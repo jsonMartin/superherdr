@@ -115,6 +115,18 @@ pub(crate) fn keybind_help_groups(
                     "workspace navigation",
                 ),
                 entry(binding_label(&keybinds.goto), "session navigator"),
+                entry(binding_label(&keybinds.focus_project), "focus project"),
+                entry(
+                    binding_label(&keybinds.clear_project_focus),
+                    "stop focusing",
+                ),
+                entry(binding_label(&keybinds.snooze_workspace), "snooze workspace"),
+                entry(binding_label(&keybinds.snooze_project), "snooze project"),
+                entry(binding_label(&keybinds.show_snoozed), "show snoozed items"),
+                entry(
+                    binding_label(&keybinds.reset_focus_snooze),
+                    "reset focus and snooze",
+                ),
                 entry(binding_label(&keybinds.new_workspace), "new workspace"),
                 entry(binding_label(&keybinds.new_worktree), "new worktree"),
                 entry(binding_label(&keybinds.open_worktree), "open worktree"),

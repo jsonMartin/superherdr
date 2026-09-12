@@ -55,6 +55,492 @@ impl HeadlessServer {
             );
             return changed;
         }
+        if let api::schema::Method::WorkspaceSnoozeSubscribe(_) = &request.method {
+            self.snooze_subscribers.insert(client_id);
+            let state = self.snooze_state();
+            self.send_to_client(
+                client_id,
+                crate::server::client_commands::success_message_with_result(
+                    boot_id,
+                    request_id,
+                    api::schema::ResponseResult::WorkspaceSnooze { state },
+                ),
+            );
+            return false;
+        }
+        if let api::schema::Method::SnoozeList(_) = &request.method {
+            let state = self.snooze_state();
+            self.send_to_client(
+                client_id,
+                crate::server::client_commands::success_message_with_result(
+                    boot_id,
+                    request_id,
+                    api::schema::ResponseResult::WorkspaceSnooze { state },
+                ),
+            );
+            return false;
+        }
+        if let api::schema::Method::SnoozeReset(params) = &request.method {
+            if params.boot_id != self.client_shell_boot_id {
+                self.send_to_client(
+                    client_id,
+                    crate::server::client_commands::error_message(
+                        boot_id,
+                        request_id,
+                        "stale_boot",
+                        "snooze reset targeted an earlier server boot",
+                    ),
+                );
+                return false;
+            }
+            match self.commit_snooze_reset(params.expected_revision, params.confirmed) {
+                Ok(_) => {
+                    let state = self.snooze_state();
+                    self.broadcast_snooze_state();
+                    self.send_to_client(
+                        client_id,
+                        crate::server::client_commands::success_message_with_result(
+                            boot_id,
+                            request_id,
+                            api::schema::ResponseResult::WorkspaceWake { state },
+                        ),
+                    );
+                    return true;
+                }
+                Err(error) => {
+                    let (code, message) = self.snooze_reset_error(error);
+                    self.send_to_client(
+                        client_id,
+                        crate::server::client_commands::error_message(
+                            boot_id, request_id, &code, message,
+                        ),
+                    );
+                    return false;
+                }
+            }
+        }
+        if let api::schema::Method::SnoozeRecordWake(params) = &request.method {
+            if params.boot_id != self.client_shell_boot_id {
+                self.send_to_client(
+                    client_id,
+                    crate::server::client_commands::error_message(
+                        boot_id,
+                        request_id,
+                        "stale_boot",
+                        "snooze record wake targeted an earlier server boot",
+                    ),
+                );
+                return false;
+            }
+            match self.commit_snooze_record_wake(&params.record_id, params.expected_revision) {
+                Ok(_) => {
+                    let state = self.snooze_state();
+                    self.broadcast_snooze_state();
+                    self.send_to_client(
+                        client_id,
+                        crate::server::client_commands::success_message_with_result(
+                            boot_id,
+                            request_id,
+                            api::schema::ResponseResult::WorkspaceWake { state },
+                        ),
+                    );
+                    return true;
+                }
+                Err(error) => {
+                    let (code, message) = self.snooze_record_wake_error(error);
+                    self.send_to_client(
+                        client_id,
+                        crate::server::client_commands::error_message(
+                            boot_id, request_id, &code, message,
+                        ),
+                    );
+                    return false;
+                }
+            }
+        }
+        if let api::schema::Method::ProjectSnooze(params) = &request.method {
+            if params.boot_id != self.client_shell_boot_id {
+                self.send_to_client(
+                    client_id,
+                    crate::server::client_commands::error_message(
+                        boot_id,
+                        request_id,
+                        "stale_boot",
+                        "project snooze targeted an earlier server boot",
+                    ),
+                );
+                return false;
+            }
+            let Some(canonical_id) = self.app.canonical_workspace_id(&params.workspace_id) else {
+                self.send_to_client(
+                    client_id,
+                    crate::server::client_commands::error_message(
+                        boot_id,
+                        request_id,
+                        "not_found",
+                        "workspace not found",
+                    ),
+                );
+                return false;
+            };
+            let valid_key = self
+                .app
+                .state
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.id == canonical_id)
+                .and_then(|workspace| workspace.worktree_space())
+                .is_some_and(|space| space.key == params.project_key);
+            if !valid_key {
+                self.send_to_client(
+                    client_id,
+                    crate::server::client_commands::error_message(
+                        boot_id,
+                        request_id,
+                        "stale_target",
+                        "workspace no longer belongs to this project",
+                    ),
+                );
+                return false;
+            }
+            match self.commit_snooze_change(|manager| {
+                manager
+                    .project_snooze(
+                        params.project_key.clone(),
+                        params.duration_seconds,
+                        params.deadline_unix_ms,
+                        crate::server::workspace_snooze::now_unix_ms(),
+                    )
+                    .map(|_| ())
+            }) {
+                Ok(_) => {
+                    let state = self.snooze_state();
+                    self.broadcast_snooze_state();
+                    self.send_to_client(
+                        client_id,
+                        crate::server::client_commands::success_message_with_result(
+                            boot_id,
+                            request_id,
+                            api::schema::ResponseResult::WorkspaceSnooze { state },
+                        ),
+                    );
+                    return true;
+                }
+                Err(error) => {
+                    let (code, message) = self.snooze_action_error(error);
+                    self.send_to_client(
+                        client_id,
+                        crate::server::client_commands::error_message(boot_id, request_id, &code, message),
+                    );
+                    return false;
+                }
+            }
+        }
+        if let api::schema::Method::ProjectWake(params) = &request.method {
+            if params.boot_id != self.client_shell_boot_id {
+                self.send_to_client(
+                    client_id,
+                    crate::server::client_commands::error_message(
+                        boot_id,
+                        request_id,
+                        "stale_boot",
+                        "project wake targeted an earlier server boot",
+                    ),
+                );
+                return false;
+            }
+            match self.commit_snooze_wake(|manager| {
+                manager.project_wake(&params.project_key, params.expected_revision)
+            }) {
+                Ok(_) => {
+                    let state = self.snooze_state();
+                    self.broadcast_snooze_state();
+                    self.send_to_client(
+                        client_id,
+                        crate::server::client_commands::success_message_with_result(
+                            boot_id,
+                            request_id,
+                            api::schema::ResponseResult::WorkspaceWake { state },
+                        ),
+                    );
+                    return true;
+                }
+                Err(SnoozeWakeCommitError::Action(
+                    crate::server::workspace_snooze::WorkspaceWakeError::NotFound,
+                )) => {
+                    self.send_to_client(
+                        client_id,
+                        crate::server::client_commands::error_message(
+                            boot_id,
+                            request_id,
+                            "not_found",
+                            "project snooze record not found",
+                        ),
+                    );
+                }
+                Err(SnoozeWakeCommitError::Action(
+                    crate::server::workspace_snooze::WorkspaceWakeError::StaleRevision {
+                    expected,
+                    current,
+                    },
+                )) => {
+                    self.send_to_client(
+                        client_id,
+                        crate::server::client_commands::error_message(
+                            boot_id,
+                            request_id,
+                            "stale_revision",
+                            format!("project snooze record revision mismatch (expected {expected}, current {current})"),
+                        ),
+                    );
+                }
+                Err(SnoozeWakeCommitError::Persistence(message)) => {
+                    self.send_to_client(
+                        client_id,
+                        crate::server::client_commands::error_message(
+                            boot_id,
+                            request_id,
+                            "persistence_failed",
+                            message,
+                        ),
+                    );
+                }
+                Err(SnoozeWakeCommitError::Action(_)) => {}
+            }
+            return false;
+        }
+        if let api::schema::Method::WorkspaceSnooze(params) = &request.method {
+            if params.boot_id != self.client_shell_boot_id {
+                let message = crate::server::client_commands::error_message(
+                    boot_id,
+                    request_id,
+                    "stale_boot",
+                    "workspace snooze targeted an earlier server boot",
+                );
+                self.send_to_client(client_id, message);
+                return false;
+            }
+            let Some(canonical_id) = self.app.canonical_workspace_id(&params.workspace_id) else {
+                let message = crate::server::client_commands::error_message(
+                    boot_id,
+                    request_id,
+                    "not_found",
+                    "workspace not found",
+                );
+                self.send_to_client(client_id, message);
+                return false;
+            };
+            match self.commit_snooze_change(|manager| {
+                manager
+                    .snooze(
+                        canonical_id,
+                        params.duration_seconds,
+                        params.deadline_unix_ms,
+                        crate::server::workspace_snooze::now_unix_ms(),
+                    )
+                    .map(|_| ())
+            }) {
+                Ok(_) => {
+                    let state = self.snooze_state();
+                    self.broadcast_snooze_state();
+                    self.send_to_client(
+                        client_id,
+                        crate::server::client_commands::success_message_with_result(
+                            boot_id,
+                            request_id,
+                            api::schema::ResponseResult::WorkspaceSnooze { state },
+                        ),
+                    );
+                    return true;
+                }
+                Err(SnoozeCommitError::Action(
+                    crate::server::workspace_snooze::WorkspaceSnoozeError::InvalidDuration,
+                )) => {
+                    let message = crate::server::client_commands::error_message(
+                        boot_id,
+                        request_id,
+                        "invalid_duration",
+                        "invalid snooze duration (must be between 1 second and 30 days)",
+                    );
+                    self.send_to_client(client_id, message);
+                    return false;
+                }
+                Err(SnoozeCommitError::Action(
+                    crate::server::workspace_snooze::WorkspaceSnoozeError::InvalidDeadline,
+                )) => {
+                    let message = crate::server::client_commands::error_message(
+                        boot_id,
+                        request_id,
+                        "invalid_deadline",
+                        "invalid snooze deadline (must be in the future, up to 30 days)",
+                    );
+                    self.send_to_client(client_id, message);
+                    return false;
+                }
+                Err(SnoozeCommitError::Persistence(message)) => {
+                    self.send_to_client(
+                        client_id,
+                        crate::server::client_commands::error_message(
+                            boot_id,
+                            request_id,
+                            "persistence_failed",
+                            message,
+                        ),
+                    );
+                    return false;
+                }
+            }
+        }
+        if let api::schema::Method::WorkspaceWake(params) = &request.method {
+            if params.boot_id != self.client_shell_boot_id {
+                let message = crate::server::client_commands::error_message(
+                    boot_id,
+                    request_id,
+                    "stale_boot",
+                    "workspace wake targeted an earlier server boot",
+                );
+                self.send_to_client(client_id, message);
+                return false;
+            }
+            let canonical_target = match params.workspace_id.as_deref() {
+                Some(id) => match self.app.canonical_workspace_id(id) {
+                    Some(id) => Some(id),
+                    None if self.workspace_snoozes.is_snoozed(id) => Some(id.to_owned()),
+                    None => {
+                        self.send_to_client(
+                            client_id,
+                            crate::server::client_commands::error_message(
+                                boot_id,
+                                request_id,
+                                "not_found",
+                                "workspace not found",
+                            ),
+                        );
+                        return false;
+                    }
+                },
+                None => None,
+            };
+            let project_key = canonical_target.as_deref().and_then(|id| {
+                self.app
+                    .state
+                    .workspaces
+                    .iter()
+                    .find(|workspace| workspace.id == id)
+                    .and_then(|workspace| workspace.worktree_space())
+                    .map(|space| space.key.clone())
+            });
+            let wake_result = if params.workspace_id.is_none() {
+                self.commit_snooze_wake_all(params.expected_revision, params.confirmed)
+            } else {
+                self.commit_snooze_wake(|manager| {
+                    manager.wake_workspace(
+                        canonical_target.as_deref(),
+                        params.expected_revision,
+                        params.confirmed,
+                        project_key.as_deref(),
+                    )
+                    .map(|_| ())
+                })
+            };
+            match wake_result {
+                Ok(_) => {
+                    let state = self.snooze_state();
+                    self.broadcast_snooze_state();
+                    self.send_to_client(
+                        client_id,
+                        crate::server::client_commands::success_message_with_result(
+                            boot_id,
+                            request_id,
+                            api::schema::ResponseResult::WorkspaceWake { state },
+                        ),
+                    );
+                    return true;
+                }
+                Err(SnoozeWakeCommitError::Action(
+                    crate::server::workspace_snooze::WorkspaceWakeError::NotFound,
+                )) => {
+                    let message = crate::server::client_commands::error_message(
+                        boot_id,
+                        request_id,
+                        "not_found",
+                        "workspace snooze record not found",
+                    );
+                    self.send_to_client(client_id, message);
+                    return false;
+                }
+                Err(SnoozeWakeCommitError::Action(
+                    crate::server::workspace_snooze::WorkspaceWakeError::CoveredByProject,
+                )) => {
+                    let message = crate::server::client_commands::error_message(
+                        boot_id,
+                        request_id,
+                        "covered_by_project",
+                        "still snoozed by project",
+                    );
+                    self.send_to_client(client_id, message);
+                    return false;
+                }
+                Err(SnoozeWakeCommitError::Action(
+                    crate::server::workspace_snooze::WorkspaceWakeError::StaleRevision {
+                    expected,
+                    current,
+                    },
+                )) => {
+                    let message = crate::server::client_commands::error_message(
+                        boot_id,
+                        request_id,
+                        "stale_revision",
+                        format!(
+                            "workspace snooze record revision mismatch (expected {expected}, current {current})"
+                        ),
+                    );
+                    self.send_to_client(client_id, message);
+                    return false;
+                }
+                Err(SnoozeWakeCommitError::Action(
+                    crate::server::workspace_snooze::WorkspaceWakeError::UnconfirmedWakeAll,
+                )) => {
+                    let message = crate::server::client_commands::error_message(
+                        boot_id,
+                        request_id,
+                        "unconfirmed",
+                        "wake all requires confirmed: true",
+                    );
+                    self.send_to_client(client_id, message);
+                    return false;
+                }
+                Err(SnoozeWakeCommitError::Action(
+                    crate::server::workspace_snooze::WorkspaceWakeError::StaleBoot {
+                    expected,
+                    current,
+                    },
+                )) => {
+                    let message = crate::server::client_commands::error_message(
+                        boot_id,
+                        request_id,
+                        "stale_boot",
+                        format!(
+                            "workspace snooze boot mismatch (expected {expected}, current {current})"
+                        ),
+                    );
+                    self.send_to_client(client_id, message);
+                    return false;
+                }
+                Err(SnoozeWakeCommitError::Persistence(message)) => {
+                    self.send_to_client(
+                        client_id,
+                        crate::server::client_commands::error_message(
+                            boot_id,
+                            request_id,
+                            "persistence_failed",
+                            message,
+                        ),
+                    );
+                    return false;
+                }
+            }
+        }
         if client.shell_endpoint_command_in_flight {
             let message = crate::server::client_commands::error_message(
                 boot_id,

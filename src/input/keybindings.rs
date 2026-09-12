@@ -69,6 +69,12 @@ pub(crate) enum KeybindAction {
     OpenNotificationTarget,
     Detach,
     OpenNavigator,
+    FocusProject,
+    ClearProjectFocus,
+    SnoozeWorkspace,
+    SnoozeProject,
+    ShowSnoozed,
+    ResetFocusSnooze,
 }
 
 pub(crate) fn resolve_direct_binding(
@@ -152,6 +158,18 @@ pub(crate) fn resolve_non_indexed_action(
         ),
         (&keybinds.detach, KeybindAction::Detach),
         (&keybinds.goto, KeybindAction::OpenNavigator),
+        (&keybinds.focus_project, KeybindAction::FocusProject),
+        (
+            &keybinds.clear_project_focus,
+            KeybindAction::ClearProjectFocus,
+        ),
+        (&keybinds.snooze_workspace, KeybindAction::SnoozeWorkspace),
+        (&keybinds.snooze_project, KeybindAction::SnoozeProject),
+        (&keybinds.show_snoozed, KeybindAction::ShowSnoozed),
+        (
+            &keybinds.reset_focus_snooze,
+            KeybindAction::ResetFocusSnooze,
+        ),
     ] {
         if action_matches(bindings, key, dispatch) {
             return Some(action);

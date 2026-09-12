@@ -55,7 +55,17 @@ pub(super) fn render_collapsed(
         let Some(snapshot) = endpoint.snapshot.as_deref() else {
             continue;
         };
+        let visible_workspaces = super::focus_snooze::visible_workspace_ids(
+            state.focus_scope,
+            endpoint.snooze_state.as_ref(),
+            &endpoint.endpoint_id,
+            Some(snapshot.boot_id.as_str()),
+            &snapshot.workspaces,
+        );
         for workspace in &snapshot.workspaces {
+            if !visible_workspaces.contains(&workspace.workspace_id) {
+                continue;
+            }
             if y >= workspace_area.bottom() {
                 break;
             }
@@ -192,13 +202,24 @@ pub(super) fn render_expanded(
             continue;
         }
         if let Some(snapshot) = endpoint.snapshot.as_deref() {
+            let visible_workspaces = super::focus_snooze::visible_workspace_ids(
+                state.focus_scope,
+                endpoint.snooze_state.as_ref(),
+                &endpoint.endpoint_id,
+                Some(snapshot.boot_id.as_str()),
+                &snapshot.workspaces,
+            );
             rows.extend(
-                super::sidebar::workspace_entries(snapshot, &HashSet::new())
-                    .into_iter()
-                    .map(|entry| Row::Workspace {
-                        endpoint: endpoint_index,
-                        entry,
-                    }),
+                super::sidebar::workspace_entries_with_filter(
+                    snapshot,
+                    &HashSet::new(),
+                    |workspace| visible_workspaces.contains(&workspace.workspace_id),
+                )
+                .into_iter()
+                .map(|entry| Row::Workspace {
+                    endpoint: endpoint_index,
+                    entry,
+                }),
             );
         }
     }

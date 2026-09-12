@@ -30,14 +30,24 @@ pub(crate) fn render_collapsed_sidebar(
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
     selected_workspace_id: Option<&str>,
+    focus_scope: Option<&ClientFocusScope>,
+    snooze_state: Option<&crate::api::schema::WorkspaceSnoozeState>,
     hits: &mut ShellHitMap,
 ) {
     let palette = &config.palette;
     render_sidebar_background(buffer, area, palette);
     let (workspace_area, divider_y, detail_area) = collapsed_sidebar_sections(area);
+    let visible_workspaces = super::focus_snooze::visible_workspace_ids(
+        focus_scope,
+        snooze_state,
+        &ClientEndpointId::Local,
+        Some(snapshot.boot_id.as_str()),
+        &snapshot.workspaces,
+    );
     for (index, workspace) in snapshot
         .workspaces
         .iter()
+        .filter(|workspace| visible_workspaces.contains(&workspace.workspace_id))
         .take(workspace_area.height as usize)
         .enumerate()
     {
@@ -111,7 +121,11 @@ pub(crate) fn render_collapsed_sidebar(
         detail_area.width,
         detail_area.height.saturating_sub(1),
     );
-    for (index, pane_id) in super::ordered_agent_pane_ids(snapshot, config.agent_panel_sort)
+    for (index, pane_id) in super::ordered_agent_pane_ids_with_filter(
+        snapshot,
+        config.agent_panel_sort,
+        |agent| visible_workspaces.contains(&agent.workspace_id),
+    )
         .into_iter()
         .take(detail_content.height as usize)
         .enumerate()
@@ -210,7 +224,16 @@ pub(crate) fn render_sidebar(
             .add_modifier(Modifier::BOLD),
     );
 
-    let entries = workspace_entries(snapshot, state.collapsed_groups);
+    let visible_workspaces = super::focus_snooze::visible_workspace_ids(
+        state.focus_scope,
+        state.snooze_state,
+        state.active_endpoint_id,
+        Some(snapshot.boot_id.as_str()),
+        &snapshot.workspaces,
+    );
+    let entries = workspace_entries_with_filter(snapshot, state.collapsed_groups, |workspace| {
+        visible_workspaces.contains(&workspace.workspace_id)
+    });
     let body = Rect::new(
         workspace_area.x,
         workspace_area.y.saturating_add(WORKSPACE_HEADER_ROWS),
@@ -420,13 +443,14 @@ pub(crate) fn render_sidebar(
         }
     }
 
-    super::render_agent_panel(
+    super::render_agent_panel_with_filter(
         buffer,
         detail_area,
         snapshot,
         config,
         state.agent_scroll,
         hits,
+        |agent| visible_workspaces.contains(&agent.workspace_id),
     );
 
     hits.sidebar_toggle = Rect::new(
@@ -445,9 +469,10 @@ pub(crate) fn render_sidebar(
     );
 }
 
-pub(crate) fn workspace_entries(
+pub(crate) fn workspace_entries_with_filter(
     snapshot: &ClientShellSnapshot,
     collapsed_groups: &HashSet<String>,
+    filter: impl Fn(&crate::protocol::ClientShellWorkspace) -> bool,
 ) -> Vec<WorkspaceEntry> {
     let mut members = HashMap::<&str, Vec<usize>>::new();
     for (index, workspace) in snapshot.workspaces.iter().enumerate() {
@@ -476,11 +501,13 @@ pub(crate) fn workspace_entries(
             .as_ref()
             .filter(|worktree| grouped.contains(worktree.key.as_str()))
         else {
-            entries.push(WorkspaceEntry {
-                index,
-                indented: false,
-                last_child: false,
-            });
+            if filter(workspace) {
+                entries.push(WorkspaceEntry {
+                    index,
+                    indented: false,
+                    last_child: false,
+                });
+            }
             continue;
         };
         if !emitted.insert(&worktree.key) {
@@ -499,16 +526,34 @@ pub(crate) fn workspace_entries(
                     .is_some_and(|worktree| !worktree.is_linked_worktree)
             })
             .unwrap_or(index);
-        entries.push(WorkspaceEntry {
-            index: parent,
-            indented: false,
-            last_child: false,
-        });
+        let parent_visible = filter(&snapshot.workspaces[parent]);
+        if parent_visible {
+            entries.push(WorkspaceEntry {
+                index: parent,
+                indented: false,
+                last_child: false,
+            });
+        }
+        if !parent_visible {
+            let children = group_members
+                .iter()
+                .copied()
+                .filter(|member| *member != parent && filter(&snapshot.workspaces[*member]))
+                .collect::<Vec<_>>();
+            for child in children {
+                entries.push(WorkspaceEntry {
+                    index: child,
+                    indented: false,
+                    last_child: false,
+                });
+            }
+            continue;
+        }
         if collapsed_groups.contains(&worktree.key) {
             if let Some(active) = group_members
                 .iter()
                 .copied()
-                .find(|member| *member != parent && snapshot.workspaces[*member].focused)
+                .find(|member| *member != parent && snapshot.workspaces[*member].focused && filter(&snapshot.workspaces[*member]))
             {
                 entries.push(WorkspaceEntry {
                     index: active,
@@ -521,7 +566,7 @@ pub(crate) fn workspace_entries(
         let children = group_members
             .iter()
             .copied()
-            .filter(|member| *member != parent)
+            .filter(|member| *member != parent && filter(&snapshot.workspaces[*member]))
             .collect::<Vec<_>>();
         for (child_index, child) in children.iter().enumerate() {
             entries.push(WorkspaceEntry {
@@ -532,6 +577,13 @@ pub(crate) fn workspace_entries(
         }
     }
     entries
+}
+
+pub(crate) fn workspace_entries(
+    snapshot: &ClientShellSnapshot,
+    collapsed_groups: &HashSet<String>,
+) -> Vec<WorkspaceEntry> {
+    workspace_entries_with_filter(snapshot, collapsed_groups, |_| true)
 }
 
 pub(super) fn parent_group_key(snapshot: &ClientShellSnapshot, index: usize) -> Option<String> {

@@ -11,6 +11,8 @@ pub(crate) struct ClientShellEndpoint {
     pub(crate) agent_recency: HashMap<String, u64>,
     pub(super) agent_presentation: super::endpoint_agent_state::EndpointAgentPresentation,
     pub(crate) methods: Option<HashSet<String>>,
+    pub(crate) snooze_state: Option<crate::api::schema::WorkspaceSnoozeState>,
+    pub(crate) focus_scope: Option<ClientFocusScope>,
 }
 
 pub(super) struct MachineHit {
@@ -64,6 +66,8 @@ impl ClientShellState {
                     .map(|endpoint| endpoint.agent_presentation.clone())
                     .unwrap_or_default(),
                 methods: previous.and_then(|endpoint| endpoint.methods.clone()),
+                snooze_state: previous.and_then(|endpoint| endpoint.snooze_state.clone()),
+                focus_scope: self.focus_scope.clone(),
             });
         }
 
@@ -100,6 +104,8 @@ impl ClientShellState {
             endpoint.snapshot = None;
             endpoint.snapshot_generation = None;
             endpoint.methods = None;
+            endpoint.snooze_state = None;
+            endpoint.focus_scope = None;
             endpoint.agent_recency.clear();
             endpoint.agent_presentation = Default::default();
         }
@@ -110,17 +116,27 @@ impl ClientShellState {
         endpoint_id: &ClientEndpointId,
         status: ClientEndpointStatus,
     ) {
-        if let Some(endpoint) = self
+        let changed = if let Some(endpoint) = self
             .endpoints
             .iter_mut()
             .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
         {
+            let changed = endpoint.status != status;
             endpoint.status = status;
+            changed
+        } else {
+            false
+        };
+        if changed {
+            self.refresh_snooze_management_endpoint_status(endpoint_id);
         }
     }
 
     pub(crate) fn mark_endpoint_disconnected(&mut self, endpoint_id: &ClientEndpointId) {
         self.set_endpoint_status(endpoint_id, ClientEndpointStatus::Reconnecting);
+        if endpoint_id == &self.active_endpoint_id {
+            self.snooze_state = None;
+        }
         if endpoint_id == &self.active_endpoint_id {
             let pending = self.pending_requests.keys().cloned().collect::<Vec<_>>();
             for request_id in pending {
@@ -174,6 +190,11 @@ impl ClientShellState {
             self.pane_surface = None;
             self.pending_pane_surface = None;
         }
+        self.snooze_state = self
+            .endpoints
+            .iter()
+            .find(|candidate| &candidate.endpoint_id == endpoint_id)
+            .and_then(|endpoint| endpoint.snooze_state.clone());
         self.apply_active_snapshot(snapshot);
         true
     }
@@ -288,9 +309,17 @@ impl ClientShellState {
     }
 
     pub(super) fn supports_endpoint_method(&self, method: &crate::api::schema::Method) -> bool {
+        self.supports_endpoint_method_for(&self.active_endpoint_id, method)
+    }
+
+    pub(super) fn supports_endpoint_method_for(
+        &self,
+        endpoint_id: &ClientEndpointId,
+        method: &crate::api::schema::Method,
+    ) -> bool {
         self.endpoints
             .iter()
-            .find(|endpoint| endpoint.endpoint_id == self.active_endpoint_id)
+            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
             .and_then(|endpoint| endpoint.methods.as_ref())
             .is_none_or(|methods| methods.contains(crate::api::api_method_name(method)))
     }
@@ -370,6 +399,10 @@ impl ClientShellState {
             .is_some_and(|previous| previous.boot_id != snapshot.boot_id);
         if boot_changed {
             self.retire_endpoint_notifications(endpoint_id);
+            self.endpoints[index].snooze_state = None;
+            if endpoint_id == &self.active_endpoint_id {
+                self.snooze_state = None;
+            }
         }
         self.endpoints[index]
             .agent_presentation
@@ -474,6 +507,11 @@ impl ClientShellState {
             return;
         };
         if endpoint_id == &self.active_endpoint_id {
+            self.snooze_state = self
+                .endpoints
+                .iter()
+                .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+                .and_then(|endpoint| endpoint.snooze_state.clone());
             self.apply_active_snapshot(snapshot);
         }
     }
@@ -502,5 +540,7 @@ pub(super) fn local_endpoint() -> ClientShellEndpoint {
         agent_recency: HashMap::new(),
         agent_presentation: Default::default(),
         methods: None,
+        snooze_state: None,
+        focus_scope: None,
     }
 }

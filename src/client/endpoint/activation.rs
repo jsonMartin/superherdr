@@ -145,6 +145,15 @@ impl PendingEndpointActivation {
         &self.target.endpoint_id
     }
 
+    pub(crate) fn explicit_workspace_focus_target(&self) -> Option<&str> {
+        match self.focus.as_ref() {
+            Some(crate::client::shell::ClientEndpointFocusTarget::Workspace(workspace_id)) => {
+                Some(workspace_id)
+            }
+            _ => None,
+        }
+    }
+
     fn geometry(&self) -> crate::protocol::ClientSurfaceSize {
         resize_geometry(&self.resize).expect("activation resize was validated before construction")
     }

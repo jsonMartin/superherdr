@@ -272,6 +272,7 @@ fn restore_with_imports_and_failures(
     let mut terminal_runtimes = HashMap::new();
     let mut resumed_agent_sessions = HashSet::new();
     let mut failed_imports = 0;
+    let lifetime_ids = restored_workspace_lifetime_ids(snapshot);
     for (idx, ws_snap) in snapshot.workspaces.iter().enumerate() {
         let runtime_context = RestoreRuntimeContext {
             scrollback_limit_bytes,
@@ -286,6 +287,7 @@ fn restore_with_imports_and_failures(
             history.and_then(|history| history.workspaces.get(idx)),
             rows,
             cols,
+            lifetime_ids[idx].clone(),
             &runtime_context,
             &mut resumed_agent_sessions,
             imported_panes,
@@ -303,11 +305,40 @@ fn restore_with_imports_and_failures(
     ((workspaces, terminals, terminal_runtimes), failed_imports)
 }
 
+fn restored_workspace_lifetime_ids(snapshot: &SessionSnapshot) -> Vec<String> {
+    let candidates: Vec<Option<String>> = snapshot
+        .workspaces
+        .iter()
+        .map(|workspace| {
+            workspace.lifetime_id.as_deref().and_then(|value| {
+                uuid::Uuid::parse_str(value)
+                    .ok()
+                    .filter(|id| !id.is_nil())
+                    .map(|id| id.to_string())
+            })
+        })
+        .collect();
+    let mut counts = HashMap::new();
+    for id in candidates.iter().flatten() {
+        *counts.entry(id.clone()).or_insert(0usize) += 1;
+    }
+    candidates
+        .into_iter()
+        .map(|candidate| {
+            if let Some(id) = candidate.filter(|id| counts.get(id) == Some(&1)) {
+                return id;
+            }
+            crate::workspace::generate_workspace_lifetime_id()
+        })
+        .collect()
+}
+
 fn restore_workspace(
     snap: &WorkspaceSnapshot,
     history: Option<&WorkspaceHistorySnapshot>,
     rows: u16,
     cols: u16,
+    lifetime_id: String,
     runtime_context: &RestoreRuntimeContext<'_>,
     resumed_agent_sessions: &mut HashSet<String>,
     imported_panes: &mut HashMap<u32, crate::handoff_runtime::ImportedHandoffRuntime>,
@@ -409,6 +440,7 @@ fn restore_workspace(
     (
         Some(Workspace {
             id: workspace_id,
+            lifetime_id,
             custom_name: snap.custom_name.clone(),
             identity_cwd: snap.identity_cwd.clone(),
             cached_identity_cwd: snap.identity_cwd.clone(),
@@ -1010,6 +1042,58 @@ mod tests {
     }
 
     #[test]
+    fn restored_workspace_lifetime_ids_regenerate_invalid_nil_and_duplicates() {
+        let cwd = std::env::current_dir().unwrap();
+        let snapshot = SessionSnapshot {
+            version: super::super::snapshot::SNAPSHOT_VERSION,
+            workspaces: [
+                Some("123e4567-e89b-12d3-a456-426614174001"),
+                Some("123e4567-e89b-12d3-a456-426614174000"),
+                Some("123E4567-E89B-12D3-A456-426614174000"),
+                Some("00000000-0000-0000-0000-000000000000"),
+                Some("invalid"),
+                None,
+            ]
+            .into_iter()
+            .map(|lifetime_id| WorkspaceSnapshot {
+                id: Some("w1".into()),
+                lifetime_id: lifetime_id.map(str::to_owned),
+                custom_name: None,
+                identity_cwd: cwd.clone(),
+                worktree_space: None,
+                public_pane_numbers: HashMap::new(),
+                next_public_pane_number: 0,
+                public_tab_numbers: Vec::new(),
+                next_public_tab_number: 0,
+                tabs: Vec::new(),
+                active_tab: 0,
+            })
+            .collect(),
+            active: None,
+            selected: 0,
+            sidebar_width: None,
+            sidebar_section_split: None,
+            collapsed_space_keys: Default::default(),
+        };
+
+        let restored = restored_workspace_lifetime_ids(&snapshot);
+        let restored_again = restored_workspace_lifetime_ids(&snapshot);
+
+        assert_eq!(restored[0], "123e4567-e89b-12d3-a456-426614174001");
+        assert_ne!(restored[1], "123e4567-e89b-12d3-a456-426614174000");
+        assert_ne!(restored[2], "123e4567-e89b-12d3-a456-426614174000");
+        assert_ne!(restored[1], restored[2]);
+        assert!(restored[3..]
+            .iter()
+            .all(|id| uuid::Uuid::parse_str(id).is_ok()));
+        assert_ne!(restored[5], restored_again[5]);
+        assert_eq!(
+            restored.len(),
+            restored.iter().collect::<HashSet<_>>().len()
+        );
+    }
+
+    #[test]
     fn restore_plan_respects_opt_in_and_allowlist() {
         let pi_session_path = test_session_path("pi-session.jsonl");
         let session = super::super::snapshot::PaneAgentSessionSnapshot {
@@ -1174,6 +1258,7 @@ mod tests {
             version: super::super::snapshot::SNAPSHOT_VERSION,
             workspaces: vec![WorkspaceSnapshot {
                 id: Some("workspace".into()),
+                lifetime_id: None,
                 custom_name: None,
                 identity_cwd: cwd.clone(),
                 worktree_space: None,
@@ -1254,6 +1339,7 @@ mod tests {
             version: super::super::snapshot::SNAPSHOT_VERSION,
             workspaces: vec![WorkspaceSnapshot {
                 id: Some("w1".into()),
+                lifetime_id: Some("123e4567-e89b-12d3-a456-426614174002".into()),
                 custom_name: None,
                 identity_cwd: cwd.clone(),
                 worktree_space: None,
@@ -1328,6 +1414,10 @@ mod tests {
         assert_eq!(workspace.next_public_pane_number, 4);
         assert_eq!(workspace.tabs[0].number, 5);
         assert_eq!(workspace.next_public_tab_number, 6);
+        assert_eq!(
+            workspace.lifetime_id,
+            "123e4567-e89b-12d3-a456-426614174002"
+        );
     }
 
     #[tokio::test]
@@ -1363,6 +1453,7 @@ mod tests {
             version: super::super::snapshot::SNAPSHOT_VERSION,
             workspaces: vec![WorkspaceSnapshot {
                 id: Some("w1".into()),
+                lifetime_id: None,
                 custom_name: None,
                 identity_cwd: cwd.clone(),
                 worktree_space: None,
@@ -1446,6 +1537,7 @@ mod tests {
         let cwd = std::env::current_dir().unwrap();
         let snapshot = WorkspaceSnapshot {
             id: Some("w1".into()),
+            lifetime_id: None,
             custom_name: None,
             identity_cwd: cwd,
             worktree_space: None,
@@ -1485,6 +1577,7 @@ mod tests {
             version: super::super::snapshot::SNAPSHOT_VERSION,
             workspaces: vec![WorkspaceSnapshot {
                 id: Some("workspace".into()),
+                lifetime_id: Some("123e4567-e89b-12d3-a456-426614174000".into()),
                 custom_name: None,
                 identity_cwd: cwd.clone(),
                 worktree_space: None,
@@ -1538,6 +1631,10 @@ mod tests {
             Arc::new(Notify::new()),
             Arc::new(RenderSignal::new()),
         );
+        assert_eq!(
+            _workspaces[0].lifetime_id,
+            "123e4567-e89b-12d3-a456-426614174000"
+        );
 
         let terminal = terminals
             .values()
@@ -1567,6 +1664,10 @@ mod tests {
             Arc::new(RenderSignal::new()),
         )
         .expect("handoff restore should preserve pending native agent resume");
+        assert_eq!(
+            _handoff_workspaces[0].lifetime_id,
+            "123e4567-e89b-12d3-a456-426614174000"
+        );
         let handoff_terminal = handoff_terminals
             .values()
             .next()
@@ -1579,6 +1680,91 @@ mod tests {
             handoff_runtimes.is_empty(),
             "handoff restore should not replace pending native agent resume with a shell runtime"
         );
+    }
+
+    #[tokio::test]
+    async fn snooze_checkpoint_preserves_history_after_two_id_remapping_restores() {
+        let (mut snapshot, mut history) = snapshot_with_saved_pane_history();
+        let saved_id = u32::MAX;
+        let tab = &mut snapshot.workspaces[0].tabs[0];
+        let pane = tab.panes.remove(&0).unwrap();
+        tab.panes.insert(saved_id, pane);
+        tab.layout = LayoutSnapshot::Pane(saved_id);
+        tab.focused = Some(saved_id);
+        tab.root_pane = Some(saved_id);
+        let pane_history = history.workspaces[0].tabs[0].panes.remove(&0).unwrap();
+        history.workspaces[0].tabs[0]
+            .panes
+            .insert(saved_id, pane_history);
+        let (events, _events_rx) = mpsc::channel(8);
+        let (workspaces, terminals, runtimes) = restore(
+            &snapshot,
+            Some(&history),
+            5,
+            40,
+            4096,
+            test_restore_shell(),
+            crate::config::ShellModeConfig::NonLogin,
+            false,
+            events,
+            Arc::new(Notify::new()),
+            Arc::new(RenderSignal::new()),
+        );
+        let runtimes = crate::terminal::TerminalRuntimeRegistry::from(runtimes);
+        let current = crate::persist::capture(&workspaces, &terminals, &runtimes, Some(0), 0);
+        let current_history = crate::persist::capture_history(&workspaces, &runtimes);
+        let remapped = *current.workspaces[0].tabs[0].panes.keys().next().unwrap();
+        assert_ne!(remapped, saved_id);
+        assert!(current_history.workspaces[0].tabs[0]
+            .panes
+            .contains_key(&remapped));
+        let root =
+            std::env::temp_dir().join(format!("herdr-snooze-history-{}", uuid::Uuid::new_v4()));
+        let session_path = root.join("session.json");
+        let history_path = root.join("session-history.json");
+        // Seed the previous ID association so skipping the history write loses replay.
+        super::super::io::checkpoint_session_pair_to_paths(
+            &session_path,
+            &history_path,
+            &snapshot,
+            Some(&history),
+        )
+        .unwrap();
+        super::super::io::checkpoint_session_pair_to_paths(
+            &session_path,
+            &history_path,
+            &current,
+            Some(&current_history),
+        )
+        .unwrap();
+        let saved: SessionSnapshot =
+            serde_json::from_slice(&std::fs::read(&session_path).unwrap()).unwrap();
+        let saved_history: SessionHistorySnapshot =
+            serde_json::from_slice(&std::fs::read(&history_path).unwrap()).unwrap();
+        let (events, _second_events_rx) = mpsc::channel(8);
+        let (_, _, restored_runtimes) = restore(
+            &saved,
+            Some(&saved_history),
+            5,
+            40,
+            4096,
+            test_restore_shell(),
+            crate::config::ShellModeConfig::NonLogin,
+            false,
+            events,
+            Arc::new(Notify::new()),
+            Arc::new(RenderSignal::new()),
+        );
+        let text = restored_runtimes
+            .values()
+            .next()
+            .unwrap()
+            .recent_unwrapped_text(10);
+        for runtime in runtimes.values().chain(restored_runtimes.values()) {
+            let _ = runtime.try_send_bytes(bytes::Bytes::from_static(b"exit\n"));
+        }
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(text.contains("RESTORED_HISTORY 👨‍👩‍👧 LINK"), "{text}");
     }
 
     #[tokio::test]
@@ -1694,6 +1880,7 @@ mod tests {
             version: super::super::snapshot::SNAPSHOT_VERSION,
             workspaces: vec![WorkspaceSnapshot {
                 id: Some("workspace".into()),
+                lifetime_id: None,
                 custom_name: None,
                 identity_cwd: cwd,
                 worktree_space: None,

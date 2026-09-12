@@ -2,6 +2,8 @@ use super::*;
 use crate::client::endpoint::{
     ClientEndpointId, ClientEndpointStatus, ProfileId, SavedSshEndpoint,
 };
+use crate::client::shell::focus_snooze::ClientFocusScope;
+use crate::protocol::ClientShellWorktree;
 use crossterm::event::{KeyModifiers, MouseButton, MouseEventKind};
 
 fn remote_profile() -> SavedSshEndpoint {
@@ -50,6 +52,231 @@ fn state_with_remote() -> (ClientShellState, ClientEndpointId) {
     remote.workspaces[0].label = "remote-workspace".into();
     state.set_endpoint_snapshot(&endpoint_id, Box::new(remote));
     (state, endpoint_id)
+}
+
+#[test]
+fn snooze_state_rejects_older_same_boot_broadcast_per_endpoint() {
+    let (mut state, endpoint_id) = state_with_remote();
+    let state_for = |boot_id: &str, revision| crate::api::schema::WorkspaceSnoozeState {
+        boot_id: boot_id.into(),
+        revision,
+        records: Vec::new(),
+        project_records: Vec::new(),
+        persistence: None,
+    };
+
+    state.set_endpoint_snooze_state(&ClientEndpointId::Local, state_for("boot-1", 9));
+    state.set_endpoint_snooze_state(&ClientEndpointId::Local, state_for("boot-1", 8));
+    assert_eq!(
+        state
+            .snooze_state
+            .as_ref()
+            .expect("local snooze state")
+            .revision,
+        9
+    );
+
+    state.set_endpoint_snooze_state(&endpoint_id, state_for("boot-1", 9));
+    state.set_endpoint_snooze_state(&endpoint_id, state_for("boot-1", 8));
+    assert_eq!(
+        state
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+            .and_then(|endpoint| endpoint.snooze_state.as_ref())
+            .expect("remote snooze state")
+            .revision,
+        9
+    );
+}
+
+#[test]
+fn active_snooze_cache_cannot_be_rolled_back_by_a_late_endpoint_update() {
+    let (mut state, _) = state_with_remote();
+    let state_for = |revision| crate::api::schema::WorkspaceSnoozeState {
+        boot_id: "boot-1".into(),
+        revision,
+        records: Vec::new(),
+        project_records: Vec::new(),
+        persistence: None,
+    };
+    state.snooze_state = Some(state_for(9));
+    state.endpoints[0].snooze_state = Some(state_for(8));
+    state.set_endpoint_snooze_state(&ClientEndpointId::Local, state_for(7));
+    assert_eq!(state.snooze_state.as_ref().unwrap().revision, 9);
+    assert_eq!(
+        state.endpoints[0].snooze_state.as_ref().unwrap().revision,
+        8
+    );
+}
+
+#[test]
+fn disconnected_endpoint_keeps_recovery_records_until_a_new_boot() {
+    let (mut state, endpoint_id) = state_with_remote();
+    let snooze = crate::api::schema::WorkspaceSnoozeState {
+        boot_id: "remote-boot".into(),
+        revision: 4,
+        records: vec![crate::api::schema::WorkspaceSnoozeRecord {
+            workspace_id: "ws_1".into(),
+            boot_id: "remote-boot".into(),
+            deadline_unix_ms: 4_000_000,
+            revision: 4,
+        }],
+        project_records: Vec::new(),
+        persistence: None,
+    };
+    state.set_endpoint_snooze_state(&endpoint_id, snooze.clone());
+    state.mark_endpoint_disconnected(&endpoint_id);
+    assert_eq!(
+        state.endpoint_status(&endpoint_id),
+        Some(ClientEndpointStatus::Reconnecting)
+    );
+    assert_eq!(
+        state
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+            .and_then(|endpoint| endpoint.snooze_state.as_ref()),
+        Some(&snooze)
+    );
+    state.open_snooze_recovery(0, 0);
+    let Some(crate::client::shell::state::ClientShellOverlay::SnoozeManagement(view)) =
+        state.overlay.as_ref()
+    else {
+        panic!("expected cached recovery view");
+    };
+    assert!(!view.records[0].available);
+
+    state.set_endpoint_status(&endpoint_id, ClientEndpointStatus::Online);
+    let mut replacement = snapshot();
+    replacement.boot_id = "replacement-boot".into();
+    state.set_endpoint_snapshot(&endpoint_id, Box::new(replacement));
+    assert!(state
+        .endpoints
+        .iter()
+        .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+        .and_then(|endpoint| endpoint.snooze_state.as_ref())
+        .is_none());
+}
+
+#[test]
+fn shared_endpoint_timeout_notices_are_qualified_by_endpoint() {
+    let (mut state, endpoint_id) = state_with_remote();
+    state.set_endpoint_status(&endpoint_id, ClientEndpointStatus::Online);
+    let mut remote = snapshot();
+    remote.workspaces[0].label = "Remote workspace".into();
+    state.set_endpoint_snapshot(&endpoint_id, Box::new(remote));
+
+    let method = || {
+        crate::api::schema::Method::WorkspaceWake(crate::api::schema::WorkspaceWakeParams {
+            workspace_id: None,
+            boot_id: "boot-1".into(),
+            expected_revision: 1,
+            confirmed: true,
+        })
+    };
+    let mut local_outcome = ClientShellInput::default();
+    state.push_endpoint_method_for(
+        &ClientEndpointId::Local,
+        "boot-1".into(),
+        method(),
+        crate::client::shell::state::PendingEndpointKind::Generic,
+        &mut local_outcome,
+    );
+    let local_id = match local_outcome.actions.as_slice() {
+        [ClientShellAction::Endpoint { request, .. }] => request.id.clone(),
+        actions => panic!("expected local request: {actions:?}"),
+    };
+    let mut remote_outcome = ClientShellInput::default();
+    state.push_endpoint_method_for(
+        &endpoint_id,
+        "boot-1".into(),
+        method(),
+        crate::client::shell::state::PendingEndpointKind::Generic,
+        &mut remote_outcome,
+    );
+    let remote_id = match remote_outcome.actions.as_slice() {
+        [ClientShellAction::Endpoint { request, .. }] => request.id.clone(),
+        actions => panic!("expected remote request: {actions:?}"),
+    };
+    let error = || ClientShellEndpointError {
+        code: Some("endpoint_timeout".into()),
+        message: "timed out".into(),
+    };
+    state.handle_endpoint_result("boot-1", &local_id, Err(error()));
+    let local_key = state
+        .visible_endpoint_notice
+        .as_ref()
+        .expect("local timeout notice")
+        .key
+        .clone();
+    state.handle_endpoint_result("boot-1", &remote_id, Err(error()));
+    let remote_key = state
+        .visible_endpoint_notice
+        .as_ref()
+        .expect("remote timeout notice")
+        .key
+        .clone();
+    assert_ne!(local_key, remote_key);
+}
+
+#[test]
+fn reconnect_preserves_qualified_focus_for_cached_aggregate_rows() {
+    let (mut state, endpoint_id) = state_with_remote();
+    let scope = ClientFocusScope::Worktree {
+        endpoint_id: ClientEndpointId::Local,
+        boot_id: "boot-1".into(),
+        worktree_key: "repo-a".into(),
+    };
+    let mut local = snapshot();
+    local.workspaces[0].worktree = Some(ClientShellWorktree {
+        key: "repo-a".into(),
+        label: "repo-a".into(),
+        is_linked_worktree: false,
+    });
+    state.set_snapshot(Box::new(local));
+    let mut remote = snapshot();
+    remote.boot_id = "remote-boot".into();
+    remote.workspaces[0].worktree = Some(ClientShellWorktree {
+        key: "repo-a".into(),
+        label: "repo-a".into(),
+        is_linked_worktree: false,
+    });
+    state.set_endpoint_snapshot(&endpoint_id, Box::new(remote.clone()));
+    state.set_focus_scope(Some(scope));
+
+    let visible_target_counts = |state: &mut ClientShellState| {
+        state.open_navigator_overlay();
+        let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_ref() else {
+            panic!("expected navigator");
+        };
+        let rows =
+            render::client_navigator_rows(&state.endpoints, &state.active_endpoint_id, navigator);
+        let workspace_count = rows
+            .iter()
+            .filter(|row| matches!(&row.target, ClientNavigatorTarget::Workspace { .. }))
+            .count();
+        let agent_count = rows
+            .iter()
+            .filter(|row| matches!(&row.target, ClientNavigatorTarget::Pane { .. }))
+            .count();
+        state.overlay = None;
+        (workspace_count, agent_count)
+    };
+    assert_eq!(visible_target_counts(&mut state), (1, 1));
+    state.mark_endpoint_disconnected(&endpoint_id);
+    assert_eq!(visible_target_counts(&mut state), (1, 1));
+    state.set_endpoint_status(&endpoint_id, ClientEndpointStatus::Online);
+    state.set_endpoint_snapshot(&endpoint_id, Box::new(remote));
+    assert_eq!(visible_target_counts(&mut state), (1, 1));
+    assert_eq!(
+        state.focus_scope,
+        Some(ClientFocusScope::Worktree {
+            endpoint_id: ClientEndpointId::Local,
+            boot_id: "boot-1".into(),
+            worktree_key: "repo-a".into(),
+        })
+    );
 }
 
 #[test]
@@ -528,6 +755,85 @@ fn context_menu_lookup_ignores_inactive_endpoint_workspaces() {
         state.active_endpoint_workspace_at((local.x, local.y)),
         Some("ws_1".into())
     );
+}
+
+#[test]
+fn expanded_endpoint_sidebar_filters_grouped_workspaces_without_orphan_indentation() {
+    let (mut state, endpoint_id) = state_with_remote();
+    let mut remote = snapshot();
+    remote.boot_id = "remote-boot".into();
+    remote.workspaces[0].workspace_id = "parent".into();
+    remote.workspaces[0].label = "parent".into();
+    remote.workspaces[0].focused = false;
+    remote.workspaces[0].worktree = Some(ClientShellWorktree {
+        key: "repo-a".into(),
+        label: "repo-a".into(),
+        is_linked_worktree: false,
+    });
+    let mut child = remote.workspaces[0].clone();
+    child.workspace_id = "child".into();
+    child.number = 2;
+    child.label = "child".into();
+    child.focused = true;
+    child.worktree = Some(ClientShellWorktree {
+        key: "repo-a".into(),
+        label: "repo-a".into(),
+        is_linked_worktree: true,
+    });
+    remote.workspaces.push(child);
+    let mut child_agent = agent("child-agent", crate::api::schema::AgentStatus::Working, 2);
+    child_agent.pane_id = "child-pane".into();
+    child_agent.workspace_id = "child".into();
+    remote.agents.push(child_agent);
+    state.set_endpoint_snapshot(&endpoint_id, Box::new(remote));
+    let _ = state.set_endpoint_snooze_state(
+        &endpoint_id,
+        crate::api::schema::WorkspaceSnoozeState {
+            boot_id: "remote-boot".into(),
+            revision: 2,
+            records: vec![crate::api::schema::WorkspaceSnoozeRecord {
+                workspace_id: "parent".into(),
+                boot_id: "remote-boot".into(),
+                deadline_unix_ms: 4_000_000,
+                revision: 2,
+            }],
+            project_records: Vec::new(),
+            persistence: None,
+        },
+    );
+
+    let frame = state.compose(106, 30).expect("expanded endpoint sidebar");
+    let remote_hits = state
+        .hits
+        .workspaces
+        .iter()
+        .filter(|hit| hit.endpoint_id == endpoint_id)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        remote_hits
+            .iter()
+            .map(|hit| hit.workspace_id.as_str())
+            .collect::<Vec<_>>(),
+        ["child"]
+    );
+    assert!(!remote_hits[0].indented);
+    assert!(state
+        .hits
+        .endpoint_agents
+        .iter()
+        .any(|(_, hit_endpoint, pane_id)| hit_endpoint == &endpoint_id && pane_id == "child-pane"));
+    let text = frame
+        .cells
+        .chunks(frame.width as usize)
+        .map(|row| {
+            row.iter()
+                .map(|cell| cell.symbol.as_str())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("child"), "{text}");
+    assert!(text.contains("child-agent"), "{text}");
 }
 
 #[test]

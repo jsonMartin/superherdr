@@ -8,6 +8,15 @@ pub(crate) struct OverlayRender {
     pub(crate) primary: Rect,
     pub(crate) clear: Rect,
     pub(crate) cancel: Rect,
+    pub(crate) snooze_popup: Rect,
+    pub(crate) snooze_choice_rows: Vec<(Rect, usize)>,
+    pub(crate) snooze_management_popup: Rect,
+    pub(crate) snooze_management_rows: Vec<(Rect, usize)>,
+    pub(crate) snooze_management_wake_all: Rect,
+    pub(crate) snooze_management_wake_parent: Rect,
+    pub(crate) snooze_management_reset: Rect,
+    pub(crate) snooze_management_previous: Rect,
+    pub(crate) snooze_management_next: Rect,
     pub(crate) navigator_popup: Rect,
     pub(crate) navigator_search: Rect,
     pub(crate) navigator_rows: Vec<(Rect, ClientNavigatorTarget)>,
@@ -59,6 +68,11 @@ pub(crate) fn render_client_overlay(
         }
         ClientShellOverlay::Rename(v) => render_rename_overlay(b, v, p),
         ClientShellOverlay::ConfirmClose(v) => render_confirm_close_overlay(b, v, p),
+        ClientShellOverlay::ConfirmWakeSharedSnoozes(v) => {
+            render_confirm_wake_shared_snoozes_overlay(b, v, p)
+        }
+        ClientShellOverlay::Snooze(v) => render_snooze_overlay(b, v, p),
+        ClientShellOverlay::SnoozeManagement(v) => render_snooze_management_overlay(b, v, p),
         ClientShellOverlay::Help(v) => render_help_overlay(b, v, k, p),
         ClientShellOverlay::Navigator(v) => {
             render_navigator_overlay(b, v, endpoints, active_endpoint_id, p)
@@ -77,6 +91,541 @@ pub(crate) fn render_client_overlay(
         }
         ClientShellOverlay::ContextMenu(_) | ClientShellOverlay::GlobalMenu(_) => None,
     }
+}
+
+fn render_snooze_management_overlay(
+    b: &mut Buffer,
+    management: &ClientSnoozeManagementOverlay,
+    p: &Palette,
+) -> Option<OverlayRender> {
+    let q = if b.area.width <= 28 || b.area.height <= 8 {
+        b.area
+    } else {
+        popup(b.area, 92, 22)?
+    };
+    let i = panel(b, q, p.accent, p.panel_bg)?;
+    if i.height < 10 {
+        let style = Style::default().fg(p.text).bg(p.panel_bg);
+        let (target, scope, project, wake, status) =
+            management.records.get(management.selected).map_or_else(
+                || {
+                    (
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                    )
+                },
+                |record| {
+                    (
+                        record.label.clone(),
+                        record.scope.clone(),
+                        record
+                            .project_label
+                            .clone()
+                            .unwrap_or_else(|| record.label.clone()),
+                        super::snooze_presets::wake_label_for_deadline(record.deadline_unix_ms),
+                        if record.outside_focus {
+                            if record.available {
+                                "Outside Focus · Avail".to_owned()
+                            } else {
+                                "Outside Focus · Unavail".to_owned()
+                            }
+                        } else if record.available {
+                            "Available".to_owned()
+                        } else {
+                            "Unavailable".to_owned()
+                        },
+                    )
+                },
+            );
+        let status = if scope.is_empty() {
+            status
+        } else {
+            format!("{scope} · {status}")
+        };
+        let navigation = i.width >= 16;
+        let title_width = i.width.saturating_sub(if navigation { 5 } else { 0 });
+        let heading = format!(" Snoozed · {}", management.endpoint_label);
+        let target_line = management
+            .restriction
+            .as_deref()
+            .or(management.notice.as_deref())
+            .map_or_else(|| format!(" {target}"), |notice| format!(" ! {notice}"));
+        let footer_y = i.y + i.height.saturating_sub(1);
+        let lines = [
+            heading,
+            target_line,
+            format!(" {project}"),
+            format!(" {wake}"),
+            format!(" {status}"),
+            if i.width >= 21 {
+                "↵Wake Reset Esc close".to_owned()
+            } else {
+                "↵Wake Reset Esc".to_owned()
+            },
+        ];
+        for (offset, line) in lines.iter().enumerate().take(i.height as usize) {
+            let line_style = if offset == 0 {
+                Style::default()
+                    .fg(p.yellow)
+                    .bg(p.panel_bg)
+                    .add_modifier(Modifier::BOLD)
+            } else if offset == 5 {
+                Style::default().fg(p.overlay0).bg(p.panel_bg)
+            } else {
+                style
+            };
+            let y = if offset == 5 {
+                footer_y
+            } else {
+                i.y + offset as u16
+            };
+            put_text(
+                b,
+                i.x,
+                y,
+                if offset == 0 { title_width } else { i.width },
+                line,
+                line_style,
+            );
+        }
+        let wake = Rect::new(i.x, footer_y, i.width.min(5), 1);
+        let reset_x = i.x.saturating_add(6).min(i.right());
+        let reset = Rect::new(
+            reset_x,
+            footer_y,
+            i.right().saturating_sub(reset_x).min(5),
+            1,
+        );
+        let close_x = i.x.saturating_add(12).min(i.right());
+        let close = Rect::new(
+            close_x,
+            footer_y,
+            i.right().saturating_sub(close_x).min(9),
+            1,
+        );
+        let previous = if navigation {
+            Rect::new(i.right().saturating_sub(5), i.y, 2, 1)
+        } else {
+            Rect::default()
+        };
+        let next = if navigation {
+            Rect::new(i.right().saturating_sub(2), i.y, 2, 1)
+        } else {
+            Rect::default()
+        };
+        if navigation {
+            let nav_style = Style::default()
+                .fg(p.accent)
+                .bg(p.panel_bg)
+                .add_modifier(Modifier::UNDERLINED);
+            put_text(b, previous.x, previous.y, previous.width, "‹", nav_style);
+            put_text(b, next.x, next.y, next.width, "›", nav_style);
+        }
+        return Some(OverlayRender {
+            primary: wake,
+            cancel: close,
+            snooze_management_popup: q,
+            snooze_management_reset: reset,
+            snooze_management_previous: previous,
+            snooze_management_next: next,
+            ..OverlayRender::default()
+        });
+    }
+    let navigation = i.width >= 52;
+    let title_width = i.width.saturating_sub(if navigation { 18 } else { 0 });
+    put_text(
+        b,
+        i.x,
+        i.y,
+        title_width,
+        &format!(" Snoozed records · {}", management.endpoint_label),
+        Style::default()
+            .fg(p.text)
+            .bg(p.panel_bg)
+            .add_modifier(Modifier::BOLD),
+    );
+    let previous = if navigation {
+        Rect::new(i.x + i.width - 18, i.y, 7, 1)
+    } else {
+        Rect::default()
+    };
+    let next = if navigation {
+        Rect::new(i.x + i.width - 10, i.y, 8, 1)
+    } else {
+        Rect::default()
+    };
+    if navigation {
+        let nav_style = Style::default()
+            .fg(p.accent)
+            .bg(p.panel_bg)
+            .add_modifier(Modifier::UNDERLINED);
+        put_text(
+            b,
+            previous.x,
+            previous.y,
+            previous.width,
+            "‹ prev",
+            nav_style,
+        );
+        put_text(b, next.x, next.y, next.width, "next ›", nav_style);
+    }
+    let mut rows = Vec::new();
+    let list_height = i.height.saturating_sub(10).max(1) as usize;
+    let start = management
+        .scroll
+        .min(management.records.len().saturating_sub(list_height));
+    for (visible, (index, record)) in management
+        .records
+        .iter()
+        .enumerate()
+        .skip(start)
+        .take(list_height)
+        .enumerate()
+    {
+        let y = i.y.saturating_add(2 + visible as u16);
+        let row = Rect::new(i.x, y, i.width, 1);
+        let style = if index == management.selected {
+            Style::default()
+                .fg(contrast(p))
+                .bg(p.accent)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(p.text).bg(p.panel_bg)
+        };
+        let status = if record.available {
+            "Available"
+        } else {
+            "Unavailable / reassociation needed"
+        };
+        let label = format!(" {} · {} · {}", record.label, record.scope, status);
+        b.set_style(row, style);
+        put_text(b, row.x, row.y, row.width, &label, style);
+        rows.push((row, index));
+    }
+    if let Some(record) = management.records.get(management.selected) {
+        let detail_y = i.y + i.height.saturating_sub(7);
+        let details = [
+            format!(" Target: {}", record.label),
+            format!(
+                " Scope: {}{}",
+                record.scope,
+                record
+                    .project_label
+                    .as_deref()
+                    .map_or(String::new(), |project| format!(" · project {project}"))
+            ),
+            format!(
+                " Wake at: {}",
+                super::snooze_presets::wake_label_for_deadline(record.deadline_unix_ms)
+            ),
+            format!(
+                " {}{}",
+                if record.available {
+                    "Available"
+                } else {
+                    "Unavailable / reassociation needed"
+                },
+                if record.outside_focus {
+                    " · Outside current Focus"
+                } else {
+                    ""
+                }
+            ),
+        ];
+        for (offset, detail) in details.iter().enumerate() {
+            put_text(
+                b,
+                i.x,
+                detail_y.saturating_add(offset as u16),
+                i.width,
+                detail,
+                Style::default()
+                    .fg(if record.outside_focus {
+                        p.yellow
+                    } else {
+                        p.overlay0
+                    })
+                    .bg(p.panel_bg),
+            );
+        }
+        let parent_label = if record.covered_by_project {
+            record
+                .project_label
+                .as_deref()
+                .or(Some(record.label.as_str()))
+        } else {
+            management.parent_action.as_ref().and_then(|parent| {
+                parent
+                    .project_label
+                    .as_deref()
+                    .or(Some(parent.label.as_str()))
+            })
+        };
+        if let Some(parent_label) = parent_label {
+            let parent = Rect::new(i.x, detail_y.saturating_add(4), i.width, 1);
+            put_text(
+                b,
+                parent.x,
+                parent.y,
+                parent.width,
+                &format!(" P  Wake parent project: {parent_label}"),
+                Style::default()
+                    .fg(p.yellow)
+                    .bg(p.panel_bg)
+                    .add_modifier(Modifier::UNDERLINED),
+            );
+        }
+    }
+    let notice_y = i.y + 1;
+    if let Some(notice) = management
+        .restriction
+        .as_deref()
+        .or(management.notice.as_deref())
+    {
+        put_text(
+            b,
+            i.x,
+            notice_y,
+            i.width,
+            &format!(" ! {notice}"),
+            Style::default().fg(p.yellow).bg(p.panel_bg),
+        );
+    }
+    let buttons_y = i.bottom().saturating_sub(2);
+    let button_row = Rect::new(i.x, buttons_y, i.width, 1);
+    let widths = if i.width >= 64 {
+        vec![12, 12, 12, 10]
+    } else {
+        vec![i.width.saturating_sub(3) / 4; 4]
+    };
+    let button_rects = row(button_row, &widths, 1, 0);
+    let mut render = OverlayRender {
+        snooze_management_popup: q,
+        snooze_management_rows: rows,
+        ..OverlayRender::default()
+    };
+    render.snooze_management_previous = previous;
+    render.snooze_management_next = next;
+    if management
+        .records
+        .get(management.selected)
+        .is_some_and(|record| record.covered_by_project)
+        || management.parent_action.is_some()
+    {
+        render.snooze_management_wake_parent =
+            Rect::new(i.x, i.bottom().saturating_sub(3), i.width, 1);
+    }
+    if i.width >= 64 {
+        let [wake, all, reset, cancel] = button_rects.as_slice() else {
+            return Some(render);
+        };
+        button(
+            b,
+            *wake,
+            " wake now ",
+            Style::default()
+                .fg(contrast(p))
+                .bg(p.accent)
+                .add_modifier(Modifier::BOLD),
+        );
+        button(
+            b,
+            *all,
+            " wake all ",
+            Style::default()
+                .fg(p.text)
+                .bg(p.surface0)
+                .add_modifier(Modifier::BOLD),
+        );
+        button(
+            b,
+            *reset,
+            " Reset ",
+            Style::default()
+                .fg(p.text)
+                .bg(p.surface0)
+                .add_modifier(Modifier::BOLD),
+        );
+        button(
+            b,
+            *cancel,
+            " close ",
+            Style::default()
+                .fg(p.text)
+                .bg(p.surface0)
+                .add_modifier(Modifier::BOLD),
+        );
+        render.primary = *wake;
+        render.cancel = *cancel;
+        render.snooze_management_wake_all = *all;
+        render.snooze_management_reset = *reset;
+    } else {
+        let [wake, all, reset, cancel] = button_rects.as_slice() else {
+            return Some(render);
+        };
+        button(
+            b,
+            *wake,
+            " wake ",
+            Style::default()
+                .fg(contrast(p))
+                .bg(p.accent)
+                .add_modifier(Modifier::BOLD),
+        );
+        button(
+            b,
+            *all,
+            " all ",
+            Style::default()
+                .fg(p.text)
+                .bg(p.surface0)
+                .add_modifier(Modifier::BOLD),
+        );
+        button(
+            b,
+            *reset,
+            " Reset ",
+            Style::default()
+                .fg(p.text)
+                .bg(p.surface0)
+                .add_modifier(Modifier::BOLD),
+        );
+        button(
+            b,
+            *cancel,
+            " close ",
+            Style::default()
+                .fg(p.text)
+                .bg(p.surface0)
+                .add_modifier(Modifier::BOLD),
+        );
+        render.primary = *wake;
+        render.cancel = *cancel;
+        render.snooze_management_wake_all = *all;
+        render.snooze_management_reset = *reset;
+    }
+    Some(render)
+}
+
+fn render_snooze_overlay(
+    b: &mut Buffer,
+    s: &ClientSnoozeOverlay,
+    p: &Palette,
+) -> Option<OverlayRender> {
+    let q = popup(b.area, 70, 18)?;
+    let i = panel(b, q, p.accent, p.panel_bg)?;
+    if i.width < 28 || i.height < 14 {
+        return None;
+    }
+    let title = if s.project_key.is_some() {
+        " Snooze project"
+    } else {
+        " Snooze workspace"
+    };
+    put_text(
+        b,
+        i.x,
+        i.y,
+        i.width,
+        title,
+        Style::default()
+            .fg(p.text)
+            .bg(p.panel_bg)
+            .add_modifier(Modifier::BOLD),
+    );
+    let scope = s.project_label.as_deref().map_or_else(
+        || s.target_label.clone(),
+        |label| format!("{} · project {label}", s.target_label),
+    );
+    put_text(
+        b,
+        i.x,
+        i.y + 1,
+        i.width,
+        &format!(" {scope}"),
+        Style::default().fg(p.overlay0).bg(p.panel_bg),
+    );
+    let Some(selected) = s.choices.get(s.selected) else {
+        return None;
+    };
+    put_text(
+        b,
+        i.x,
+        i.y + 2,
+        i.width,
+        &format!(" wake at {}", selected.wake_label),
+        Style::default().fg(p.yellow).bg(p.panel_bg),
+    );
+    let mut choice_rows = Vec::new();
+    for (index, choice) in s.choices.iter().enumerate() {
+        let row = Rect::new(i.x, i.y + 4 + index as u16, i.width, 1);
+        let style = if index == s.selected {
+            Style::default()
+                .fg(contrast(p))
+                .bg(p.accent)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(p.text).bg(p.panel_bg)
+        };
+        b.set_style(row, style);
+        put_text(
+            b,
+            row.x,
+            row.y,
+            row.width,
+            &format!(" {}  {}", choice.label, choice.wake_label),
+            style,
+        );
+        choice_rows.push((row, index));
+    }
+    let buttons = row(i, &[12, 12], 2, 11);
+    let [confirm, cancel] = buttons.as_slice() else {
+        return None;
+    };
+    button(
+        b,
+        *confirm,
+        " snooze ",
+        Style::default()
+            .fg(contrast(p))
+            .bg(p.accent)
+            .add_modifier(Modifier::BOLD),
+    );
+    button(
+        b,
+        *cancel,
+        " esc cancel ",
+        Style::default()
+            .fg(p.text)
+            .bg(p.surface0)
+            .add_modifier(Modifier::BOLD),
+    );
+    put_text(
+        b,
+        i.x,
+        i.y + 12,
+        i.width,
+        " agents keep running · notifications unchanged",
+        Style::default().fg(p.overlay0).bg(p.panel_bg),
+    );
+    put_text(
+        b,
+        i.x,
+        i.bottom() - 1,
+        i.width,
+        " ↑↓/tab choose · enter snooze · esc cancel",
+        Style::default().fg(p.overlay0).bg(p.panel_bg),
+    );
+    Some(OverlayRender {
+        primary: *confirm,
+        cancel: *cancel,
+        snooze_popup: q,
+        snooze_choice_rows: choice_rows,
+        ..OverlayRender::default()
+    })
 }
 
 pub(crate) fn render_global_menu(
@@ -115,8 +664,11 @@ pub(crate) fn render_global_menu(
         palette.panel_bg,
     )?;
     let mut rows = Vec::new();
-    for (index, (label, action)) in items.iter().enumerate() {
-        let row_y = inner.y.saturating_add(index as u16);
+    let first = menu
+        .highlighted
+        .saturating_sub(usize::from(inner.height.saturating_sub(1)));
+    for (index, (label, action)) in items.iter().enumerate().skip(first) {
+        let row_y = inner.y.saturating_add((index - first) as u16);
         if row_y >= inner.bottom() {
             break;
         }
@@ -167,7 +719,7 @@ pub(crate) fn render_context_menu(
     let screen = buffer.area;
     let max_item_width = items
         .iter()
-        .map(|item| display_width(item.label))
+        .map(|item| display_width(item.label.as_str()))
         .max()
         .unwrap_or(0);
     let width = max_item_width
@@ -204,7 +756,7 @@ pub(crate) fn render_context_menu(
             Style::default().fg(palette.text).bg(palette.panel_bg)
         };
         buffer.set_style(row, style);
-        put_text(buffer, row.x, row.y, row.width, item.label, style);
+        put_text(buffer, row.x, row.y, row.width, &item.label, style);
         rows.push((row, index));
     }
     Some(rows)
@@ -1169,6 +1721,77 @@ fn render_confirm_close_overlay(
         worktree_search: Rect::default(),
         worktree_rows: Vec::new(),
         cursor: None,
+        ..OverlayRender::default()
+    })
+}
+
+fn render_confirm_wake_shared_snoozes_overlay(
+    b: &mut Buffer,
+    c: &ClientConfirmWakeSharedSnoozesOverlay,
+    p: &Palette,
+) -> Option<OverlayRender> {
+    let q = popup(b.area, 64, 8)?;
+    let i = panel(b, q, p.yellow, p.panel_bg)?;
+    let (title, details) = match c.purpose {
+        ClientWakeConfirmationPurpose::WakeSharedSnoozes => (
+            " Wake shared snoozes?",
+            vec![format!(" {} records on {}", c.count, c.endpoint_label)],
+        ),
+        ClientWakeConfirmationPurpose::ResetFocusSnooze => (
+            " Reset Focus + Snooze?",
+            vec![
+                " Clear this window's Focus".to_owned(),
+                format!(" plus all shared snoozes on {}", c.endpoint_label),
+                format!(" ({} records)", c.count),
+            ],
+        ),
+    };
+    put_text(
+        b,
+        i.x,
+        i.y,
+        i.width,
+        title,
+        Style::default()
+            .fg(p.yellow)
+            .bg(p.panel_bg)
+            .add_modifier(Modifier::BOLD),
+    );
+    for (offset, detail) in details.iter().enumerate() {
+        put_text(
+            b,
+            i.x,
+            i.y + 1 + offset as u16,
+            i.width,
+            detail,
+            Style::default().fg(p.text).bg(p.panel_bg),
+        );
+    }
+    let rs = row(i, &[13, 12], 2, 4);
+    let [ok, cancel] = rs.as_slice() else {
+        return None;
+    };
+    button(
+        b,
+        *ok,
+        " ↵ confirm ",
+        Style::default()
+            .fg(contrast(p))
+            .bg(p.yellow)
+            .add_modifier(Modifier::BOLD),
+    );
+    button(
+        b,
+        *cancel,
+        " esc cancel ",
+        Style::default()
+            .fg(p.text)
+            .bg(p.surface0)
+            .add_modifier(Modifier::BOLD),
+    );
+    Some(OverlayRender {
+        primary: *ok,
+        cancel: *cancel,
         ..OverlayRender::default()
     })
 }

@@ -91,6 +91,22 @@ pub enum Method {
     WorkspaceReportMetadata(WorkspaceReportMetadataParams),
     #[serde(rename = "workspace.close")]
     WorkspaceClose(WorkspaceCloseParams),
+    #[serde(rename = "workspace.snooze")]
+    WorkspaceSnooze(WorkspaceSnoozeParams),
+    #[serde(rename = "workspace.wake")]
+    WorkspaceWake(WorkspaceWakeParams),
+    #[serde(rename = "snooze.reset")]
+    SnoozeReset(SnoozeResetParams),
+    #[serde(rename = "project.snooze")]
+    ProjectSnooze(ProjectSnoozeParams),
+    #[serde(rename = "project.wake")]
+    ProjectWake(ProjectWakeParams),
+    #[serde(rename = "snooze.record.wake")]
+    SnoozeRecordWake(SnoozeRecordWakeParams),
+    #[serde(rename = "workspace.snooze.subscribe")]
+    WorkspaceSnoozeSubscribe(EmptyParams),
+    #[serde(rename = "snooze.list")]
+    SnoozeList(EmptyParams),
     #[serde(rename = "worktree.list")]
     WorktreeList(WorktreeListParams),
     #[serde(rename = "worktree.create")]

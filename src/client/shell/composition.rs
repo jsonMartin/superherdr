@@ -56,6 +56,8 @@ impl ClientShellState {
                 selected_workspace_id: self.navigate_workspace_id.as_deref(),
                 dragged_workspace_id: None,
                 workspace_drop_indicator_row: None,
+                focus_scope: self.focus_scope.as_ref(),
+                snooze_state: self.snooze_state.as_ref(),
             },
             &mut self.hits,
         );
@@ -95,11 +97,239 @@ impl ClientShellState {
             &self.config.keybinds,
             &self.config.palette,
         );
+        let (clear_focus, show_snoozed) =
+            recovery_bar::render(&mut buffer, self, layout.recovery_bar);
+        self.hits.feature_clear_focus = clear_focus;
+        self.hits.feature_show_snoozed = show_snoozed;
+        if let Some(overlay) = self.overlay.as_ref() {
+            if let ClientShellOverlay::ContextMenu(menu) = overlay {
+                self.hits.context_menu_rows =
+                    render::render_context_menu(&mut buffer, menu, &self.config.palette)
+                        .unwrap_or_default();
+            } else if let Some(snapshot) = self.snapshot.as_deref() {
+                if let ClientShellOverlay::GlobalMenu(menu) = overlay {
+                    self.hits.global_menu_rows = render::render_global_menu(
+                        &mut buffer,
+                        self.hits.global_launcher,
+                        menu,
+                        snapshot,
+                        &self.config.palette,
+                    )
+                    .unwrap_or_default();
+                } else if let Some(rendered) = render::render_client_overlay(
+                    &mut buffer,
+                    overlay,
+                    snapshot,
+                    &self.endpoints,
+                    &self.active_endpoint_id,
+                    &self.config.keybinds,
+                    &self.config.palette,
+                ) {
+                    if self.config.mouse_capture {
+                        self.hits.overlay_primary = rendered.primary;
+                        self.hits.overlay_clear = rendered.clear;
+                        self.hits.overlay_cancel = rendered.cancel;
+                        self.hits.snooze_popup = rendered.snooze_popup;
+                        self.hits.snooze_choice_rows = rendered.snooze_choice_rows;
+                        self.hits.snooze_management_popup = rendered.snooze_management_popup;
+                        self.hits.snooze_management_rows = rendered.snooze_management_rows;
+                        self.hits.snooze_management_wake_all = rendered.snooze_management_wake_all;
+                        self.hits.snooze_management_wake_parent =
+                            rendered.snooze_management_wake_parent;
+                        self.hits.snooze_management_reset = rendered.snooze_management_reset;
+                        self.hits.snooze_management_previous = rendered.snooze_management_previous;
+                        self.hits.snooze_management_next = rendered.snooze_management_next;
+                    }
+                }
+            }
+        }
+        FrameData::from_ratatui_buffer_with_hyperlinks(&buffer, None, &[])
+    }
+
+    fn compose_empty_presentation(&mut self, cols: u16, rows: u16) -> FrameData {
+        let layout = self.layout(cols, rows);
+        let mut buffer = Buffer::empty(Rect::new(0, 0, cols, rows));
+        buffer.set_style(
+            buffer.area,
+            Style::default()
+                .fg(self.config.palette.text)
+                .bg(self.config.palette.panel_bg),
+        );
+        self.hits = ShellHitMap::default();
+        let content_bottom = if layout.recovery_bar.height > 0 {
+            layout.recovery_bar.y
+        } else {
+            rows
+        };
+        let mobile = layout.sidebar.width == 0;
+        if let Some(snapshot) = self.snapshot.as_deref() {
+            let sidebar = if !mobile {
+                layout.sidebar
+            } else {
+                let message_height = content_bottom.min(5);
+                Rect::new(
+                    0,
+                    message_height,
+                    cols,
+                    content_bottom.saturating_sub(message_height),
+                )
+            };
+            super::endpoint_sidebar::render_expanded(
+                &mut buffer,
+                sidebar,
+                Some(snapshot),
+                &self.config,
+                &mut render::ShellRenderState {
+                    endpoints: &self.endpoints,
+                    active_endpoint_id: &self.active_endpoint_id,
+                    collapsed_endpoints: &self.collapsed_endpoints,
+                    collapsed_groups: &self.collapsed_groups,
+                    workspace_scroll: &mut self.workspace_scroll,
+                    agent_scroll: &mut self.agent_scroll,
+                    tab_scroll: &mut self.tab_scroll,
+                    reveal_focused_workspace: &mut self.reveal_focused_workspace,
+                    reveal_focused_tab: &mut self.reveal_focused_tab,
+                    sidebar_collapsed: false,
+                    sidebar_section_split: self.sidebar_section_split,
+                    tab_drag_insert_index: None,
+                    selected_workspace_id: self.navigate_workspace_id.as_deref(),
+                    dragged_workspace_id: None,
+                    workspace_drop_indicator_row: None,
+                    focus_scope: self.focus_scope.as_ref(),
+                    snooze_state: self.snooze_state.as_ref(),
+                },
+                &mut self.hits,
+            );
+        }
+        if !self.config.mouse_capture {
+            self.hits = ShellHitMap::default();
+        }
+        self.hits.panes.clear();
+        self.hits.pane_splits.clear();
+
+        let message_area = if !mobile {
+            layout.pane_surface
+        } else {
+            Rect::new(0, 0, cols, content_bottom.min(5))
+        };
+
+        let recovery_workspace = recovery_bar::snooze_visible(self).then_some(());
+        let action_area = Rect::new(
+            message_area.x.saturating_add(2),
+            message_area.y.saturating_add(3),
+            message_area.width.saturating_sub(4),
+            1,
+        );
+        if recovery_workspace.is_some() {
+            self.hits.empty_recovery = action_area;
+            render::put_text(
+                &mut buffer,
+                action_area.x,
+                action_area.y,
+                action_area.width,
+                "Wake shared snoozes (click to review, w)",
+                Style::default()
+                    .fg(self.config.palette.accent)
+                    .add_modifier(Modifier::UNDERLINED),
+            );
+        }
+        let clear_area = Rect::new(
+            action_area.x,
+            action_area.y.saturating_add(1),
+            action_area.width,
+            1,
+        );
+        if self.focus_scope.is_some() {
+            self.hits.empty_clear_focus = clear_area;
+        }
+        render::put_text(
+            &mut buffer,
+            clear_area.x,
+            clear_area.y,
+            clear_area.width,
+            "Clear local focus (click)",
+            if self.focus_scope.is_some() {
+                Style::default()
+                    .fg(self.config.palette.accent)
+                    .add_modifier(Modifier::UNDERLINED)
+            } else {
+                Style::default().fg(self.config.palette.overlay0)
+            },
+        );
+
+        let message = "Terminal input paused. Select a workspace.";
+        render::put_text(
+            &mut buffer,
+            message_area.x + 2,
+            message_area.y + 2,
+            message_area.width.saturating_sub(4),
+            message,
+            Style::default().fg(self.config.palette.overlay0),
+        );
+        render::render_mode_bar(
+            &mut buffer,
+            Rect::new(0, 0, cols, rows),
+            self.mode,
+            None,
+            self.endpoint_error.as_deref(),
+            false,
+            &self.config.keybinds,
+            &self.config.palette,
+        );
+        let (clear_focus, show_snoozed) =
+            recovery_bar::render(&mut buffer, self, layout.recovery_bar);
+        self.hits.feature_clear_focus = clear_focus;
+        self.hits.feature_show_snoozed = show_snoozed;
+        if let Some(overlay) = self.overlay.as_ref() {
+            if let ClientShellOverlay::ContextMenu(menu) = overlay {
+                self.hits.context_menu_rows =
+                    render::render_context_menu(&mut buffer, menu, &self.config.palette)
+                        .unwrap_or_default();
+            } else if let Some(snapshot) = self.snapshot.as_deref() {
+                if let ClientShellOverlay::GlobalMenu(menu) = overlay {
+                    self.hits.global_menu_rows = render::render_global_menu(
+                        &mut buffer,
+                        self.hits.global_launcher,
+                        menu,
+                        snapshot,
+                        &self.config.palette,
+                    )
+                    .unwrap_or_default();
+                } else if let Some(rendered) = render::render_client_overlay(
+                    &mut buffer,
+                    overlay,
+                    snapshot,
+                    &self.endpoints,
+                    &self.active_endpoint_id,
+                    &self.config.keybinds,
+                    &self.config.palette,
+                ) {
+                    if self.config.mouse_capture {
+                        self.hits.overlay_primary = rendered.primary;
+                        self.hits.overlay_clear = rendered.clear;
+                        self.hits.overlay_cancel = rendered.cancel;
+                        self.hits.snooze_popup = rendered.snooze_popup;
+                        self.hits.snooze_choice_rows = rendered.snooze_choice_rows;
+                        self.hits.snooze_management_popup = rendered.snooze_management_popup;
+                        self.hits.snooze_management_rows = rendered.snooze_management_rows;
+                        self.hits.snooze_management_wake_all = rendered.snooze_management_wake_all;
+                        self.hits.snooze_management_wake_parent =
+                            rendered.snooze_management_wake_parent;
+                        self.hits.snooze_management_reset = rendered.snooze_management_reset;
+                        self.hits.snooze_management_previous = rendered.snooze_management_previous;
+                        self.hits.snooze_management_next = rendered.snooze_management_next;
+                    }
+                }
+            }
+        }
         FrameData::from_ratatui_buffer_with_hyperlinks(&buffer, None, &[])
     }
 
     pub(crate) fn compose(&mut self, cols: u16, rows: u16) -> Option<FrameData> {
         self.last_composed_size = Some((cols, rows));
+        if self.empty_presentation {
+            return Some(self.compose_empty_presentation(cols, rows));
+        }
         if self.snapshot.is_none() || self.pane_surface.is_none() {
             return Some(self.compose_unavailable(cols, rows));
         }
@@ -156,6 +386,8 @@ impl ClientShellState {
                     .flatten(),
                 dragged_workspace_id,
                 workspace_drop_indicator_row,
+                focus_scope: self.focus_scope.as_ref(),
+                snooze_state: self.snooze_state.as_ref(),
             },
         );
         self.hits.panes = surface
@@ -538,6 +770,14 @@ impl ClientShellState {
             self.hits.pane_splits.clear();
             self.hits.popup = None;
         }
+        if recovery_bar::is_visible(self) {
+            let mut composed = frame.to_ratatui_buffer()?;
+            let (clear_focus, show_snoozed) =
+                recovery_bar::render(&mut composed, self, layout.recovery_bar);
+            self.hits.feature_clear_focus = clear_focus;
+            self.hits.feature_show_snoozed = show_snoozed;
+            frame.replace_from_ratatui_buffer_preserving_effects(&composed, frame.cursor.clone());
+        }
         restore_mode_bar(&mut frame, mode_bar, mode_bar_cells.as_deref());
         if let Some(overlay) = self.overlay.as_ref() {
             let mut composed = frame.to_ratatui_buffer()?;
@@ -564,29 +804,42 @@ impl ClientShellState {
                     &self.config.keybinds,
                     &self.config.palette,
                 )?;
-                self.hits.overlay_primary = rendered.primary;
-                self.hits.overlay_clear = rendered.clear;
-                self.hits.overlay_cancel = rendered.cancel;
-                self.hits.navigator_popup = rendered.navigator_popup;
-                self.hits.navigator_search = rendered.navigator_search;
-                self.hits.navigator_rows = rendered.navigator_rows;
-                self.hits.worktree_search = rendered.worktree_search;
-                self.hits.worktree_rows = rendered.worktree_rows;
-                self.hits.help_popup = rendered.help_popup;
-                self.hits.help_scrollbar = rendered.help_scrollbar;
-                self.hits.help_scroll_metrics = rendered.help_scroll_metrics;
-                self.hits.help_max_scroll = rendered.help_max_scroll;
-                self.hits.settings_popup = rendered.settings_popup;
-                self.hits.settings_tabs = rendered.settings_tabs;
-                self.hits.settings_choices = rendered.settings_choices;
-                self.hits.product_announcement_scrollbar = rendered.product_announcement_scrollbar;
-                self.hits.product_announcement_scroll_metrics =
-                    rendered.product_announcement_scroll_metrics;
-                self.hits.product_announcement_max_scroll =
-                    rendered.product_announcement_max_scroll;
-                self.hits.release_notes_scrollbar = rendered.release_notes_scrollbar;
-                self.hits.release_notes_scroll_metrics = rendered.release_notes_scroll_metrics;
-                self.hits.release_notes_max_scroll = rendered.release_notes_max_scroll;
+                if self.config.mouse_capture {
+                    self.hits.overlay_primary = rendered.primary;
+                    self.hits.overlay_clear = rendered.clear;
+                    self.hits.overlay_cancel = rendered.cancel;
+                    self.hits.snooze_popup = rendered.snooze_popup;
+                    self.hits.snooze_choice_rows = rendered.snooze_choice_rows;
+                    self.hits.snooze_management_popup = rendered.snooze_management_popup;
+                    self.hits.snooze_management_rows = rendered.snooze_management_rows;
+                    self.hits.snooze_management_wake_all = rendered.snooze_management_wake_all;
+                    self.hits.snooze_management_wake_parent =
+                        rendered.snooze_management_wake_parent;
+                    self.hits.snooze_management_reset = rendered.snooze_management_reset;
+                    self.hits.snooze_management_previous = rendered.snooze_management_previous;
+                    self.hits.snooze_management_next = rendered.snooze_management_next;
+                    self.hits.navigator_popup = rendered.navigator_popup;
+                    self.hits.navigator_search = rendered.navigator_search;
+                    self.hits.navigator_rows = rendered.navigator_rows;
+                    self.hits.worktree_search = rendered.worktree_search;
+                    self.hits.worktree_rows = rendered.worktree_rows;
+                    self.hits.help_popup = rendered.help_popup;
+                    self.hits.help_scrollbar = rendered.help_scrollbar;
+                    self.hits.help_scroll_metrics = rendered.help_scroll_metrics;
+                    self.hits.help_max_scroll = rendered.help_max_scroll;
+                    self.hits.settings_popup = rendered.settings_popup;
+                    self.hits.settings_tabs = rendered.settings_tabs;
+                    self.hits.settings_choices = rendered.settings_choices;
+                    self.hits.product_announcement_scrollbar =
+                        rendered.product_announcement_scrollbar;
+                    self.hits.product_announcement_scroll_metrics =
+                        rendered.product_announcement_scroll_metrics;
+                    self.hits.product_announcement_max_scroll =
+                        rendered.product_announcement_max_scroll;
+                    self.hits.release_notes_scrollbar = rendered.release_notes_scrollbar;
+                    self.hits.release_notes_scroll_metrics = rendered.release_notes_scroll_metrics;
+                    self.hits.release_notes_max_scroll = rendered.release_notes_max_scroll;
+                }
                 rendered.cursor
             };
             frame.replace_from_ratatui_buffer_preserving_effects(&composed, cursor);

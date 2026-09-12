@@ -6,10 +6,13 @@ impl ClientShellState {
             return matches!(
                 overlay,
                 ClientShellOverlay::ConfirmClose(_)
+                    | ClientShellOverlay::ConfirmWakeSharedSnoozes(_)
+                    | ClientShellOverlay::Snooze(_)
                     | ClientShellOverlay::Help(_)
                     | ClientShellOverlay::Navigator(_)
                     | ClientShellOverlay::WorktreeRemove(_)
                     | ClientShellOverlay::ContextMenu(_)
+                    | ClientShellOverlay::SnoozeManagement(_)
                     | ClientShellOverlay::GlobalMenu(_)
             );
         }

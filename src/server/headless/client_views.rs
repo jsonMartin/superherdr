@@ -490,6 +490,19 @@ impl HeadlessServer {
         workspace_index: usize,
         pane_id: crate::layout::PaneId,
     ) -> bool {
+        if self.snooze_subscribers.contains(&client_id) {
+            if let Some(workspace) = self.app.state.workspaces.get(workspace_index) {
+                if self.workspace_snoozes.is_snoozed(&workspace.id) {
+                    return false;
+                }
+                if workspace
+                    .worktree_space()
+                    .is_some_and(|space| self.workspace_snoozes.is_project_snoozed(&space.key))
+                {
+                    return false;
+                }
+            }
+        }
         let Some(target) = self.shell_target_for_client(client_id) else {
             return false;
         };

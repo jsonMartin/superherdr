@@ -50,6 +50,32 @@ pub(super) fn global_menu_items(
         "detach",
         ClientGlobalMenuAction::Binding(crate::input::KeybindAction::Detach),
     ));
+    items.extend([
+        (
+            "Focus project",
+            ClientGlobalMenuAction::Binding(crate::input::KeybindAction::FocusProject),
+        ),
+        (
+            "Stop focusing",
+            ClientGlobalMenuAction::Binding(crate::input::KeybindAction::ClearProjectFocus),
+        ),
+        (
+            "Snooze workspace…",
+            ClientGlobalMenuAction::Binding(crate::input::KeybindAction::SnoozeWorkspace),
+        ),
+        (
+            "Snooze project…",
+            ClientGlobalMenuAction::Binding(crate::input::KeybindAction::SnoozeProject),
+        ),
+        (
+            "Show snoozed items",
+            ClientGlobalMenuAction::Binding(crate::input::KeybindAction::ShowSnoozed),
+        ),
+        (
+            "Reset Focus + Snooze",
+            ClientGlobalMenuAction::Binding(crate::input::KeybindAction::ResetFocusSnooze),
+        ),
+    ]);
     items
 }
 

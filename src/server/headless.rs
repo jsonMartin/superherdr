@@ -70,6 +70,7 @@ use crate::server::socket_paths::{
     client_socket_path, prepare_socket_path, restrict_socket_permissions,
 };
 use crate::server::terminal_attach::paste_payload_for_runtime;
+use crate::server::snooze_store;
 
 mod bootstrap;
 mod client_views;
@@ -116,6 +117,16 @@ fn notification_show_result(
 
 fn non_empty_body(value: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_owned())
+}
+
+enum SnoozeCommitError {
+    Action(crate::server::workspace_snooze::WorkspaceSnoozeError),
+    Persistence(String),
+}
+
+enum SnoozeWakeCommitError {
+    Action(crate::server::workspace_snooze::WorkspaceWakeError),
+    Persistence(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -214,6 +225,13 @@ pub struct HeadlessServer {
     popup_owner_tab_id: Option<String>,
     /// Process-local identity used to reject shell replacements from an earlier server boot.
     client_shell_boot_id: String,
+    /// Server-owned workspace snooze records keyed to current boot.
+    pub(crate) workspace_snoozes: crate::server::workspace_snooze::WorkspaceSnoozeManager,
+    pub(crate) snooze_store: Option<snooze_store::SnoozeStore>,
+    pub(crate) snooze_notice: Option<String>,
+    pub(crate) snooze_retry_deadline: Option<Instant>,
+    /// Participating client connections subscribed to workspace snooze state.
+    pub(crate) snooze_subscribers: HashSet<u64>,
     /// Outer window title last pushed, paired with the client that received it.
     /// Keying on the client means a newly attached terminal is written to even
     /// when the title itself has not changed, without every code path that
@@ -338,6 +356,34 @@ impl HeadlessServer {
             server_config_diagnostic_summaries(config_diagnostics);
         #[cfg(not(unix))]
         let _ = api_tx;
+        let client_shell_boot_id = format!(
+            "{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        );
+        let mut workspace_snoozes =
+            crate::server::workspace_snooze::WorkspaceSnoozeManager::new(
+                client_shell_boot_id.clone(),
+            );
+        let (snooze_store, snooze_notice) = if app.policy.persist_session {
+            let path = crate::session::data_dir().join("snooze.json");
+            let (store, notice) = snooze_store::SnoozeStore::load(
+                path,
+                &app.state.workspaces,
+                &mut workspace_snoozes,
+                crate::server::workspace_snooze::now_unix_ms(),
+            );
+            (Some(store), notice)
+        } else {
+            (None, None)
+        };
+        let snooze_retry_deadline = snooze_store
+            .as_ref()
+            .filter(|store| store.needs_save())
+            .map(|_| Instant::now() + Duration::from_secs(1));
         Ok(Self {
             app,
             #[cfg(unix)]
@@ -353,14 +399,12 @@ impl HeadlessServer {
             foreground_client_id: None,
             tab_geometry_controllers: HashMap::new(),
             popup_owner_tab_id: None,
-            client_shell_boot_id: format!(
-                "{}-{}",
-                std::process::id(),
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos()
-            ),
+            workspace_snoozes,
+            snooze_store,
+            snooze_notice,
+            snooze_retry_deadline,
+            snooze_subscribers: HashSet::new(),
+            client_shell_boot_id,
             sent_window_title: None,
             api_window_title: None,
             server_keybindings,
@@ -471,7 +515,12 @@ impl HeadlessServer {
             }
 
             self.app.sync_focus_events();
+            let snooze_membership_changed = self.reconcile_snooze_membership_if_dirty();
             self.app.sync_session_save_schedule();
+            if snooze_membership_changed {
+                needs_render = true;
+                needs_full_render = true;
+            }
 
             // 4. Accept new client connections.
             self.accept_client_connections()?;
@@ -619,6 +668,36 @@ impl HeadlessServer {
                 .fold(next_deadline, |deadline, pending| {
                     Some(deadline.map_or(pending, |current| current.min(pending)))
                 });
+            let now_ms = crate::server::workspace_snooze::now_unix_ms();
+            let next_deadline = if let Some(dl_ms) = self.workspace_snoozes.next_deadline() {
+                let dl_instant = if dl_ms <= now_ms {
+                    now
+                } else {
+                    now + Duration::from_millis((dl_ms - now_ms) as u64)
+                };
+                Some(next_deadline.map_or(dl_instant, |current| current.min(dl_instant)))
+            } else {
+                next_deadline
+            };
+            let next_deadline = self
+                .snooze_store
+                .as_ref()
+                .and_then(|store| store.next_deadline())
+                .map(|dl_ms| {
+                    if dl_ms <= now_ms {
+                        now
+                    } else {
+                        now + Duration::from_millis((dl_ms - now_ms) as u64)
+                    }
+                })
+                .map(|store_deadline| {
+                    next_deadline.map_or(store_deadline, |current| current.min(store_deadline))
+                })
+                .or(next_deadline);
+            let next_deadline = self
+                .snooze_retry_deadline
+                .map(|retry| next_deadline.map_or(retry, |current| current.min(retry)))
+                .or(next_deadline);
             let event = {
                 tokio::select! {
                     maybe_api = self.app.api_rx.recv() => match maybe_api {
@@ -1012,6 +1091,7 @@ impl HeadlessServer {
         });
         let was_foreground = self.foreground_client_id == Some(client_id);
         let removed = self.clients.remove(&client_id);
+        self.snooze_subscribers.remove(&client_id);
         self.tab_geometry_controllers
             .retain(|_, controller_id| *controller_id != client_id);
         if let Some(mut removed) = removed {
@@ -1718,6 +1798,570 @@ impl HeadlessServer {
         } else {
             false
         }
+    }
+
+    pub(crate) fn make_snooze_state_message(&self) -> Option<ServerMessage> {
+        let state = self.snooze_state();
+        let data = serde_json::to_string(&state).ok()?;
+        Some(ServerMessage::EndpointControl {
+            kind: "workspace_snooze.state".to_string(),
+            data,
+        })
+    }
+
+    fn snooze_state(&self) -> api::schema::WorkspaceSnoozeState {
+        let mut state = self.workspace_snoozes.state();
+        state.records.retain(|record| {
+            self.app
+                .state
+                .workspaces
+                .iter()
+                .any(|workspace| workspace.id == record.workspace_id)
+        });
+        if let Some(store) = &self.snooze_store {
+            state.persistence = Some(store.info(
+                &self.app.state.workspaces,
+                self.snooze_notice.clone(),
+            ));
+        }
+        state
+    }
+
+    fn commit_snooze_change<F>(
+        &mut self,
+        change: F,
+    ) -> Result<Option<String>, SnoozeCommitError>
+    where
+        F: FnOnce(
+            &mut crate::server::workspace_snooze::WorkspaceSnoozeManager,
+        ) -> Result<(), crate::server::workspace_snooze::WorkspaceSnoozeError>,
+    {
+        let mut manager = self.workspace_snoozes.clone();
+        change(&mut manager).map_err(SnoozeCommitError::Action)?;
+        self.commit_snooze_candidate(manager)
+    }
+
+    fn commit_snooze_candidate(
+        &mut self,
+        manager: crate::server::workspace_snooze::WorkspaceSnoozeManager,
+    ) -> Result<Option<String>, SnoozeCommitError> {
+        let Some(store) = self.snooze_store.clone() else {
+            self.workspace_snoozes = manager;
+            return Ok(None);
+        };
+        self.commit_snooze_candidate_from_store(manager, store)
+    }
+
+    fn commit_snooze_candidate_from_store(
+        &mut self,
+        manager: crate::server::workspace_snooze::WorkspaceSnoozeManager,
+        store: crate::server::snooze_store::SnoozeStore,
+    ) -> Result<Option<String>, SnoozeCommitError> {
+        self.commit_snooze_candidate_from_store_with_options(manager, store, false)
+    }
+
+    fn commit_snooze_candidate_from_store_with_options(
+        &mut self,
+        manager: crate::server::workspace_snooze::WorkspaceSnoozeManager,
+        store: crate::server::snooze_store::SnoozeStore,
+        force_save: bool,
+    ) -> Result<Option<String>, SnoozeCommitError> {
+        let now_ms = crate::server::workspace_snooze::now_unix_ms();
+        let mut manager = manager;
+        let mut staged = store
+            .staged(
+                &manager.state(),
+                &self.app.state.workspaces,
+                now_ms,
+            )
+            .map_err(SnoozeCommitError::Persistence)?;
+        if staged.retain_valid_live_records(&mut manager, &self.app.state.workspaces) {
+            staged = staged
+                .staged(&manager.state(), &self.app.state.workspaces, now_ms)
+                .map_err(SnoozeCommitError::Persistence)?;
+        }
+        let unchanged = self
+            .snooze_store
+            .as_ref()
+            .is_some_and(|current| current.same_document(&staged))
+            && !staged.needs_save()
+            && !staged.is_write_blocked()
+            && !force_save
+            && self.snooze_retry_deadline.is_none()
+            && self.snooze_notice.is_none();
+        if unchanged {
+            self.workspace_snoozes = manager;
+            self.snooze_store = Some(staged);
+            return Ok(None);
+        }
+        self.app
+            .checkpoint_session_for_snooze()
+            .map_err(|err| SnoozeCommitError::Persistence(format!("failed to checkpoint session: {err}")))?;
+        let warning = match staged.save() {
+            Ok(crate::server::snooze_store::SaveOutcome::Durable) => None,
+            Ok(crate::server::snooze_store::SaveOutcome::CommittedWithWarning(warning)) => {
+                self.snooze_retry_deadline = Some(Instant::now() + Duration::from_secs(1));
+                Some(warning)
+            }
+            Err(err) => {
+                self.snooze_retry_deadline = Some(Instant::now() + Duration::from_secs(1));
+                return Err(SnoozeCommitError::Persistence(err.to_string()));
+            }
+        };
+        self.workspace_snoozes = manager;
+        self.snooze_store = Some(staged);
+        self.snooze_notice = warning.clone();
+        if warning.is_none() {
+            self.snooze_retry_deadline = None;
+        }
+        Ok(warning)
+    }
+
+    fn snooze_action_error(
+        &self,
+        error: SnoozeCommitError,
+    ) -> (String, String) {
+        match error {
+            SnoozeCommitError::Action(
+                crate::server::workspace_snooze::WorkspaceSnoozeError::InvalidDuration,
+            ) => (
+                "invalid_duration".into(),
+                "invalid snooze duration (must be between 1 second and 30 days)".into(),
+            ),
+            SnoozeCommitError::Action(
+                crate::server::workspace_snooze::WorkspaceSnoozeError::InvalidDeadline,
+            ) => (
+                "invalid_deadline".into(),
+                "invalid snooze deadline (must be in the future, up to 30 days)".into(),
+            ),
+            SnoozeCommitError::Persistence(message) => ("persistence_failed".into(), message),
+        }
+    }
+
+    fn commit_snooze_wake<F>(
+        &mut self,
+        change: F,
+    ) -> Result<Option<String>, SnoozeWakeCommitError>
+    where
+        F: FnOnce(
+            &mut crate::server::workspace_snooze::WorkspaceSnoozeManager,
+        ) -> Result<(), crate::server::workspace_snooze::WorkspaceWakeError>,
+    {
+        let mut manager = self.workspace_snoozes.clone();
+        change(&mut manager).map_err(SnoozeWakeCommitError::Action)?;
+        self.commit_snooze_candidate(manager)
+            .map_err(|error| match error {
+                SnoozeCommitError::Persistence(message) => {
+                    SnoozeWakeCommitError::Persistence(message)
+                }
+                SnoozeCommitError::Action(_) => {
+                    SnoozeWakeCommitError::Persistence("invalid snooze wake state".into())
+                }
+            })
+    }
+
+    fn commit_snooze_wake_all(
+        &mut self,
+        expected_revision: u64,
+        confirmed: bool,
+    ) -> Result<Option<String>, SnoozeWakeCommitError> {
+        self.commit_snooze_clear(expected_revision, confirmed, false)
+    }
+
+    fn commit_snooze_reset(
+        &mut self,
+        expected_revision: u64,
+        confirmed: bool,
+    ) -> Result<Option<String>, SnoozeWakeCommitError> {
+        self.commit_snooze_clear(expected_revision, confirmed, true)
+    }
+
+    fn commit_snooze_clear(
+        &mut self,
+        expected_revision: u64,
+        confirmed: bool,
+        reset_store: bool,
+    ) -> Result<Option<String>, SnoozeWakeCommitError> {
+        let mut manager = self.workspace_snoozes.clone();
+        let previous_revision = manager.revision();
+        manager
+            .wake_workspace(None, expected_revision, confirmed, None)
+            .map_err(SnoozeWakeCommitError::Action)?;
+        let Some(mut store) = self.snooze_store.clone() else {
+            self.workspace_snoozes = manager;
+            return Ok(None);
+        };
+        if store.clear() && manager.revision() == previous_revision {
+            manager.bump_revision();
+        }
+        if reset_store {
+            store.reset_write_block();
+        }
+        self.commit_snooze_candidate_from_store_with_options(manager, store, reset_store)
+            .map_err(|error| match error {
+                SnoozeCommitError::Persistence(message) => {
+                    SnoozeWakeCommitError::Persistence(message)
+                }
+                SnoozeCommitError::Action(_) => {
+                    SnoozeWakeCommitError::Persistence("invalid snooze wake state".into())
+                }
+            })
+    }
+
+    fn commit_snooze_record_wake(
+        &mut self,
+        record_id: &str,
+        expected_revision: u64,
+    ) -> Result<Option<String>, SnoozeWakeCommitError> {
+        if self.workspace_snoozes.revision() != expected_revision {
+            return Err(SnoozeWakeCommitError::Action(
+                crate::server::workspace_snooze::WorkspaceWakeError::StaleRevision {
+                    expected: expected_revision,
+                    current: self.workspace_snoozes.revision(),
+                },
+            ));
+        }
+        let Some(store) = self.snooze_store.clone() else {
+            return Err(SnoozeWakeCommitError::Action(
+                crate::server::workspace_snooze::WorkspaceWakeError::NotFound,
+            ));
+        };
+        let Some(target) = store.live_target(record_id) else {
+            let mut candidate_store = store.clone();
+            if !candidate_store.remove_record(record_id) {
+                return Err(SnoozeWakeCommitError::Action(
+                    crate::server::workspace_snooze::WorkspaceWakeError::NotFound,
+                ));
+            }
+            let mut manager = self.workspace_snoozes.clone();
+            manager.bump_revision();
+            return self
+                .commit_snooze_candidate_from_store(manager, candidate_store)
+                .map_err(|error| match error {
+                    SnoozeCommitError::Persistence(message) => {
+                        SnoozeWakeCommitError::Persistence(message)
+                    }
+                    SnoozeCommitError::Action(_) => {
+                        SnoozeWakeCommitError::Persistence("invalid snooze wake state".into())
+                    }
+                });
+        };
+        let mut manager = self.workspace_snoozes.clone();
+        match target {
+            crate::server::snooze_store::LiveSnoozeTarget::Workspace(workspace_id) => {
+                let Some(record) = manager
+                    .state()
+                    .records
+                    .into_iter()
+                    .find(|record| record.workspace_id == workspace_id)
+                else {
+                    return Err(SnoozeWakeCommitError::Action(
+                        crate::server::workspace_snooze::WorkspaceWakeError::NotFound,
+                    ));
+                };
+                manager
+                    .wake_workspace(Some(&workspace_id), record.revision, false, None)
+                    .map_err(SnoozeWakeCommitError::Action)?;
+            }
+            crate::server::snooze_store::LiveSnoozeTarget::Project(project_key) => {
+                let Some(record) = manager
+                    .state()
+                    .project_records
+                    .into_iter()
+                    .find(|record| record.project_key == project_key)
+                else {
+                    return Err(SnoozeWakeCommitError::Action(
+                        crate::server::workspace_snooze::WorkspaceWakeError::NotFound,
+                    ));
+                };
+                manager
+                    .project_wake(&project_key, record.revision)
+                    .map_err(SnoozeWakeCommitError::Action)?;
+            }
+        }
+        let mut candidate_store = store;
+        candidate_store.remove_record(record_id);
+        self.commit_snooze_candidate_from_store(manager, candidate_store)
+            .map_err(|error| match error {
+                SnoozeCommitError::Persistence(message) => {
+                    SnoozeWakeCommitError::Persistence(message)
+                }
+                SnoozeCommitError::Action(_) => {
+                    SnoozeWakeCommitError::Persistence("invalid snooze wake state".into())
+                }
+            })
+    }
+
+    fn snooze_record_wake_error(
+        &self,
+        error: SnoozeWakeCommitError,
+    ) -> (String, String) {
+        match error {
+            SnoozeWakeCommitError::Action(
+                crate::server::workspace_snooze::WorkspaceWakeError::NotFound,
+            ) => ("not_found".into(), "snooze record not found".into()),
+            SnoozeWakeCommitError::Action(
+                crate::server::workspace_snooze::WorkspaceWakeError::StaleRevision {
+                    expected,
+                    current,
+                },
+            ) => (
+                "stale_revision".into(),
+                format!(
+                    "snooze state revision mismatch (expected {expected}, current {current})"
+                ),
+            ),
+            SnoozeWakeCommitError::Action(
+                crate::server::workspace_snooze::WorkspaceWakeError::StaleBoot {
+                    expected,
+                    current,
+                },
+            ) => (
+                "stale_boot".into(),
+                format!("snooze boot mismatch (expected {expected}, current {current})"),
+            ),
+            SnoozeWakeCommitError::Action(_) => {
+                ("wake_failed".into(), "snooze record wake was rejected".into())
+            }
+            SnoozeWakeCommitError::Persistence(message) => ("persistence_failed".into(), message),
+        }
+    }
+
+    fn snooze_reset_error(
+        &self,
+        error: SnoozeWakeCommitError,
+    ) -> (String, String) {
+        match error {
+            SnoozeWakeCommitError::Action(
+                crate::server::workspace_snooze::WorkspaceWakeError::StaleRevision {
+                    expected,
+                    current,
+                },
+            ) => (
+                "stale_revision".into(),
+                format!(
+                    "snooze state revision mismatch (expected {expected}, current {current})"
+                ),
+            ),
+            SnoozeWakeCommitError::Action(
+                crate::server::workspace_snooze::WorkspaceWakeError::UnconfirmedWakeAll,
+            ) => ("unconfirmed".into(), "reset requires confirmed: true".into()),
+            SnoozeWakeCommitError::Persistence(message) => ("persistence_failed".into(), message),
+            SnoozeWakeCommitError::Action(_) => {
+                ("reset_failed".into(), "snooze reset was rejected".into())
+            }
+        }
+    }
+
+    fn expire_snoozes(&mut self) -> bool {
+        let now_ms = crate::server::workspace_snooze::now_unix_ms();
+        let mut manager = self.workspace_snoozes.clone();
+        let live_changed = manager.expire_due(now_ms);
+        let Some(store) = self.snooze_store.clone() else {
+            if live_changed {
+                self.workspace_snoozes = manager;
+                self.broadcast_snooze_state();
+            }
+            return live_changed;
+        };
+        let mut store = store;
+        let store_changed = store.expire_due(now_ms);
+        if !live_changed && !store_changed {
+            return false;
+        }
+        if store_changed && !live_changed {
+            manager.bump_revision();
+        }
+        let mut staged = match store.staged(&manager.state(), &self.app.state.workspaces, now_ms) {
+            Ok(staged) => staged,
+            Err(error) => {
+                self.snooze_notice = Some(error);
+                self.workspace_snoozes = manager;
+                self.snooze_store = Some(store);
+                self.snooze_retry_deadline = Some(Instant::now() + Duration::from_secs(1));
+                return true;
+            }
+        };
+        if staged.retain_valid_live_records(&mut manager, &self.app.state.workspaces) {
+            staged = match staged.staged(&manager.state(), &self.app.state.workspaces, now_ms) {
+                Ok(staged) => staged,
+                Err(error) => {
+                    self.snooze_notice = Some(error);
+                    self.workspace_snoozes = manager;
+                    self.snooze_store = Some(staged);
+                    self.snooze_retry_deadline = Some(Instant::now() + Duration::from_secs(1));
+                    return true;
+                }
+            };
+        }
+        match staged.save() {
+            Ok(crate::server::snooze_store::SaveOutcome::Durable) => {
+                self.snooze_notice = None;
+                self.snooze_retry_deadline = None;
+            }
+            Ok(crate::server::snooze_store::SaveOutcome::CommittedWithWarning(warning)) => {
+                self.snooze_notice = Some(warning);
+                self.snooze_retry_deadline = Some(Instant::now() + Duration::from_secs(1));
+            }
+            Err(error) => {
+                self.snooze_notice = Some(format!("failed to persist snooze expiry: {error}"));
+                self.snooze_retry_deadline = Some(Instant::now() + Duration::from_secs(1));
+            }
+        }
+        self.workspace_snoozes = manager;
+        self.snooze_store = Some(staged);
+        self.broadcast_snooze_state();
+        true
+    }
+
+    fn retry_snooze_store(&mut self, now: Instant) -> bool {
+        if !self
+            .snooze_retry_deadline
+            .is_some_and(|deadline| now >= deadline)
+        {
+            return false;
+        }
+        let Some(store) = self.snooze_store.clone() else {
+            self.snooze_retry_deadline = None;
+            return false;
+        };
+        match store.save() {
+            Ok(crate::server::snooze_store::SaveOutcome::Durable) => {
+                self.snooze_notice = None;
+                self.snooze_retry_deadline = None;
+            }
+            Ok(crate::server::snooze_store::SaveOutcome::CommittedWithWarning(warning)) => {
+                self.snooze_notice = Some(warning);
+                self.snooze_retry_deadline = Some(now + Duration::from_secs(1));
+            }
+            Err(error) => {
+                self.snooze_notice = Some(format!("failed to persist snooze state: {error}"));
+                self.snooze_retry_deadline = Some(now + Duration::from_secs(1));
+            }
+        }
+        self.broadcast_snooze_state();
+        true
+    }
+
+    fn reconcile_snooze_membership_if_dirty(&mut self) -> bool {
+        if !self.app.state.session_dirty {
+            return false;
+        }
+        let Some(store) = self.snooze_store.clone() else {
+            return false;
+        };
+        let now_ms = crate::server::workspace_snooze::now_unix_ms();
+        let mut manager = self.workspace_snoozes.clone();
+        let manager_revision = manager.revision();
+        let mut staged = match store.staged(&manager.state(), &self.app.state.workspaces, now_ms) {
+            Ok(staged) => staged,
+            Err(error) => {
+                self.snooze_notice = Some(error);
+                self.snooze_retry_deadline = Some(Instant::now() + Duration::from_secs(1));
+                self.broadcast_snooze_state();
+                return true;
+            }
+        };
+        if staged.retain_valid_live_records(&mut manager, &self.app.state.workspaces) {
+            staged = match staged.staged(&manager.state(), &self.app.state.workspaces, now_ms) {
+                Ok(staged) => staged,
+                Err(error) => {
+                    self.snooze_notice = Some(error);
+                    self.workspace_snoozes = manager;
+                    self.snooze_store = Some(staged);
+                    self.snooze_retry_deadline = Some(Instant::now() + Duration::from_secs(1));
+                    self.broadcast_snooze_state();
+                    return true;
+                }
+            };
+        }
+        if store.same_document(&staged) && !staged.needs_save() {
+            self.workspace_snoozes = manager;
+            self.snooze_store = Some(staged);
+            if self.workspace_snoozes.revision() != manager_revision {
+                self.broadcast_snooze_state();
+                return true;
+            }
+            return false;
+        }
+        match staged.save() {
+            Ok(crate::server::snooze_store::SaveOutcome::Durable) => {
+                self.snooze_notice = None;
+                self.snooze_retry_deadline = None;
+            }
+            Ok(crate::server::snooze_store::SaveOutcome::CommittedWithWarning(warning)) => {
+                self.snooze_notice = Some(warning);
+                self.snooze_retry_deadline = Some(Instant::now() + Duration::from_secs(1));
+            }
+            Err(error) => {
+                self.snooze_notice = Some(format!("failed to persist snooze membership: {error}"));
+                self.snooze_retry_deadline = Some(Instant::now() + Duration::from_secs(1));
+            }
+        }
+        self.workspace_snoozes = manager;
+        self.snooze_store = Some(staged);
+        self.broadcast_snooze_state();
+        true
+    }
+
+    pub(crate) fn flush_snooze_store_for_handoff(&mut self) -> io::Result<()> {
+        let Some(store) = self.snooze_store.clone() else {
+            return Ok(());
+        };
+        let now_ms = crate::server::workspace_snooze::now_unix_ms();
+        let mut manager = self.workspace_snoozes.clone();
+        let live_changed = manager.expire_due(now_ms);
+        let mut candidate_store = store.clone();
+        let store_changed = candidate_store.expire_due(now_ms);
+        if store_changed && !live_changed {
+            manager.bump_revision();
+        }
+        let mut staged = candidate_store
+            .staged(&manager.state(), &self.app.state.workspaces, now_ms)
+            .map_err(io::Error::other)?;
+        if staged.retain_valid_live_records(&mut manager, &self.app.state.workspaces) {
+            staged = staged
+                .staged(&manager.state(), &self.app.state.workspaces, now_ms)
+                .map_err(io::Error::other)?;
+        }
+        self.app.checkpoint_session_for_snooze()?;
+        match staged.save()? {
+            crate::server::snooze_store::SaveOutcome::Durable => {
+                self.workspace_snoozes = manager;
+                self.snooze_store = Some(staged);
+                self.snooze_notice = None;
+                self.snooze_retry_deadline = None;
+                Ok(())
+            }
+            crate::server::snooze_store::SaveOutcome::CommittedWithWarning(warning) => {
+                self.workspace_snoozes = manager;
+                self.snooze_store = Some(staged);
+                self.snooze_notice = Some(warning.clone());
+                self.snooze_retry_deadline = Some(Instant::now() + Duration::from_secs(1));
+                Err(io::Error::other(warning))
+            }
+        }
+    }
+
+    pub(crate) fn send_snooze_state_to_client(&mut self, client_id: u64) -> bool {
+        let Some(msg) = self.make_snooze_state_message() else {
+            return false;
+        };
+        self.send_to_client(client_id, msg)
+    }
+
+    pub(crate) fn broadcast_snooze_state(&mut self) -> bool {
+        let Some(msg) = self.make_snooze_state_message() else {
+            return false;
+        };
+        let subscribers: Vec<u64> = self.snooze_subscribers.iter().copied().collect();
+        let mut any_sent = false;
+        for client_id in subscribers {
+            if self.send_to_client(client_id, msg.clone()) {
+                any_sent = true;
+            }
+        }
+        any_sent
     }
 
     fn shutdown_terminal_stream_clients(&mut self, terminal_id: &str, reason: String) {
@@ -2611,6 +3255,11 @@ impl HeadlessServer {
                 );
                 navigation_changed | geometry_changed
             }
+            ServerEvent::ClientShellSnoozeSubscribe { client_id } => {
+                self.snooze_subscribers.insert(client_id);
+                self.send_snooze_state_to_client(client_id);
+                false
+            }
             ServerEvent::ClientDetach { client_id } => {
                 info!(client_id, "client detached");
                 self.send_terminal_stream_detach_shutdown(client_id);
@@ -2974,6 +3623,495 @@ impl HeadlessServer {
                 let response = self.handle_client_window_title_api(msg.request.id.clone(), None);
                 let _ = msg.respond_to.send(response);
                 return true;
+            }
+            api::schema::Method::SnoozeList(_) => {
+                let state = self.snooze_state();
+                let response = serde_json::to_string(&api::schema::SuccessResponse {
+                    id: msg.request.id,
+                    result: api::schema::ResponseResult::WorkspaceSnooze { state },
+                })
+                .unwrap_or_default();
+                let _ = msg.respond_to.send(response);
+                return false;
+            }
+            api::schema::Method::SnoozeReset(params) => {
+                if params.boot_id != self.client_shell_boot_id {
+                    let response = serde_json::to_string(&api::schema::ErrorResponse {
+                        id: msg.request.id,
+                        error: api::schema::ErrorBody {
+                            code: "stale_boot".into(),
+                            message: "snooze reset targeted an earlier server boot".into(),
+                        },
+                    })
+                    .unwrap_or_default();
+                    let _ = msg.respond_to.send(response);
+                    return false;
+                }
+                match self.commit_snooze_reset(params.expected_revision, params.confirmed) {
+                    Ok(_) => {
+                        let state = self.snooze_state();
+                        self.broadcast_snooze_state();
+                        let response = serde_json::to_string(&api::schema::SuccessResponse {
+                            id: msg.request.id,
+                            result: api::schema::ResponseResult::WorkspaceWake { state },
+                        })
+                        .unwrap_or_default();
+                        let _ = msg.respond_to.send(response);
+                        return true;
+                    }
+                    Err(error) => {
+                        let (code, message) = self.snooze_reset_error(error);
+                        let response = serde_json::to_string(&api::schema::ErrorResponse {
+                            id: msg.request.id,
+                            error: api::schema::ErrorBody { code, message },
+                        })
+                        .unwrap_or_default();
+                        let _ = msg.respond_to.send(response);
+                        return false;
+                    }
+                }
+            }
+            api::schema::Method::ProjectSnooze(params) => {
+                if params.boot_id != self.client_shell_boot_id {
+                    let response = serde_json::to_string(&api::schema::ErrorResponse {
+                        id: msg.request.id,
+                        error: api::schema::ErrorBody {
+                            code: "stale_boot".into(),
+                            message: "project snooze targeted an earlier server boot".into(),
+                        },
+                    })
+                    .unwrap_or_default();
+                    let _ = msg.respond_to.send(response);
+                    return false;
+                }
+                let Some(canonical_id) = self.app.canonical_workspace_id(&params.workspace_id) else {
+                    let response = serde_json::to_string(&api::schema::ErrorResponse {
+                        id: msg.request.id,
+                        error: api::schema::ErrorBody {
+                            code: "not_found".into(),
+                            message: "workspace not found".into(),
+                        },
+                    })
+                    .unwrap_or_default();
+                    let _ = msg.respond_to.send(response);
+                    return false;
+                };
+                let valid_key = self
+                    .app
+                    .state
+                    .workspaces
+                    .iter()
+                    .find(|workspace| workspace.id == canonical_id)
+                    .and_then(|workspace| workspace.worktree_space())
+                    .is_some_and(|space| space.key == params.project_key);
+                if !valid_key {
+                    let response = serde_json::to_string(&api::schema::ErrorResponse {
+                        id: msg.request.id,
+                        error: api::schema::ErrorBody {
+                            code: "stale_target".into(),
+                            message: "workspace no longer belongs to this project".into(),
+                        },
+                    })
+                    .unwrap_or_default();
+                    let _ = msg.respond_to.send(response);
+                    return false;
+                }
+                return match self.commit_snooze_change(|manager| {
+                    manager
+                        .project_snooze(
+                            params.project_key.clone(),
+                            params.duration_seconds,
+                            params.deadline_unix_ms,
+                            crate::server::workspace_snooze::now_unix_ms(),
+                        )
+                        .map(|_| ())
+                }) {
+                    Ok(_) => {
+                        let state = self.snooze_state();
+                        self.broadcast_snooze_state();
+                        let response = serde_json::to_string(&api::schema::SuccessResponse {
+                            id: msg.request.id,
+                            result: api::schema::ResponseResult::WorkspaceSnooze { state },
+                        })
+                        .unwrap_or_default();
+                        let _ = msg.respond_to.send(response);
+                        true
+                    }
+                    Err(error) => {
+                        let (code, message) = self.snooze_action_error(error);
+                        let response = serde_json::to_string(&api::schema::ErrorResponse {
+                            id: msg.request.id,
+                            error: api::schema::ErrorBody {
+                                code: code.into(),
+                                message: message.into(),
+                            },
+                        })
+                        .unwrap_or_default();
+                        let _ = msg.respond_to.send(response);
+                        false
+                    }
+                }
+            }
+            api::schema::Method::SnoozeRecordWake(params) => {
+                if params.boot_id != self.client_shell_boot_id {
+                    let response = serde_json::to_string(&api::schema::ErrorResponse {
+                        id: msg.request.id,
+                        error: api::schema::ErrorBody {
+                            code: "stale_boot".into(),
+                            message: "snooze record wake targeted an earlier server boot".into(),
+                        },
+                    })
+                    .unwrap_or_default();
+                    let _ = msg.respond_to.send(response);
+                    return false;
+                }
+                return match self.commit_snooze_record_wake(&params.record_id, params.expected_revision) {
+                    Ok(_) => {
+                        let state = self.snooze_state();
+                        self.broadcast_snooze_state();
+                        let response = serde_json::to_string(&api::schema::SuccessResponse {
+                            id: msg.request.id,
+                            result: api::schema::ResponseResult::WorkspaceWake { state },
+                        })
+                        .unwrap_or_default();
+                        let _ = msg.respond_to.send(response);
+                        true
+                    }
+                    Err(error) => {
+                        let (code, message) = self.snooze_record_wake_error(error);
+                        let response = serde_json::to_string(&api::schema::ErrorResponse {
+                            id: msg.request.id,
+                            error: api::schema::ErrorBody {
+                                code,
+                                message,
+                            },
+                        })
+                        .unwrap_or_default();
+                        let _ = msg.respond_to.send(response);
+                        false
+                    }
+                }
+            }
+            api::schema::Method::ProjectWake(params) => {
+                if params.boot_id != self.client_shell_boot_id {
+                    let response = serde_json::to_string(&api::schema::ErrorResponse {
+                        id: msg.request.id,
+                        error: api::schema::ErrorBody {
+                            code: "stale_boot".into(),
+                            message: "project wake targeted an earlier server boot".into(),
+                        },
+                    })
+                    .unwrap_or_default();
+                    let _ = msg.respond_to.send(response);
+                    return false;
+                }
+                return match self.commit_snooze_wake(|manager| {
+                    manager.project_wake(&params.project_key, params.expected_revision)
+                }) {
+                    Ok(_) => {
+                        let state = self.snooze_state();
+                        self.broadcast_snooze_state();
+                        let response = serde_json::to_string(&api::schema::SuccessResponse {
+                            id: msg.request.id,
+                            result: api::schema::ResponseResult::WorkspaceWake { state },
+                        })
+                        .unwrap_or_default();
+                        let _ = msg.respond_to.send(response);
+                        true
+                    }
+                    Err(SnoozeWakeCommitError::Action(
+                        crate::server::workspace_snooze::WorkspaceWakeError::NotFound,
+                    )) => {
+                        let response = serde_json::to_string(&api::schema::ErrorResponse {
+                            id: msg.request.id,
+                            error: api::schema::ErrorBody {
+                                code: "not_found".into(),
+                                message: "project snooze record not found".into(),
+                            },
+                        })
+                        .unwrap_or_default();
+                        let _ = msg.respond_to.send(response);
+                        false
+                    }
+                    Err(SnoozeWakeCommitError::Action(
+                        crate::server::workspace_snooze::WorkspaceWakeError::StaleRevision {
+                        expected,
+                        current,
+                        },
+                    )) => {
+                        let response = serde_json::to_string(&api::schema::ErrorResponse {
+                            id: msg.request.id,
+                            error: api::schema::ErrorBody {
+                                code: "stale_revision".into(),
+                                message: format!("project snooze record revision mismatch (expected {expected}, current {current})"),
+                            },
+                        })
+                        .unwrap_or_default();
+                        let _ = msg.respond_to.send(response);
+                        false
+                    }
+                    Err(SnoozeWakeCommitError::Persistence(message)) => {
+                        let response = serde_json::to_string(&api::schema::ErrorResponse {
+                            id: msg.request.id,
+                            error: api::schema::ErrorBody {
+                                code: "persistence_failed".into(),
+                                message,
+                            },
+                        })
+                        .unwrap_or_default();
+                        let _ = msg.respond_to.send(response);
+                        false
+                    }
+                    Err(SnoozeWakeCommitError::Action(_)) => false,
+                }
+            }
+            api::schema::Method::WorkspaceSnooze(params) => {
+                if params.boot_id != self.client_shell_boot_id {
+                    let response = serde_json::to_string(&api::schema::ErrorResponse {
+                        id: msg.request.id,
+                        error: api::schema::ErrorBody {
+                            code: "stale_boot".into(),
+                            message: "workspace snooze targeted an earlier server boot".into(),
+                        },
+                    })
+                    .unwrap_or_default();
+                    let _ = msg.respond_to.send(response);
+                    return false;
+                }
+                let Some(canonical_id) = self.app.canonical_workspace_id(&params.workspace_id) else {
+                    let response = serde_json::to_string(&api::schema::ErrorResponse {
+                        id: msg.request.id,
+                        error: api::schema::ErrorBody {
+                            code: "not_found".into(),
+                            message: "workspace not found".into(),
+                        },
+                    })
+                    .unwrap_or_default();
+                    let _ = msg.respond_to.send(response);
+                    return false;
+                };
+                match self.commit_snooze_change(|manager| {
+                    manager
+                        .snooze(
+                            canonical_id,
+                            params.duration_seconds,
+                            params.deadline_unix_ms,
+                            crate::server::workspace_snooze::now_unix_ms(),
+                        )
+                        .map(|_| ())
+                }) {
+                    Ok(_) => {
+                        let state = self.snooze_state();
+                        self.broadcast_snooze_state();
+                        let response = serde_json::to_string(&api::schema::SuccessResponse {
+                            id: msg.request.id,
+                            result: api::schema::ResponseResult::WorkspaceSnooze { state },
+                        })
+                        .unwrap_or_default();
+                        let _ = msg.respond_to.send(response);
+                        return true;
+                    }
+                    Err(SnoozeCommitError::Action(
+                        crate::server::workspace_snooze::WorkspaceSnoozeError::InvalidDuration,
+                    )) => {
+                        let response = serde_json::to_string(&api::schema::ErrorResponse {
+                            id: msg.request.id,
+                            error: api::schema::ErrorBody {
+                                code: "invalid_duration".into(),
+                                message: "invalid snooze duration (must be between 1 second and 30 days)".into(),
+                            },
+                        })
+                        .unwrap_or_default();
+                        let _ = msg.respond_to.send(response);
+                        return false;
+                    }
+                    Err(SnoozeCommitError::Action(
+                        crate::server::workspace_snooze::WorkspaceSnoozeError::InvalidDeadline,
+                    )) => {
+                        let response = serde_json::to_string(&api::schema::ErrorResponse {
+                            id: msg.request.id,
+                            error: api::schema::ErrorBody {
+                                code: "invalid_deadline".into(),
+                                message: "invalid snooze deadline (must be in the future, up to 30 days)".into(),
+                            },
+                        })
+                        .unwrap_or_default();
+                        let _ = msg.respond_to.send(response);
+                        return false;
+                    }
+                    Err(SnoozeCommitError::Persistence(message)) => {
+                        let response = serde_json::to_string(&api::schema::ErrorResponse {
+                            id: msg.request.id,
+                            error: api::schema::ErrorBody {
+                                code: "persistence_failed".into(),
+                                message,
+                            },
+                        })
+                        .unwrap_or_default();
+                        let _ = msg.respond_to.send(response);
+                        return false;
+                    }
+                }
+            }
+            api::schema::Method::WorkspaceWake(params) => {
+                if params.boot_id != self.client_shell_boot_id {
+                    let response = serde_json::to_string(&api::schema::ErrorResponse {
+                        id: msg.request.id,
+                        error: api::schema::ErrorBody {
+                            code: "stale_boot".into(),
+                            message: "workspace wake targeted an earlier server boot".into(),
+                        },
+                    })
+                    .unwrap_or_default();
+                    let _ = msg.respond_to.send(response);
+                    return false;
+                }
+                let canonical_target = match params.workspace_id.as_deref() {
+                    Some(id) => match self.app.canonical_workspace_id(id) {
+                        Some(id) => Some(id),
+                        None if self.workspace_snoozes.is_snoozed(id) => Some(id.to_owned()),
+                        None => {
+                            let response = serde_json::to_string(&api::schema::ErrorResponse {
+                                id: msg.request.id,
+                                error: api::schema::ErrorBody {
+                                    code: "not_found".into(),
+                                    message: "workspace not found".into(),
+                                },
+                            })
+                            .unwrap_or_default();
+                            let _ = msg.respond_to.send(response);
+                            return false;
+                        }
+                    },
+                    None => None,
+                };
+                let project_key = canonical_target.as_deref().and_then(|id| {
+                    self.app
+                        .state
+                        .workspaces
+                        .iter()
+                        .find(|workspace| workspace.id == id)
+                        .and_then(|workspace| workspace.worktree_space())
+                        .map(|space| space.key.clone())
+                });
+                let wake_result = if params.workspace_id.is_none() {
+                    self.commit_snooze_wake_all(params.expected_revision, params.confirmed)
+                } else {
+                    self.commit_snooze_wake(|manager| {
+                        manager.wake_workspace(
+                            canonical_target.as_deref(),
+                            params.expected_revision,
+                            params.confirmed,
+                            project_key.as_deref(),
+                        )
+                        .map(|_| ())
+                    })
+                };
+                match wake_result {
+                    Ok(_) => {
+                        let state = self.snooze_state();
+                        self.broadcast_snooze_state();
+                        let response = serde_json::to_string(&api::schema::SuccessResponse {
+                            id: msg.request.id,
+                            result: api::schema::ResponseResult::WorkspaceWake { state },
+                        })
+                        .unwrap_or_default();
+                        let _ = msg.respond_to.send(response);
+                        return true;
+                    }
+                    Err(SnoozeWakeCommitError::Action(
+                        crate::server::workspace_snooze::WorkspaceWakeError::NotFound,
+                    )) => {
+                        let response = serde_json::to_string(&api::schema::ErrorResponse {
+                            id: msg.request.id,
+                            error: api::schema::ErrorBody {
+                                code: "not_found".into(),
+                                message: "workspace snooze record not found".into(),
+                            },
+                        })
+                        .unwrap_or_default();
+                        let _ = msg.respond_to.send(response);
+                        return false;
+                    }
+                    Err(SnoozeWakeCommitError::Action(
+                        crate::server::workspace_snooze::WorkspaceWakeError::CoveredByProject,
+                    )) => {
+                        let response = serde_json::to_string(&api::schema::ErrorResponse {
+                            id: msg.request.id,
+                            error: api::schema::ErrorBody {
+                                code: "covered_by_project".into(),
+                                message: "still snoozed by project".into(),
+                            },
+                        })
+                        .unwrap_or_default();
+                        let _ = msg.respond_to.send(response);
+                        return false;
+                    }
+                    Err(SnoozeWakeCommitError::Action(
+                        crate::server::workspace_snooze::WorkspaceWakeError::StaleRevision {
+                        expected,
+                        current,
+                    },
+                    )) => {
+                        let response = serde_json::to_string(&api::schema::ErrorResponse {
+                            id: msg.request.id,
+                            error: api::schema::ErrorBody {
+                                code: "stale_revision".into(),
+                                message: format!(
+                                    "workspace snooze record revision mismatch (expected {expected}, current {current})"
+                                ),
+                            },
+                        })
+                        .unwrap_or_default();
+                        let _ = msg.respond_to.send(response);
+                        return false;
+                    }
+                    Err(SnoozeWakeCommitError::Action(
+                        crate::server::workspace_snooze::WorkspaceWakeError::UnconfirmedWakeAll,
+                    )) => {
+                        let response = serde_json::to_string(&api::schema::ErrorResponse {
+                            id: msg.request.id,
+                            error: api::schema::ErrorBody {
+                                code: "unconfirmed".into(),
+                                message: "wake all requires confirmed: true".into(),
+                            },
+                        })
+                        .unwrap_or_default();
+                        let _ = msg.respond_to.send(response);
+                        return false;
+                    }
+                    Err(SnoozeWakeCommitError::Action(
+                        crate::server::workspace_snooze::WorkspaceWakeError::StaleBoot {
+                        expected,
+                        current,
+                    },
+                    )) => {
+                        let response = serde_json::to_string(&api::schema::ErrorResponse {
+                            id: msg.request.id,
+                            error: api::schema::ErrorBody {
+                                code: "stale_boot".into(),
+                                message: format!(
+                                    "workspace snooze boot mismatch (expected {expected}, current {current})"
+                                ),
+                            },
+                        })
+                        .unwrap_or_default();
+                        let _ = msg.respond_to.send(response);
+                        return false;
+                    }
+                    Err(SnoozeWakeCommitError::Persistence(message)) => {
+                        let response = serde_json::to_string(&api::schema::ErrorResponse {
+                            id: msg.request.id,
+                            error: api::schema::ErrorBody {
+                                code: "persistence_failed".into(),
+                                message,
+                            },
+                        })
+                        .unwrap_or_default();
+                        let _ = msg.respond_to.send(response);
+                        return false;
+                    }
+                }
             }
             _ => {}
         }
@@ -3377,6 +4515,10 @@ impl HeadlessServer {
                 .app
                 .start_pending_agent_resumes(self.app.pending_agent_resume_due(now));
         }
+
+        changed |= self.retry_snooze_store(now);
+        changed |= self.expire_snoozes();
+
         changed
     }
 }

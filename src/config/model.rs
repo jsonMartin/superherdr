@@ -353,6 +353,18 @@ pub struct KeysConfig {
     pub workspace_picker: BindingConfig,
     /// Open the session navigator. Default: "prefix+g"
     pub goto: BindingConfig,
+    /// Focus the selected project locally. Unset by default.
+    pub focus_project: BindingConfig,
+    /// Clear local project focus. Unset by default.
+    pub clear_project_focus: BindingConfig,
+    /// Open the workspace snooze picker. Unset by default.
+    pub snooze_workspace: BindingConfig,
+    /// Open the project snooze picker. Unset by default.
+    pub snooze_project: BindingConfig,
+    /// Open snoozed-item recovery. Unset by default.
+    pub show_snoozed: BindingConfig,
+    /// Reset local Focus and all shared snoozes. Unset by default.
+    pub reset_focus_snooze: BindingConfig,
     /// Move workspace selection up in navigate mode. Default: "up".
     pub navigate_workspace_up: BindingConfig,
     /// Move workspace selection down in navigate mode. Default: "down".
@@ -484,6 +496,18 @@ pub(crate) struct KeysConfigOverlay {
     workspace_picker: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     goto: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    focus_project: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    clear_project_focus: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    snooze_workspace: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    snooze_project: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    show_snoozed: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reset_focus_snooze: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     navigate_workspace_up: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -620,6 +644,12 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(close_workspace);
         apply_field!(workspace_picker);
         apply_field!(goto);
+        apply_field!(focus_project);
+        apply_field!(clear_project_focus);
+        apply_field!(snooze_workspace);
+        apply_field!(snooze_project);
+        apply_field!(show_snoozed);
+        apply_field!(reset_focus_snooze);
         apply_field!(navigate_workspace_up);
         apply_field!(navigate_workspace_down);
         apply_field!(navigate_pane_left);
@@ -724,6 +754,12 @@ impl KeysConfig {
         copy_effective_action_field!(close_workspace, keybinds.close_workspace);
         copy_effective_action_field!(workspace_picker, keybinds.workspace_picker);
         copy_effective_action_field!(goto, keybinds.goto);
+        copy_effective_action_field!(focus_project, keybinds.focus_project);
+        copy_effective_action_field!(clear_project_focus, keybinds.clear_project_focus);
+        copy_effective_action_field!(snooze_workspace, keybinds.snooze_workspace);
+        copy_effective_action_field!(snooze_project, keybinds.snooze_project);
+        copy_effective_action_field!(show_snoozed, keybinds.show_snoozed);
+        copy_effective_action_field!(reset_focus_snooze, keybinds.reset_focus_snooze);
         copy_effective_action_field!(navigate_workspace_up, keybinds.navigate.workspace_up);
         copy_effective_action_field!(navigate_workspace_down, keybinds.navigate.workspace_down);
         copy_effective_action_field!(navigate_pane_left, keybinds.navigate.pane_left);
@@ -1092,6 +1128,12 @@ impl Default for KeysConfig {
             close_workspace: BindingConfig::one("prefix+shift+d"),
             workspace_picker: BindingConfig::one("prefix+w"),
             goto: BindingConfig::one("prefix+g"),
+            focus_project: BindingConfig::empty(),
+            clear_project_focus: BindingConfig::empty(),
+            snooze_workspace: BindingConfig::empty(),
+            snooze_project: BindingConfig::empty(),
+            show_snoozed: BindingConfig::empty(),
+            reset_focus_snooze: BindingConfig::empty(),
             navigate_workspace_up: BindingConfig::one("up"),
             navigate_workspace_down: BindingConfig::one("down"),
             navigate_pane_left: BindingConfig::one("h"),

@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::protocol::ClientShellAgent;
+
 pub(super) const MIN_TAB_WIDTH: u16 = 8;
 pub(super) const NEW_TAB_WIDTH: u16 = 3;
 pub(super) const WORKSPACE_HEADER_ROWS: u16 = 2;
@@ -115,6 +117,7 @@ pub(super) struct ClientShellLayout {
     pub tab_bar: Rect,
     pub mobile_header: Rect,
     pub pane_surface: Rect,
+    pub recovery_bar: Rect,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -169,11 +172,24 @@ pub(super) struct ShellHitMap {
     pub(super) mobile_max_scroll: usize,
     pub(super) global_launcher: Rect,
     pub(super) notification_toast: Rect,
+    pub(super) empty_recovery: Rect,
+    pub(super) empty_clear_focus: Rect,
+    pub(super) feature_clear_focus: Rect,
+    pub(super) feature_show_snoozed: Rect,
     pub(super) global_menu_rows: Vec<(Rect, usize)>,
     pub(super) context_menu_rows: Vec<(Rect, usize)>,
     pub(super) overlay_primary: Rect,
     pub(super) overlay_clear: Rect,
     pub(super) overlay_cancel: Rect,
+    pub(super) snooze_popup: Rect,
+    pub(super) snooze_choice_rows: Vec<(Rect, usize)>,
+    pub(super) snooze_management_popup: Rect,
+    pub(super) snooze_management_rows: Vec<(Rect, usize)>,
+    pub(super) snooze_management_wake_all: Rect,
+    pub(super) snooze_management_wake_parent: Rect,
+    pub(super) snooze_management_reset: Rect,
+    pub(super) snooze_management_previous: Rect,
+    pub(super) snooze_management_next: Rect,
     pub(super) navigator_popup: Rect,
     pub(super) navigator_search: Rect,
     pub(super) navigator_rows: Vec<(Rect, ClientNavigatorTarget)>,
@@ -334,12 +350,14 @@ pub(super) enum ClientShellOverlayKind {
     ReleaseNotes,
     Rename,
     ConfirmClose,
+    Snooze,
     Help,
     Navigator,
     WorktreeCreate,
     WorktreeOpen,
     WorktreeRemove,
     ContextMenu,
+    SnoozeManagement,
     GlobalMenu,
     Settings,
 }
@@ -581,16 +599,35 @@ pub(super) enum ClientContextMenuAction {
     Zoom,
     ToggleRightClickPassthrough,
     ClosePane,
+    FocusProject,
+    FocusWorkspace,
+    ClearFocus,
+    Snooze30Minutes,
+    SnoozeProject30Minutes,
+    WakeWorkspace,
+    WakeProject,
+    ShowSnoozedRecords,
+    WakeSharedSnoozes,
+    ResetFocusSnooze,
 }
 
 #[derive(Debug)]
 pub(super) enum ClientContextMenuTarget {
     Workspace {
+        endpoint_id: ClientEndpointId,
+        boot_id: String,
         workspace_id: String,
+        is_active_endpoint: bool,
+        worktree_key: Option<String>,
+        expected_revision: u64,
+        workspace_record_revision: Option<u64>,
+        project_record_revision: Option<u64>,
+        has_snoozed_records: bool,
         is_git: bool,
         is_linked_worktree: bool,
         has_worktree_children: bool,
         collapsed: bool,
+        can_clear_focus: bool,
     },
     Tab {
         tab_id: String,
@@ -613,8 +650,59 @@ pub(super) struct ClientContextMenuOverlay {
     pub(super) highlighted: usize,
 }
 
+#[derive(Debug, Clone)]
+pub(super) enum ClientSnoozeManagementTarget {
+    Workspace {
+        workspace_id: String,
+        revision: u64,
+    },
+    Project {
+        project_key: String,
+        revision: u64,
+    },
+    Persisted {
+        record_id: String,
+        deadline_unix_ms: i64,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct ClientSnoozeManagementRecord {
+    pub(super) target: ClientSnoozeManagementTarget,
+    pub(super) label: String,
+    pub(super) scope: String,
+    pub(super) project_label: Option<String>,
+    pub(super) deadline_unix_ms: i64,
+    pub(super) available: bool,
+    pub(super) outside_focus: bool,
+    pub(super) covered_by_project: bool,
+    pub(super) project_key: Option<String>,
+    pub(super) project_revision: Option<u64>,
+    pub(super) workspace_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(super) enum ClientSnoozeManagementFocusTarget {
+    Workspace(String),
+    Project(String),
+}
+
+#[derive(Debug)]
+pub(super) struct ClientSnoozeManagementOverlay {
+    pub(super) endpoint_id: ClientEndpointId,
+    pub(super) boot_id: String,
+    pub(super) endpoint_label: String,
+    pub(super) expected_revision: u64,
+    pub(super) records: Vec<ClientSnoozeManagementRecord>,
+    pub(super) selected: usize,
+    pub(super) scroll: usize,
+    pub(super) notice: Option<String>,
+    pub(super) restriction: Option<String>,
+    pub(super) parent_action: Option<ClientSnoozeManagementRecord>,
+}
+
 pub(super) struct ClientContextMenuItem {
-    pub(super) label: &'static str,
+    pub(super) label: String,
     pub(super) action: ClientContextMenuAction,
 }
 
@@ -626,18 +714,49 @@ pub(super) struct ClientConfirmCloseOverlay {
 }
 
 #[derive(Debug)]
+pub(super) struct ClientConfirmWakeSharedSnoozesOverlay {
+    pub(super) endpoint_id: ClientEndpointId,
+    pub(super) boot_id: String,
+    pub(super) expected_revision: u64,
+    pub(super) count: usize,
+    pub(super) purpose: ClientWakeConfirmationPurpose,
+    pub(super) endpoint_label: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ClientWakeConfirmationPurpose {
+    WakeSharedSnoozes,
+    ResetFocusSnooze,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct ClientSnoozeOverlay {
+    pub(super) endpoint_id: ClientEndpointId,
+    pub(super) boot_id: String,
+    pub(super) workspace_id: String,
+    pub(super) target_label: String,
+    pub(super) project_key: Option<String>,
+    pub(super) project_label: Option<String>,
+    pub(super) choices: Vec<super::snooze_presets::SnoozeChoice>,
+    pub(super) selected: usize,
+}
+
+#[derive(Debug)]
 pub(super) enum ClientShellOverlay {
     Onboarding,
     ProductAnnouncement(crate::app::state::ProductAnnouncementState),
     ReleaseNotes(crate::app::state::ReleaseNotesState),
     Rename(ClientRenameOverlay),
     ConfirmClose(ClientConfirmCloseOverlay),
+    ConfirmWakeSharedSnoozes(ClientConfirmWakeSharedSnoozesOverlay),
+    Snooze(ClientSnoozeOverlay),
     Help(ClientHelpOverlay),
     Navigator(ClientNavigatorOverlay),
     WorktreeCreate(ClientWorktreeCreateOverlay),
     WorktreeOpen(ClientWorktreeOpenOverlay),
     WorktreeRemove(ClientWorktreeRemoveOverlay),
     ContextMenu(ClientContextMenuOverlay),
+    SnoozeManagement(ClientSnoozeManagementOverlay),
     GlobalMenu(ClientGlobalMenuOverlay),
     Settings(ClientSettingsOverlay),
 }
@@ -650,12 +769,15 @@ impl ClientShellOverlay {
             Self::ReleaseNotes(_) => ClientShellOverlayKind::ReleaseNotes,
             Self::Rename(_) => ClientShellOverlayKind::Rename,
             Self::ConfirmClose(_) => ClientShellOverlayKind::ConfirmClose,
+            Self::ConfirmWakeSharedSnoozes(_) => ClientShellOverlayKind::ConfirmClose,
+            Self::Snooze(_) => ClientShellOverlayKind::Snooze,
             Self::Help(_) => ClientShellOverlayKind::Help,
             Self::Navigator(_) => ClientShellOverlayKind::Navigator,
             Self::WorktreeCreate(_) => ClientShellOverlayKind::WorktreeCreate,
             Self::WorktreeOpen(_) => ClientShellOverlayKind::WorktreeOpen,
             Self::WorktreeRemove(_) => ClientShellOverlayKind::WorktreeRemove,
             Self::ContextMenu(_) => ClientShellOverlayKind::ContextMenu,
+            Self::SnoozeManagement(_) => ClientShellOverlayKind::SnoozeManagement,
             Self::GlobalMenu(_) => ClientShellOverlayKind::GlobalMenu,
             Self::Settings(_) => ClientShellOverlayKind::Settings,
         }
@@ -665,6 +787,20 @@ impl ClientShellOverlay {
 #[derive(Debug)]
 pub(super) enum PendingEndpointKind {
     Generic,
+    SharedSnooze {
+        endpoint_id: ClientEndpointId,
+    },
+    SnoozeReset {
+        endpoint_id: ClientEndpointId,
+        captured_focus: Option<ClientFocusScope>,
+    },
+    SnoozeManagementWake {
+        endpoint_id: ClientEndpointId,
+        label: String,
+        project_key: Option<String>,
+        covered_by_project: bool,
+        focus_target: Option<ClientSnoozeManagementFocusTarget>,
+    },
     ProductAnnouncementDismiss {
         version: String,
         id: String,
@@ -971,6 +1107,9 @@ pub(crate) struct ClientShellState {
     pub(super) config_diagnostic: Option<String>,
     pub(super) endpoint_error: Option<String>,
     pub(super) dismissed_product_announcement: Option<(String, String)>,
+    pub(crate) focus_scope: Option<ClientFocusScope>,
+    pub(crate) snooze_state: Option<crate::api::schema::WorkspaceSnoozeState>,
+    pub(crate) empty_presentation: bool,
 }
 
 pub(super) fn product_announcement_state(
@@ -998,8 +1137,8 @@ pub(super) fn release_notes_state(
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct WorkspaceEntry {
-    pub(super) index: usize,
+pub(crate) struct WorkspaceEntry {
+    pub(crate) index: usize,
     pub(super) indented: bool,
     pub(super) last_child: bool,
 }
@@ -1114,6 +1253,9 @@ impl ClientShellState {
             local_config_diagnostic,
             endpoint_error: None,
             dismissed_product_announcement: None,
+            focus_scope: None,
+            snooze_state: None,
+            empty_presentation: false,
         }
     }
 
@@ -1141,14 +1283,230 @@ impl ClientShellState {
             .is_some_and(|(cols, rows)| !self.layout(cols, rows).mobile_header.is_empty())
     }
 
-    pub(super) fn navigation_workspace_entries(
+    pub(crate) fn navigation_workspace_entries(
         &self,
         snapshot: &ClientShellSnapshot,
     ) -> Vec<WorkspaceEntry> {
-        if self.mobile_layout_active() {
-            render::workspace_entries(snapshot, &HashSet::new())
+        let collapsed = if self.mobile_layout_active() {
+            &HashSet::new()
         } else {
-            render::workspace_entries(snapshot, &self.collapsed_groups)
+            &self.collapsed_groups
+        };
+        render::sidebar::workspace_entries_with_filter(snapshot, collapsed, |ws| {
+            self.is_workspace_visible(ws)
+        })
+    }
+
+    pub(crate) fn is_workspace_visible(&self, workspace: &ClientShellWorkspace) -> bool {
+        let boot_id = self.snapshot.as_deref().map(|s| s.boot_id.as_str());
+        workspace_is_visible(
+            self.focus_scope.as_ref(),
+            self.snooze_state.as_ref(),
+            &self.active_endpoint_id,
+            boot_id,
+            workspace,
+        )
+    }
+
+    pub(crate) fn is_workspace_id_visible(&self, workspace_id: &str) -> bool {
+        let Some(snapshot) = self.snapshot.as_deref() else {
+            return false;
+        };
+        let Some(workspace) = snapshot
+            .workspaces
+            .iter()
+            .find(|ws| ws.workspace_id == workspace_id)
+        else {
+            return false;
+        };
+        self.is_workspace_visible(workspace)
+    }
+
+    pub(crate) fn commit_explicit_workspace_focus(&mut self, workspace_id: &str) -> bool {
+        let selected =
+            self.snapshot.as_deref().is_some_and(|snapshot| {
+                snapshot.focused_workspace_id.as_deref() == Some(workspace_id)
+            }) && self.is_workspace_id_visible(workspace_id);
+        if selected {
+            self.empty_presentation = false;
+        }
+        selected
+    }
+
+    pub(crate) fn is_agent_visible(&self, agent: &ClientShellAgent) -> bool {
+        let Some(snapshot) = self.snapshot.as_deref() else {
+            return false;
+        };
+        let boot_id = Some(snapshot.boot_id.as_str());
+        agent_is_visible(
+            self.focus_scope.as_ref(),
+            self.snooze_state.as_ref(),
+            &self.active_endpoint_id,
+            boot_id,
+            agent,
+            &snapshot.workspaces,
+        )
+    }
+
+    pub(crate) fn set_snooze_state(
+        &mut self,
+        snooze_state: crate::api::schema::WorkspaceSnoozeState,
+    ) -> Vec<ClientShellAction> {
+        let active_endpoint_id = self.active_endpoint_id.clone();
+        let stale_active_state = self.snooze_state.as_ref().is_some_and(|current| {
+            current.boot_id == snooze_state.boot_id && current.revision > snooze_state.revision
+        });
+        let stale_endpoint_state = self
+            .endpoints
+            .iter()
+            .find(|endpoint| &endpoint.endpoint_id == &active_endpoint_id)
+            .and_then(|endpoint| endpoint.snooze_state.as_ref())
+            .is_some_and(|current| {
+                current.boot_id == snooze_state.boot_id && current.revision > snooze_state.revision
+            });
+        if stale_active_state || stale_endpoint_state {
+            return Vec::new();
+        }
+        self.snooze_state = Some(snooze_state.clone());
+        if let Some(endpoint) = self
+            .endpoints
+            .iter_mut()
+            .find(|endpoint| &endpoint.endpoint_id == &active_endpoint_id)
+        {
+            endpoint.snooze_state = Some(snooze_state);
+        }
+        self.reconcile_active_workspace_visibility(false)
+    }
+
+    pub(crate) fn set_focus_scope(
+        &mut self,
+        scope: Option<ClientFocusScope>,
+    ) -> Vec<ClientShellAction> {
+        self.focus_scope = scope.clone();
+        for endpoint in &mut self.endpoints {
+            // Keep the qualified scope on every projection. A missing scope means unrestricted;
+            // a scope for another endpoint must still reject this endpoint's rows.
+            endpoint.focus_scope = scope.clone();
+        }
+        self.reconcile_active_workspace_visibility(true)
+    }
+
+    pub(crate) fn clear_focus_scope(&mut self) -> Vec<ClientShellAction> {
+        self.set_focus_scope(None)
+    }
+
+    pub(crate) fn set_endpoint_snooze_state(
+        &mut self,
+        endpoint_id: &ClientEndpointId,
+        snooze_state: crate::api::schema::WorkspaceSnoozeState,
+    ) -> Vec<ClientShellAction> {
+        let endpoint_is_active = &self.active_endpoint_id == endpoint_id;
+        let stale_endpoint_state = self
+            .endpoints
+            .iter()
+            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+            .and_then(|endpoint| endpoint.snooze_state.as_ref())
+            .is_some_and(|current| {
+                current.boot_id == snooze_state.boot_id && current.revision > snooze_state.revision
+            });
+        let stale_active_state = endpoint_is_active
+            && self.snooze_state.as_ref().is_some_and(|current| {
+                current.boot_id == snooze_state.boot_id && current.revision > snooze_state.revision
+            });
+        if stale_endpoint_state || stale_active_state {
+            return Vec::new();
+        }
+        if endpoint_is_active {
+            self.set_snooze_state(snooze_state)
+        } else {
+            if let Some(endpoint) = self
+                .endpoints
+                .iter_mut()
+                .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+            {
+                endpoint.snooze_state = Some(snooze_state);
+            }
+            Vec::new()
+        }
+    }
+
+    pub(crate) fn clear_endpoint_snooze_state(
+        &mut self,
+        endpoint_id: &ClientEndpointId,
+    ) -> Vec<ClientShellAction> {
+        if let Some(endpoint) = self
+            .endpoints
+            .iter_mut()
+            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+        {
+            endpoint.snooze_state = None;
+        }
+        if &self.active_endpoint_id == endpoint_id {
+            self.snooze_state = None;
+            self.reconcile_active_workspace_visibility(false)
+        } else {
+            Vec::new()
+        }
+    }
+
+    pub(crate) fn reconcile_active_workspace_visibility(
+        &mut self,
+        explicit_selection: bool,
+    ) -> Vec<ClientShellAction> {
+        let Some(snapshot) = self.snapshot.as_deref() else {
+            return Vec::new();
+        };
+        let active_ws = snapshot.workspaces.iter().find(|ws| ws.focused);
+        let active_is_visible = active_ws.is_some_and(|ws| self.is_workspace_visible(ws));
+
+        if active_is_visible {
+            if explicit_selection {
+                self.empty_presentation = false;
+            }
+            return Vec::new();
+        }
+
+        if self.empty_presentation && !explicit_selection {
+            return Vec::new();
+        }
+
+        let visible_workspaces: Vec<&ClientShellWorkspace> = snapshot
+            .workspaces
+            .iter()
+            .filter(|ws| self.is_workspace_visible(ws))
+            .collect();
+
+        if visible_workspaces.is_empty() {
+            self.empty_presentation = true;
+            self.pane_surface = None;
+            Vec::new()
+        } else {
+            let current_idx = active_ws
+                .and_then(|active| {
+                    snapshot
+                        .workspaces
+                        .iter()
+                        .position(|ws| ws.workspace_id == active.workspace_id)
+                })
+                .unwrap_or(0);
+
+            let target_ws = visible_workspaces
+                .iter()
+                .find(|ws| {
+                    let idx = snapshot
+                        .workspaces
+                        .iter()
+                        .position(|w| w.workspace_id == ws.workspace_id)
+                        .unwrap_or(0);
+                    idx >= current_idx
+                })
+                .or_else(|| visible_workspaces.last())
+                .unwrap_or(&visible_workspaces[0]);
+
+            self.empty_presentation = false;
+            self.focus_endpoint_target(ClientEndpointFocusTarget::Workspace(
+                target_ws.workspace_id.clone(),
+            ))
         }
     }
 
@@ -1172,13 +1530,19 @@ impl ClientShellState {
     }
 
     pub(super) fn layout(&self, cols: u16, rows: u16) -> ClientShellLayout {
-        self.config.layout(
+        let recovery_bar_visible = recovery_bar::is_visible(self) && rows > 0;
+        let content_rows = rows.saturating_sub(if recovery_bar_visible { 1 } else { 0 });
+        let mut layout = self.config.layout(
             cols,
-            rows,
+            content_rows,
             self.sidebar_collapsed,
             self.focused_tab_count(),
             self.sidebar_width,
-        )
+        );
+        if recovery_bar_visible {
+            layout.recovery_bar = Rect::new(0, rows.saturating_sub(1), cols, 1);
+        }
+        layout
     }
 
     pub(crate) fn surface_size(&self, cols: u16, rows: u16) -> ClientSurfaceSize {

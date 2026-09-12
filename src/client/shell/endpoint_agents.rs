@@ -103,7 +103,19 @@ fn agent_rows(
         .iter()
         .filter_map(|endpoint| {
             endpoint.snapshot.as_deref().map(|snapshot| {
-                super::agent_sidebar::agent_rows(snapshot, config, Some(&endpoint.label))
+                let visible_workspaces = super::focus_snooze::visible_workspace_ids(
+                    endpoint.focus_scope.as_ref(),
+                    endpoint.snooze_state.as_ref(),
+                    &endpoint.endpoint_id,
+                    Some(snapshot.boot_id.as_str()),
+                    &snapshot.workspaces,
+                );
+                super::agent_sidebar::agent_rows_with_filter(
+                    snapshot,
+                    config,
+                    Some(&endpoint.label),
+                    |agent| visible_workspaces.contains(&agent.workspace_id),
+                )
                     .into_iter()
                     .map(|agent| ((endpoint.endpoint_id.clone(), agent.pane_id.clone()), agent))
                     .collect::<Vec<_>>()

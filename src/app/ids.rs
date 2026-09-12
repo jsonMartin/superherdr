@@ -66,6 +66,14 @@ impl App {
             .or_else(|| id.parse::<usize>().ok()?.checked_sub(1))
     }
 
+    pub(crate) fn canonical_workspace_id(&self, id: &str) -> Option<String> {
+        self.state
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.id == id)
+            .map(|workspace| workspace.id.clone())
+    }
+
     pub(crate) fn parse_tab_id(&self, id: &str) -> Option<(usize, usize)> {
         if let Some(rest) = id.strip_prefix("t_") {
             let (ws_raw, tab_raw) = rest.rsplit_once('_')?;

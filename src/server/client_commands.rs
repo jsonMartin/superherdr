@@ -53,12 +53,26 @@ const CLIENT_SHELL_METHODS: &[&str] = &[
     "worktree.remove",
 ];
 
-pub(crate) fn supported_client_shell_method_names() -> &'static [&'static str] {
+const OPTIONAL_CLIENT_SHELL_METHODS: &[&str] = &[
+    "project.snooze",
+    "project.wake",
+    "snooze.list",
+    "snooze.record.wake",
+    "snooze.reset",
+    "workspace.snooze",
+    "workspace.snooze.subscribe",
+    "workspace.wake",
+];
+
+pub(crate) fn supported_client_shell_method_names() -> impl Iterator<Item = &'static str> {
     CLIENT_SHELL_METHODS
+        .iter()
+        .copied()
+        .chain(OPTIONAL_CLIENT_SHELL_METHODS.iter().copied())
 }
 
 pub(crate) fn supports_client_shell_method_name(method: &str) -> bool {
-    CLIENT_SHELL_METHODS.contains(&method)
+    CLIENT_SHELL_METHODS.contains(&method) || OPTIONAL_CLIENT_SHELL_METHODS.contains(&method)
 }
 
 pub(crate) fn supports_client_shell_method(method: &Method) -> bool {
@@ -331,6 +345,24 @@ mod tests {
             assert!(
                 schema_methods.iter().any(|candidate| candidate == method),
                 "advertised endpoint method {method:?} is absent from the request schema"
+            );
+        }
+    }
+
+    #[test]
+    fn optional_client_shell_methods_are_advertised_accepted_and_in_schema() {
+        let advertised = supported_client_shell_method_names().collect::<Vec<_>>();
+        let schema = serde_json::to_string(&schemars::schema_for!(crate::api::schema::Request))
+            .expect("request schema");
+        for method in OPTIONAL_CLIENT_SHELL_METHODS {
+            assert!(
+                advertised.iter().any(|candidate| candidate == method),
+                "optional endpoint method {method:?} is not advertised"
+            );
+            assert!(supports_client_shell_method_name(method));
+            assert!(
+                schema.contains(&format!("\"const\":\"{method}\"")),
+                "optional endpoint method {method:?} is absent from the request schema"
             );
         }
     }

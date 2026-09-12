@@ -10,6 +10,8 @@ pub(super) struct CachedEndpointSnapshot<'a> {
     pub(super) status: ClientEndpointStatus,
     pub(super) snapshot: &'a ClientShellSnapshot,
     pub(super) agent_recency: &'a HashMap<String, u64>,
+    pub(super) snooze_state: Option<&'a crate::api::schema::WorkspaceSnoozeState>,
+    pub(super) focus_scope: Option<&'a ClientFocusScope>,
 }
 
 impl CachedEndpointSnapshot<'_> {
@@ -31,6 +33,8 @@ pub(super) fn cached_endpoint_snapshots(
                 status: endpoint.status,
                 snapshot,
                 agent_recency: &endpoint.agent_recency,
+                snooze_state: endpoint.snooze_state.as_ref(),
+                focus_scope: endpoint.focus_scope.as_ref(),
             })
     })
 }
@@ -50,28 +54,39 @@ pub(super) fn aggregate_agent_rows(
     endpoints: &[ClientShellEndpoint],
     sort: crate::config::AgentPanelSortConfig,
 ) -> Vec<AggregateAgentRow<'_>> {
-    let mut rows = cached_endpoint_snapshots(endpoints)
-        .flat_map(|endpoint| {
-            super::agent_sidebar::ordered_agent_pane_ids(endpoint.snapshot, sort)
-                .into_iter()
-                .filter_map(move |pane_id| {
-                    let agent = endpoint
-                        .snapshot
-                        .agents
-                        .iter()
-                        .find(|agent| agent.pane_id == pane_id)?;
-                    Some(AggregateAgentRow {
-                        recency: endpoint
-                            .agent_recency
-                            .get(&pane_id)
-                            .copied()
-                            .unwrap_or_default(),
-                        endpoint,
-                        agent,
-                    })
-                })
-        })
-        .collect::<Vec<_>>();
+    let mut rows = Vec::new();
+    for endpoint in cached_endpoint_snapshots(endpoints) {
+        let visible_workspaces = super::focus_snooze::visible_workspace_ids(
+            endpoint.focus_scope,
+            endpoint.snooze_state,
+            endpoint.endpoint_id,
+            Some(endpoint.snapshot.boot_id.as_str()),
+            &endpoint.snapshot.workspaces,
+        );
+        for pane_id in super::agent_sidebar::ordered_agent_pane_ids_with_filter(
+            endpoint.snapshot,
+            sort,
+            |agent| visible_workspaces.contains(&agent.workspace_id),
+        ) {
+            let Some(agent) = endpoint
+                .snapshot
+                .agents
+                .iter()
+                .find(|agent| agent.pane_id == pane_id)
+            else {
+                continue;
+            };
+            rows.push(AggregateAgentRow {
+                recency: endpoint
+                    .agent_recency
+                    .get(&pane_id)
+                    .copied()
+                    .unwrap_or_default(),
+                endpoint,
+                agent,
+            });
+        }
+    }
     if sort == crate::config::AgentPanelSortConfig::Priority {
         rows.sort_by_key(|row| {
             (
@@ -122,7 +137,17 @@ pub(super) fn navigator_rows(
         let endpoint_query_matches = !query.is_empty() && text(&endpoint.label);
         let mut endpoint_rows = Vec::new();
         if let Some(snapshot) = endpoint.snapshot.as_deref() {
+            let visible_workspaces = super::focus_snooze::visible_workspace_ids(
+                endpoint.focus_scope.as_ref(),
+                endpoint.snooze_state.as_ref(),
+                &endpoint.endpoint_id,
+                Some(snapshot.boot_id.as_str()),
+                &snapshot.workspaces,
+            );
             for workspace in &snapshot.workspaces {
+                if !visible_workspaces.contains(&workspace.workspace_id) {
+                    continue;
+                }
                 let workspace_meta = workspace.branch.clone().unwrap_or_default();
                 let mut children = Vec::new();
                 for tab in snapshot

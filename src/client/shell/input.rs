@@ -155,6 +155,7 @@ impl ClientShellState {
 
     pub(super) fn handle_raw_events(&mut self, events: Vec<RawInputEvent>) -> ClientShellInput {
         let mut outcome = ClientShellInput::default();
+        let recovery_bar_was_visible = super::recovery_bar::is_visible(self);
         if !events.is_empty() && self.endpoint_error.take().is_some() {
             outcome.repaint = true;
         }
@@ -284,6 +285,11 @@ impl ClientShellState {
             self.reconcile_input_source();
         }
         outcome.repaint |= self.resume_mobile_switcher_if_ready();
+        if recovery_bar_was_visible != super::recovery_bar::is_visible(self) {
+            self.invalidate_pane_surface();
+            outcome.repaint = true;
+            outcome.resize = true;
+        }
         outcome
     }
 
@@ -513,6 +519,15 @@ impl ClientShellState {
         if matches!(key.code, KeyCode::Modifier(_)) {
             return None;
         }
+        if self.empty_presentation
+            && key.kind == KeyEventKind::Press
+            && key.code == KeyCode::Char('w')
+            && key.modifiers.is_empty()
+        {
+            self.open_snooze_recovery(0, 0);
+            outcome.repaint = true;
+            return None;
+        }
         self.pending_word_selection = None;
         if self.mode != ClientShellMode::Copy
             && self.copy_or_terminal_mode() != ClientShellMode::Copy
@@ -552,7 +567,11 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return None;
                 }
-                self.focused_pane_id().map(ClientInputTarget::Pane)
+                if self.empty_presentation {
+                    None
+                } else {
+                    self.focused_pane_id().map(ClientInputTarget::Pane)
+                }
             }
             ClientShellMode::Prefix => {
                 let return_mode = if self.copy_mode.as_ref().is_some_and(|copy_mode| {
@@ -565,7 +584,11 @@ impl ClientShellState {
                 if crate::config::terminal_key_matches_combo(key, self.config.keybinds.prefix) {
                     self.mode = return_mode;
                     outcome.repaint = true;
-                    return self.focused_pane_id().map(ClientInputTarget::Pane);
+                    if self.empty_presentation {
+                        return None;
+                    } else {
+                        return self.focused_pane_id().map(ClientInputTarget::Pane);
+                    }
                 }
                 if key.code == KeyCode::Esc {
                     self.mode = return_mode;
@@ -686,6 +709,7 @@ impl ClientShellState {
                     self.mode = ClientShellMode::Terminal;
                     self.navigate_workspace_id = None;
                     if let Some(workspace_id) = selected {
+                        self.empty_presentation = false;
                         self.push_endpoint_method(
                             crate::api::schema::Method::WorkspaceFocus(
                                 crate::api::schema::WorkspaceTarget { workspace_id },
@@ -1023,12 +1047,18 @@ impl ClientShellState {
         key: crate::input::TerminalKey,
         outcome: &mut ClientShellInput,
     ) {
+        if self.empty_presentation && key.kind != KeyEventKind::Release {
+            return;
+        }
         if let Some(event) = ClientPaneInputEvent::from_terminal_key(key) {
             super::push_target_event(target, event, outcome);
         }
     }
 
     fn push_focused_pane_event(&self, event: ClientPaneInputEvent, outcome: &mut ClientShellInput) {
+        if self.empty_presentation {
+            return;
+        }
         if let Some(pane_id) = self.focused_pane_id() {
             super::push_target_event(ClientInputTarget::Pane(pane_id), event, outcome);
         }

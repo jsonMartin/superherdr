@@ -239,6 +239,51 @@ fn context_menus_capture_stable_targets_and_route_actions() {
 }
 
 #[test]
+fn compact_sidebar_right_click_opens_non_active_workspace_menu() {
+    let mut local = snapshot();
+    let mut other = local.workspaces[0].clone();
+    other.workspace_id = "ws_2".into();
+    other.number = 2;
+    other.label = "second workspace".into();
+    other.focused = false;
+    local.workspaces.push(other);
+
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(local));
+    state.set_pane_surface(surface());
+    state.sidebar_collapsed = true;
+    state.compose(106, 20).expect("compact sidebar");
+    let workspace = state
+        .hits
+        .workspaces
+        .iter()
+        .find(|hit| hit.workspace_id == "ws_2")
+        .expect("non-active compact workspace")
+        .rect;
+    let before = state.snapshot.clone();
+    let focus = state.focus_scope.clone();
+    let outcome =
+        state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Right),
+            column: workspace.x + 1,
+            row: workspace.y,
+            modifiers: KeyModifiers::empty(),
+        })]);
+
+    assert!(outcome.actions.is_empty() && outcome.requests.is_empty());
+    assert_eq!(state.snapshot, before);
+    assert!(state.active_endpoint_id.is_local());
+    assert_eq!(state.focus_scope, focus);
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
+            target: ClientContextMenuTarget::Workspace { ref workspace_id, .. },
+            ..
+        })) if workspace_id == "ws_2"
+    ));
+}
+
+#[test]
 fn global_menu_opens_from_sidebar_and_routes_client_actions() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));

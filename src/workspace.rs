@@ -109,6 +109,10 @@ pub(crate) fn generate_workspace_id() -> String {
     format!("w{}", encode_public_number(counter as usize))
 }
 
+pub(crate) fn generate_workspace_lifetime_id() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
+
 pub(crate) fn encode_public_number(mut value: usize) -> String {
     if value == 0 {
         return "0".to_string();
@@ -176,6 +180,8 @@ pub(crate) fn reserve_workspace_ids(workspaces: &[Workspace]) {
 pub struct Workspace {
     /// Stable public workspace identity, independent of display order.
     pub id: String,
+    /// Stable internal workspace identity, independent of public IDs and labels.
+    pub(crate) lifetime_id: String,
     /// User-provided override. If set, auto-derived identity stops updating.
     pub custom_name: Option<String>,
     /// Fallback workspace identity source for tests, old snapshots, or missing runtimes.
@@ -251,6 +257,7 @@ impl Workspace {
             discover_workspace_git_identity(&identity_cwd);
         Self {
             id,
+            lifetime_id: generate_workspace_lifetime_id(),
             custom_name: label,
             identity_cwd: identity_cwd.clone(),
             cached_identity_cwd: identity_cwd.clone(),
@@ -403,6 +410,7 @@ impl Workspace {
         Ok((
             Self {
                 id,
+                lifetime_id: generate_workspace_lifetime_id(),
                 custom_name: None,
                 identity_cwd: initial_cwd.clone(),
                 cached_identity_cwd: initial_cwd.clone(),
@@ -1196,6 +1204,7 @@ impl Workspace {
         public_pane_numbers.insert(tab.root_pane, 1);
         Self {
             id: generate_workspace_id(),
+            lifetime_id: generate_workspace_lifetime_id(),
             custom_name: Some(name.to_string()),
             identity_cwd: identity_cwd.clone(),
             cached_identity_cwd: identity_cwd.clone(),
@@ -1445,6 +1454,26 @@ mod tests {
             second.len() <= 3,
             "unexpectedly long workspace id: {second}"
         );
+    }
+
+    #[test]
+    fn workspace_lifetime_ids_are_unique_across_reused_public_identity() {
+        let first = Workspace::test_new("same");
+        let mut second = Workspace::test_new("same");
+        second.id = first.id.clone();
+        second.identity_cwd = first.identity_cwd.clone();
+
+        assert_ne!(first.lifetime_id, second.lifetime_id);
+    }
+
+    #[test]
+    fn workspace_rename_retains_lifetime_id() {
+        let mut workspace = Workspace::test_new("before");
+        let lifetime_id = workspace.lifetime_id.clone();
+
+        workspace.set_custom_name("after".into());
+
+        assert_eq!(workspace.lifetime_id, lifetime_id);
     }
 
     #[test]

@@ -1,9 +1,13 @@
 use super::*;
 
+#[path = "project_snooze.rs"]
+mod project_snooze_tests;
 #[path = "pane_graphics.rs"]
 mod pane_graphics_tests;
 #[path = "surface_interest.rs"]
 mod surface_interest_tests;
+#[path = "workspace_snooze.rs"]
+mod workspace_snooze_tests;
 
 fn client_shell_snapshot(message: ServerMessage) -> Box<crate::protocol::ClientShellSnapshot> {
     let ServerMessage::EndpointControl { kind, data } = message else {
@@ -69,6 +73,13 @@ fn test_headless_server_with_event_hub(event_hub: api::EventHub) -> HeadlessServ
         foreground_client_id: None,
         tab_geometry_controllers: HashMap::new(),
         popup_owner_tab_id: None,
+        workspace_snoozes: crate::server::workspace_snooze::WorkspaceSnoozeManager::new(
+            "test-boot".into(),
+        ),
+        snooze_store: None,
+        snooze_notice: None,
+        snooze_retry_deadline: None,
+        snooze_subscribers: HashSet::new(),
         client_shell_boot_id: "test-boot".into(),
         sent_window_title: None,
         api_window_title: None,

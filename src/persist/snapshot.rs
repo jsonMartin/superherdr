@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use ratatui::layout::Direction;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::layout::Node;
 use crate::terminal::TerminalRuntimeRegistry;
@@ -50,6 +50,12 @@ pub struct TabHistorySnapshot {
 pub struct WorkspaceSnapshot {
     #[serde(default)]
     pub id: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_string"
+    )]
+    pub lifetime_id: Option<String>,
     #[serde(default)]
     pub custom_name: Option<String>,
     pub identity_cwd: PathBuf,
@@ -66,6 +72,15 @@ pub struct WorkspaceSnapshot {
     pub tabs: Vec<TabSnapshot>,
     #[serde(default)]
     pub active_tab: usize,
+}
+
+fn deserialize_optional_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(serde_json::Value::deserialize(deserializer)?
+        .as_str()
+        .map(str::to_owned))
 }
 
 #[derive(Deserialize)]
@@ -155,6 +170,7 @@ impl From<LegacyWorkspaceSnapshot> for WorkspaceSnapshot {
 
         Self {
             id: None,
+            lifetime_id: None,
             custom_name: snap.custom_name,
             identity_cwd,
             worktree_space: None,
@@ -283,6 +299,7 @@ fn capture_workspace(
 ) -> WorkspaceSnapshot {
     WorkspaceSnapshot {
         id: Some(ws.id.clone()),
+        lifetime_id: Some(ws.lifetime_id.clone()),
         custom_name: ws.custom_name.clone(),
         identity_cwd: ws
             .resolved_identity_cwd_from(terminals, terminal_runtimes)
@@ -659,6 +676,7 @@ mod tests {
         let snap = SessionSnapshot {
             workspaces: vec![WorkspaceSnapshot {
                 id: Some("wproj".to_string()),
+                lifetime_id: None,
                 custom_name: Some("pi-mono".to_string()),
                 identity_cwd: PathBuf::from("/home/can/Projects/herdr"),
                 worktree_space: None,
@@ -754,6 +772,45 @@ mod tests {
 
         assert_eq!(restored.sidebar_width, None);
         assert_eq!(restored.sidebar_section_split, None);
+    }
+
+    #[test]
+    fn workspace_lifetime_id_captures_and_parses_through_json() {
+        let state = state_with_workspaces(&["one"]);
+        let lifetime_id = state.workspaces[0].lifetime_id.clone();
+
+        let snapshot = capture_from_state(&state);
+        let encoded = serde_json::to_string(&snapshot).unwrap();
+        let parsed = parse_snapshot(&encoded).unwrap();
+
+        assert_eq!(
+            parsed.workspaces[0].lifetime_id.as_deref(),
+            Some(lifetime_id.as_str())
+        );
+    }
+
+    #[test]
+    fn malformed_workspace_lifetime_id_is_treated_as_missing() {
+        let json = serde_json::json!({
+            "version": SNAPSHOT_VERSION,
+            "workspaces": [{
+                "id": "wtest",
+                "lifetime_id": 42,
+                "identity_cwd": "/tmp",
+                "tabs": [{
+                    "layout": { "Pane": 0 },
+                    "panes": { "0": { "cwd": "/tmp" } },
+                    "zoomed": false
+                }]
+            }],
+            "active": 0,
+            "selected": 0
+        })
+        .to_string();
+
+        let parsed = parse_snapshot(&json).unwrap();
+
+        assert_eq!(parsed.workspaces[0].lifetime_id, None);
     }
 
     #[test]
@@ -1226,6 +1283,7 @@ mod tests {
             version: SNAPSHOT_VERSION,
             workspaces: vec![WorkspaceSnapshot {
                 id: Some("test-ws".to_string()),
+                lifetime_id: None,
                 custom_name: Some("fallback test".to_string()),
                 identity_cwd: PathBuf::from("/tmp"),
                 worktree_space: None,

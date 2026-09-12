@@ -328,6 +328,12 @@ pub struct Keybinds {
     pub close_workspace: ActionKeybinds,
     pub workspace_picker: ActionKeybinds,
     pub goto: ActionKeybinds,
+    pub focus_project: ActionKeybinds,
+    pub clear_project_focus: ActionKeybinds,
+    pub snooze_workspace: ActionKeybinds,
+    pub snooze_project: ActionKeybinds,
+    pub show_snoozed: ActionKeybinds,
+    pub reset_focus_snooze: ActionKeybinds,
     pub detach: ActionKeybinds,
     pub reload_config: ActionKeybinds,
     pub open_notification_target: ActionKeybinds,
@@ -496,6 +502,12 @@ impl Config {
             close_workspace: empty_action!(),
             workspace_picker: empty_action!(),
             goto: empty_action!(),
+            focus_project: empty_action!(),
+            clear_project_focus: empty_action!(),
+            snooze_workspace: empty_action!(),
+            snooze_project: empty_action!(),
+            show_snoozed: empty_action!(),
+            reset_focus_snooze: empty_action!(),
             detach: empty_action!(),
             reload_config: empty_action!(),
             open_notification_target: empty_action!(),
@@ -624,6 +636,12 @@ impl Config {
             apply_action!(keybinds.close_workspace, close_workspace, source);
             apply_action!(keybinds.workspace_picker, workspace_picker, source);
             apply_action!(keybinds.goto, goto, source);
+            apply_action!(keybinds.focus_project, focus_project, source);
+            apply_action!(keybinds.clear_project_focus, clear_project_focus, source);
+            apply_action!(keybinds.snooze_workspace, snooze_workspace, source);
+            apply_action!(keybinds.snooze_project, snooze_project, source);
+            apply_action!(keybinds.show_snoozed, show_snoozed, source);
+            apply_action!(keybinds.reset_focus_snooze, reset_focus_snooze, source);
             apply_action!(keybinds.detach, detach, source);
             apply_action!(keybinds.reload_config, reload_config, source);
             apply_action!(

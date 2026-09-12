@@ -141,6 +141,11 @@ use windows_sys::{
 
 use super::{ClipboardImage, ForegroundJob, Signal};
 
+#[link(name = "msvcrt")]
+unsafe extern "C" {
+    fn _mktime64(value: *mut libc::tm) -> i64;
+}
+
 const STILL_ACTIVE: u32 = 259;
 const FOREGROUND_PROCESS_SNAPSHOT_CACHE_TTL: Duration = Duration::from_millis(250);
 const FOREGROUND_SELECTION_RECHECK: Duration = Duration::from_secs(5);
@@ -507,24 +512,65 @@ pub(crate) fn local_datetime() -> Option<time::PrimitiveDateTime> {
     if unsafe { libc::time(&mut timestamp) } == -1 {
         return None;
     }
+    local_datetime_at(timestamp.try_into().ok()?)
+}
+
+pub(crate) fn local_datetime_at(unix_seconds: i64) -> Option<time::PrimitiveDateTime> {
+    let timestamp = libc::time_t::try_from(unix_seconds).ok()?;
     let mut local: libc::tm = unsafe { std::mem::zeroed() };
     if unsafe { libc::localtime_s(&mut local, &timestamp) } != 0 {
         return None;
     }
-    let month = time::Month::try_from(u8::try_from(local.tm_mon + 1).ok()?).ok()?;
+    datetime_from_tm(&local)
+}
+
+pub(crate) fn local_timestamp(value: time::PrimitiveDateTime) -> Option<i64> {
+    if value.time().nanosecond() != 0 {
+        return None;
+    }
+
+    [0, 1]
+        .into_iter()
+        .filter_map(|is_dst| {
+            let mut local = tm_from_datetime(value, is_dst)?;
+            let timestamp = unsafe { _mktime64(&mut local) };
+            let timestamp = libc::time_t::try_from(timestamp).ok()?;
+            let mut resolved: libc::tm = unsafe { std::mem::zeroed() };
+            if unsafe { libc::localtime_s(&mut resolved, &timestamp) } != 0 {
+                return None;
+            }
+            (datetime_from_tm(&resolved) == Some(value)).then_some(timestamp.try_into().ok()?)
+        })
+        .min()
+}
+
+fn datetime_from_tm(value: &libc::tm) -> Option<time::PrimitiveDateTime> {
+    let month = time::Month::try_from(u8::try_from(value.tm_mon + 1).ok()?).ok()?;
     let date = time::Date::from_calendar_date(
-        local.tm_year + 1900,
+        value.tm_year + 1900,
         month,
-        u8::try_from(local.tm_mday).ok()?,
+        u8::try_from(value.tm_mday).ok()?,
     )
     .ok()?;
     let time = time::Time::from_hms(
-        u8::try_from(local.tm_hour).ok()?,
-        u8::try_from(local.tm_min).ok()?,
-        u8::try_from(local.tm_sec).ok()?,
+        u8::try_from(value.tm_hour).ok()?,
+        u8::try_from(value.tm_min).ok()?,
+        u8::try_from(value.tm_sec).ok()?,
     )
     .ok()?;
     Some(time::PrimitiveDateTime::new(date, time))
+}
+
+fn tm_from_datetime(value: time::PrimitiveDateTime, is_dst: i32) -> Option<libc::tm> {
+    let mut local: libc::tm = unsafe { std::mem::zeroed() };
+    local.tm_year = value.year().checked_sub(1900)?;
+    local.tm_mon = i32::from(value.month() as u8) - 1;
+    local.tm_mday = i32::from(value.day());
+    local.tm_hour = i32::from(value.hour());
+    local.tm_min = i32::from(value.minute());
+    local.tm_sec = i32::from(value.second());
+    local.tm_isdst = is_dst;
+    Some(local)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

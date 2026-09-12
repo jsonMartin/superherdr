@@ -12,6 +12,20 @@ use super::shell::ClientShellEndpointError;
 const ENDPOINT_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_RETIRED_REQUESTS_PER_ENDPOINT: usize = 128;
 
+pub(crate) fn is_shared_snooze_method(method: &crate::api::schema::Method) -> bool {
+    matches!(
+        method,
+        crate::api::schema::Method::WorkspaceSnooze(_)
+            | crate::api::schema::Method::WorkspaceWake(_)
+            | crate::api::schema::Method::SnoozeReset(_)
+            | crate::api::schema::Method::ProjectSnooze(_)
+            | crate::api::schema::Method::ProjectWake(_)
+            | crate::api::schema::Method::SnoozeRecordWake(_)
+            | crate::api::schema::Method::WorkspaceSnoozeSubscribe(_)
+            | crate::api::schema::Method::SnoozeList(_)
+    )
+}
+
 struct QueuedCommand {
     generation: u64,
     boot_id: String,
@@ -97,9 +111,17 @@ impl EndpointCommands {
         if lane.in_flight.is_some() {
             return cancelled;
         }
+        let endpoint_is_active = endpoints.active_id() == endpoint_id;
+        if endpoint_is_active && !endpoints.active_surface_available() {
+            return cancelled;
+        }
         while let Some(queued) = lane.queued.pop_front() {
             let request_id = queued.request.id.clone();
             if !endpoints.accepts(endpoint_id, queued.generation) {
+                cancelled.push(request_id);
+                continue;
+            }
+            if !endpoint_is_active && !is_shared_snooze_method(&queued.request.method) {
                 cancelled.push(request_id);
                 continue;
             }
@@ -300,9 +322,37 @@ pub(super) fn parse_response(
 mod tests {
     use super::*;
     use crate::api::schema::{ResponseResult, SuccessResponse};
+    use crate::client::endpoint::{EndpointNegotiation, EndpointRegistry, EndpointTransport};
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone, Default)]
+    struct RecordingTransport(Arc<Mutex<Vec<ClientMessage>>>);
+
+    impl EndpointTransport for RecordingTransport {
+        fn send(&mut self, message: &ClientMessage) -> io::Result<()> {
+            self.0
+                .lock()
+                .expect("recording transport lock")
+                .push(message.clone());
+            Ok(())
+        }
+    }
 
     fn endpoint() -> ClientEndpointId {
         ClientEndpointId::Local
+    }
+
+    fn remote_endpoint() -> ClientEndpointId {
+        ClientEndpointId::Ssh(
+            crate::client::endpoint::ProfileId::parse("0123456789abcdef0123456789abcdef").unwrap(),
+        )
+    }
+
+    fn request(id: &str, method: crate::api::schema::Method) -> Box<Request> {
+        Box::new(Request {
+            id: id.into(),
+            method,
+        })
     }
 
     fn commands_with_in_flight() -> EndpointCommands {
@@ -474,6 +524,133 @@ mod tests {
             .lanes
             .get(&completed.endpoint_id)
             .is_some_and(|lane| lane.in_flight.is_none()));
+    }
+
+    #[test]
+    fn inactive_lane_rejects_ordinary_commands_but_sends_shared_snooze() {
+        let remote = remote_endpoint();
+        let local_sent = Arc::new(Mutex::new(Vec::new()));
+        let remote_sent = Arc::new(Mutex::new(Vec::new()));
+        let mut endpoints = EndpointRegistry::new(
+            RecordingTransport(local_sent.clone()),
+            1,
+            EndpointNegotiation::default(),
+        );
+        endpoints.insert(
+            remote.clone(),
+            RecordingTransport(remote_sent.clone()),
+            2,
+            EndpointNegotiation::default(),
+            false,
+        );
+        let mut commands = EndpointCommands::default();
+        commands.enqueue(
+            remote.clone(),
+            2,
+            "remote-boot".into(),
+            request(
+                "ordinary",
+                crate::api::schema::Method::WorkspaceList(Default::default()),
+            ),
+        );
+        commands.enqueue(
+            remote.clone(),
+            2,
+            "remote-boot".into(),
+            request(
+                "snooze",
+                crate::api::schema::Method::SnoozeList(Default::default()),
+            ),
+        );
+
+        assert_eq!(
+            commands.send_next(&remote, &mut endpoints),
+            vec!["ordinary".to_owned()]
+        );
+        assert_eq!(remote_sent.lock().expect("remote recording lock").len(), 1);
+        assert!(local_sent.lock().expect("local recording lock").is_empty());
+    }
+
+    #[test]
+    fn inactive_snooze_queue_advances_after_completion_and_timeout() {
+        let remote = remote_endpoint();
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let mut endpoints = EndpointRegistry::new(
+            RecordingTransport(Arc::new(Mutex::new(Vec::new()))),
+            1,
+            EndpointNegotiation::default(),
+        );
+        endpoints.insert(
+            remote.clone(),
+            RecordingTransport(sent.clone()),
+            2,
+            EndpointNegotiation::default(),
+            false,
+        );
+        let mut commands = EndpointCommands::default();
+        for id in ["first", "second", "third"] {
+            commands.enqueue(
+                remote.clone(),
+                2,
+                "remote-boot".into(),
+                request(
+                    id,
+                    crate::api::schema::Method::WorkspaceSnooze(
+                        crate::api::schema::WorkspaceSnoozeParams {
+                            workspace_id: "workspace".into(),
+                            boot_id: "remote-boot".into(),
+                            duration_seconds: Some(30),
+                            deadline_unix_ms: None,
+                        },
+                    ),
+                ),
+            );
+        }
+        assert!(commands.send_next(&remote, &mut endpoints).is_empty());
+        assert_eq!(sent.lock().expect("recording lock").len(), 1);
+        let response = serde_json::to_vec(&SuccessResponse {
+            id: "first".into(),
+            result: ResponseResult::Ok {},
+        })
+        .unwrap();
+        assert!(commands
+            .receive_chunk(&remote, 2, "remote-boot", "first", true, response)
+            .unwrap()
+            .is_some());
+        assert!(commands.send_next(&remote, &mut endpoints).is_empty());
+        assert!(commands.accepts_response(&remote, 2, "remote-boot", "second"));
+        let expired = commands
+            .expire(Instant::now() + ENDPOINT_COMMAND_TIMEOUT)
+            .pop()
+            .expect("second snooze timeout");
+        assert_eq!(expired.request_id, "second");
+        assert!(commands.send_next(&remote, &mut endpoints).is_empty());
+        assert!(commands.accepts_response(&remote, 2, "remote-boot", "third"));
+    }
+
+    #[test]
+    fn inactive_surface_does_not_replay_ordinary_queued_commands() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let mut endpoints = EndpointRegistry::new(
+            RecordingTransport(sent.clone()),
+            1,
+            EndpointNegotiation::default(),
+        );
+        endpoints.set_surface_active(&ClientEndpointId::Local, false);
+        let mut commands = EndpointCommands::default();
+        commands.enqueue(
+            ClientEndpointId::Local,
+            1,
+            "boot-a".into(),
+            request(
+                "ordinary",
+                crate::api::schema::Method::WorkspaceList(Default::default()),
+            ),
+        );
+        assert!(commands
+            .send_next(&ClientEndpointId::Local, &mut endpoints)
+            .is_empty());
+        assert!(sent.lock().expect("recording lock").is_empty());
     }
 
     #[test]

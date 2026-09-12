@@ -922,6 +922,66 @@ impl ClientShellState {
             return;
         }
 
+        if matches!(
+            self.overlay,
+            Some(ClientShellOverlay::ConfirmWakeSharedSnoozes(_))
+        ) {
+            if key.code == KeyCode::Enter {
+                self.submit_wake_shared_snoozes(outcome);
+                outcome.repaint = true;
+            } else if key.code == KeyCode::Esc {
+                self.overlay = None;
+                outcome.repaint = true;
+            }
+            return;
+        }
+
+        if matches!(self.overlay, Some(ClientShellOverlay::SnoozeManagement(_))) {
+            match key.code {
+                KeyCode::Esc => self.overlay = None,
+                KeyCode::Up => self.move_snooze_management_selection(-1),
+                KeyCode::Down => self.move_snooze_management_selection(1),
+                KeyCode::Left => self.cycle_snooze_management_endpoint(-1),
+                KeyCode::Right => self.cycle_snooze_management_endpoint(1),
+                KeyCode::Enter => self.activate_snooze_management_wake(outcome),
+                KeyCode::Char('a' | 'A') if key.modifiers.is_empty() => {
+                    self.activate_snooze_management_wake_all();
+                }
+                KeyCode::Char('p' | 'P') if key.modifiers.is_empty() => {
+                    self.activate_snooze_management_parent(outcome);
+                }
+                KeyCode::Char('r' | 'R') if key.modifiers.is_empty() => {
+                    let Some(ClientShellOverlay::SnoozeManagement(management)) =
+                        self.overlay.as_ref()
+                    else {
+                        return;
+                    };
+                    self.open_reset_confirmation(
+                        management.endpoint_id.clone(),
+                        management.boot_id.clone(),
+                        management.expected_revision,
+                        management.records.len(),
+                    );
+                }
+                _ => return,
+            }
+            outcome.repaint = true;
+            return;
+        }
+
+        if matches!(self.overlay, Some(ClientShellOverlay::Snooze(_))) {
+            match key.code {
+                KeyCode::Esc => self.overlay = None,
+                KeyCode::Enter => self.submit_snooze_overlay(outcome),
+                KeyCode::Up | KeyCode::Left => self.move_snooze_selection(-1),
+                KeyCode::Down | KeyCode::Right | KeyCode::Tab => self.move_snooze_selection(1),
+                KeyCode::BackTab => self.move_snooze_selection(-1),
+                _ => return,
+            }
+            outcome.repaint = true;
+            return;
+        }
+
         let Some(ClientShellOverlay::Rename(rename)) = self.overlay.as_mut() else {
             return;
         };

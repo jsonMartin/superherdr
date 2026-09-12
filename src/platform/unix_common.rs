@@ -190,11 +190,37 @@ pub(crate) fn local_datetime() -> Option<time::PrimitiveDateTime> {
     if unsafe { libc::time(&mut timestamp) } == -1 {
         return None;
     }
+    local_datetime_at(timestamp.try_into().ok()?)
+}
+
+pub(crate) fn local_datetime_at(unix_seconds: i64) -> Option<time::PrimitiveDateTime> {
+    let timestamp = libc::time_t::try_from(unix_seconds).ok()?;
     let mut local: libc::tm = unsafe { std::mem::zeroed() };
     if unsafe { libc::localtime_r(&timestamp, &mut local) }.is_null() {
         return None;
     }
     datetime_from_tm(&local)
+}
+
+pub(crate) fn local_timestamp(value: time::PrimitiveDateTime) -> Option<i64> {
+    if value.time().nanosecond() != 0 {
+        return None;
+    }
+
+    [0, 1]
+        .into_iter()
+        .filter_map(|is_dst| {
+            let mut local = tm_from_datetime(value, is_dst)?;
+            let timestamp = unsafe { libc::mktime(&mut local) };
+            let timestamp = i64::try_from(timestamp).ok()?;
+            let timestamp_for_localtime = libc::time_t::try_from(timestamp).ok()?;
+            let mut resolved: libc::tm = unsafe { std::mem::zeroed() };
+            if unsafe { libc::localtime_r(&timestamp_for_localtime, &mut resolved) }.is_null() {
+                return None;
+            }
+            (datetime_from_tm(&resolved) == Some(value)).then_some(timestamp)
+        })
+        .min()
 }
 
 pub(crate) fn status_commands_supported() -> bool {
@@ -259,6 +285,18 @@ fn datetime_from_tm(value: &libc::tm) -> Option<time::PrimitiveDateTime> {
     Some(time::PrimitiveDateTime::new(date, time))
 }
 
+fn tm_from_datetime(value: time::PrimitiveDateTime, is_dst: i32) -> Option<libc::tm> {
+    let mut local: libc::tm = unsafe { std::mem::zeroed() };
+    local.tm_year = value.year().checked_sub(1900)?;
+    local.tm_mon = i32::from(value.month() as u8) - 1;
+    local.tm_mday = i32::from(value.day());
+    local.tm_hour = i32::from(value.hour());
+    local.tm_min = i32::from(value.minute());
+    local.tm_sec = i32::from(value.second());
+    local.tm_isdst = is_dst;
+    Some(local)
+}
+
 pub(crate) fn set_default_plugin_pane_pwd(env: &mut Vec<(String, String)>, cwd: &std::path::Path) {
     if !env.iter().any(|(key, _)| key == "PWD") {
         env.push(("PWD".to_string(), cwd.display().to_string()));
@@ -268,6 +306,29 @@ pub(crate) fn set_default_plugin_pane_pwd(env: &mut Vec<(String, String)>, cwd: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn datetime(month: time::Month, day: u8, hour: u8, minute: u8) -> time::PrimitiveDateTime {
+        time::PrimitiveDateTime::new(
+            time::Date::from_calendar_date(2026, month, day).unwrap(),
+            time::Time::from_hms(hour, minute, 0).unwrap(),
+        )
+    }
+
+    #[test]
+    #[ignore = "requires TZ=America/Los_Angeles"]
+    fn local_timestamp_rejects_gap_and_chooses_earliest_overlap() {
+        assert!(local_timestamp(datetime(time::Month::March, 8, 2, 30)).is_none());
+
+        let overlap = datetime(time::Month::November, 1, 1, 30);
+        let earliest = local_timestamp(overlap).unwrap();
+        let mut standard = tm_from_datetime(overlap, 0).unwrap();
+        let standard = unsafe { libc::mktime(&mut standard) };
+        let mut daylight = tm_from_datetime(overlap, 1).unwrap();
+        let daylight = unsafe { libc::mktime(&mut daylight) };
+        assert_eq!(local_datetime_at(earliest), Some(overlap));
+        assert!(earliest <= i64::try_from(standard).unwrap());
+        assert!(earliest <= i64::try_from(daylight).unwrap());
+    }
 
     #[test]
     fn plugin_pane_pwd_defaults_to_cwd_without_overriding_explicit_env() {

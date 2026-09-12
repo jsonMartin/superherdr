@@ -51,6 +51,8 @@ use state::ClientState;
 use transport::*;
 
 #[cfg(test)]
+pub(crate) use shell::{ClientFocusScope, ClientShellAction};
+#[cfg(test)]
 pub(crate) use shell::{ClientShellConfig, ClientShellState};
 pub use startup::{run_client, run_terminal_attach};
 pub use terminal_sessions::{run_terminal_session_control, run_terminal_session_observe};
@@ -133,6 +135,21 @@ use crate::protocol::{self, ClientMessage, FrameData, ServerMessage, MAX_GRAPHIC
 #[cfg(test)]
 use crate::protocol::{AttachScrollDirection, AttachScrollSource, NotifyKind};
 use crate::server::socket_paths::client_socket_path;
+
+fn route_client_shell_resize(
+    state: &mut ClientState,
+    endpoints: &mut endpoint::EndpointRegistry,
+    pending_activation: &mut Option<endpoint::PendingEndpointActivation>,
+    resize: ClientMessage,
+) {
+    if let Some(activation) = pending_activation.as_mut() {
+        if let Err(error) = activation.update_resize(resize, endpoints) {
+            rollback_endpoint_activation(state, endpoints, pending_activation, error, false);
+        }
+    } else {
+        let _ = endpoints.send(&resize);
+    }
+}
 
 fn run_client_with_mode(
     attach_request: Option<(String, bool)>,
@@ -528,6 +545,19 @@ async fn run_client_loop(
         let mut registry = endpoint::EndpointRegistry::new(transport, 1, negotiation);
         if state.shell.is_some() {
             registry.send(&ClientMessage::ClientShellFocus { focused: true });
+            if registry
+                .connection(&endpoint::ClientEndpointId::Local)
+                .is_some_and(|connection| {
+                    connection
+                        .negotiation
+                        .supports_method("workspace.snooze.subscribe")
+                })
+            {
+                registry.send(&ClientMessage::EndpointControl {
+                    kind: "workspace_snooze.subscribe".into(),
+                    data: String::new(),
+                });
+            }
         }
         registry
     } else {
@@ -1165,6 +1195,23 @@ async fn run_client_loop(
                         negotiation,
                         false,
                     );
+                    if state.shell.is_some()
+                        && write_stream
+                            .connection(&endpoint_id)
+                            .is_some_and(|connection| {
+                                connection
+                                    .negotiation
+                                    .supports_method("workspace.snooze.subscribe")
+                            })
+                    {
+                        write_stream.send_to(
+                            &endpoint_id,
+                            &ClientMessage::EndpointControl {
+                                kind: "workspace_snooze.subscribe".into(),
+                                data: String::new(),
+                            },
+                        );
+                    }
                     if let Some(frame) = frame {
                         state.present_frame(frame);
                     }
@@ -1651,17 +1698,33 @@ async fn run_client_loop(
                         let Some(completed) = completed else {
                             continue;
                         };
+                        let completed_endpoint_id = completed.endpoint_id.clone();
+                        let mut resize_needed = false;
                         let (repaint, actions) = state.shell.as_mut().map_or_else(
                             || (false, Vec::new()),
                             |shell| {
                                 if completed.generation == generation
-                                    && shell.endpoint_is_active(&completed.endpoint_id)
+                                    && shell.endpoint_request_can_complete(
+                                        &completed_endpoint_id,
+                                        &completed.request_id,
+                                    )
                                 {
-                                    shell.handle_endpoint_result(
+                                    let previous_size = shell
+                                        .surface_size(state.reported_size.0, state.reported_size.1);
+                                    let result = shell.handle_endpoint_result(
                                         &completed.boot_id,
                                         &completed.request_id,
                                         completed.result,
-                                    )
+                                    );
+                                    resize_needed = previous_size
+                                        != shell.surface_size(
+                                            state.reported_size.0,
+                                            state.reported_size.1,
+                                        );
+                                    if resize_needed {
+                                        shell.invalidate_pane_surface();
+                                    }
+                                    result
                                 } else {
                                     (
                                         shell.cancel_endpoint_request(&completed.request_id),
@@ -1670,6 +1733,25 @@ async fn run_client_loop(
                                 }
                             },
                         );
+                        if resize_needed {
+                            if let Some(resize) = state.shell.as_ref().map(|shell| {
+                                client_shell_resize_message(
+                                    shell,
+                                    state.reported_size.0,
+                                    state.reported_size.1,
+                                    state.reported_cell_size.0,
+                                    state.reported_cell_size.1,
+                                    state.pixel_geometry_exact,
+                                )
+                            }) {
+                                route_client_shell_resize(
+                                    &mut state,
+                                    &mut write_stream,
+                                    &mut pending_activation,
+                                    resize,
+                                );
+                            }
+                        }
                         if let Some(shell) = state.shell.as_mut() {
                             shell.reconcile_input_source();
                         }
@@ -1685,6 +1767,16 @@ async fn run_client_loop(
                             &mut state.detached_process_children,
                             &event_tx,
                         )?;
+                        if let Some(shell) = state.shell.as_mut() {
+                            for request_id in endpoint_commands
+                                .send_next(&completed_endpoint_id, &mut write_stream)
+                            {
+                                shell.cancel_endpoint_request(&request_id);
+                            }
+                        } else {
+                            let _ = endpoint_commands
+                                .send_next(&completed_endpoint_id, &mut write_stream);
+                        }
                         let repaint = repaint || dispatch_repaint;
                         if replay_mouse.is_empty() {
                             if repaint {
@@ -1827,6 +1919,103 @@ async fn run_client_loop(
                             Ok(endpoint::EndpointControlMessage::HealthPong) => continue,
                             Ok(endpoint::EndpointControlMessage::Ignored) => {
                                 debug!(%kind, "ignoring unknown endpoint control message");
+                                continue;
+                            }
+                            Ok(endpoint::EndpointControlMessage::WorkspaceSnoozeState(
+                                snooze_state,
+                            )) => {
+                                let mut resize_needed = false;
+                                let actions = state.shell.as_mut().map(|shell| {
+                                    let previous_size = shell
+                                        .surface_size(state.reported_size.0, state.reported_size.1);
+                                    let actions = shell
+                                        .set_endpoint_snooze_state(&endpoint_id, *snooze_state);
+                                    let next_size = shell
+                                        .surface_size(state.reported_size.0, state.reported_size.1);
+                                    resize_needed = previous_size != next_size;
+                                    if resize_needed {
+                                        shell.invalidate_pane_surface();
+                                    }
+                                    actions
+                                });
+                                let resize = resize_needed
+                                    .then(|| {
+                                        state.shell.as_ref().map(|shell| {
+                                            client_shell_resize_message(
+                                                shell,
+                                                state.reported_size.0,
+                                                state.reported_size.1,
+                                                state.reported_cell_size.0,
+                                                state.reported_cell_size.1,
+                                                state.pixel_geometry_exact,
+                                            )
+                                        })
+                                    })
+                                    .flatten();
+                                if let Some(resize) = resize {
+                                    route_client_shell_resize(
+                                        &mut state,
+                                        &mut write_stream,
+                                        &mut pending_activation,
+                                        resize,
+                                    );
+                                }
+                                if let Some(actions) = actions {
+                                    let _ = dispatch_client_shell_actions(
+                                        actions,
+                                        &mut endpoint_commands,
+                                        &mut write_stream,
+                                        state.shell.as_mut(),
+                                        &mut state.detached_process_children,
+                                        &event_tx,
+                                    )?;
+                                    if let Some(frame) = state.shell.as_mut().and_then(|shell| {
+                                        shell.compose(state.reported_size.0, state.reported_size.1)
+                                    }) {
+                                        state.present_frame(frame);
+                                    }
+                                }
+                                continue;
+                            }
+                            Ok(endpoint::EndpointControlMessage::OptionalFeatureError {
+                                feature,
+                                error,
+                            }) => {
+                                let resize = state.shell.as_mut().and_then(|shell| {
+                                    let previous_size = shell
+                                        .surface_size(state.reported_size.0, state.reported_size.1);
+                                    let _ = shell.clear_endpoint_snooze_state(&endpoint_id);
+                                    let next_size = shell
+                                        .surface_size(state.reported_size.0, state.reported_size.1);
+                                    (previous_size != next_size).then(|| {
+                                        shell.invalidate_pane_surface();
+                                        client_shell_resize_message(
+                                            shell,
+                                            state.reported_size.0,
+                                            state.reported_size.1,
+                                            state.reported_cell_size.0,
+                                            state.reported_cell_size.1,
+                                            state.pixel_geometry_exact,
+                                        )
+                                    })
+                                });
+                                if let Some(resize) = resize {
+                                    route_client_shell_resize(
+                                        &mut state,
+                                        &mut write_stream,
+                                        &mut pending_activation,
+                                        resize,
+                                    );
+                                }
+                                if let Some(shell) = state.shell.as_mut() {
+                                    let _ =
+                                        shell.receive_endpoint_error(format!("{feature}: {error}"));
+                                    if let Some(frame) =
+                                        shell.compose(state.reported_size.0, state.reported_size.1)
+                                    {
+                                        state.present_frame(frame);
+                                    }
+                                }
                                 continue;
                             }
                             Ok(endpoint::EndpointControlMessage::Snapshot(snapshot)) => snapshot,
@@ -2010,7 +2199,10 @@ async fn run_client_loop(
                         let shell = state.shell.as_mut().expect("checked shell mode");
                         let mut outcome = shell.tick_selection_autoscroll(now);
                         for expired in expired_endpoints {
-                            if !shell.endpoint_is_active(&expired.endpoint_id) {
+                            if !shell.endpoint_request_can_complete(
+                                &expired.endpoint_id,
+                                &expired.request_id,
+                            ) {
                                 continue;
                             }
                             let (repaint, actions) = shell.handle_endpoint_result(
@@ -2020,6 +2212,11 @@ async fn run_client_loop(
                             );
                             outcome.repaint |= repaint;
                             outcome.actions.extend(actions);
+                            for request_id in
+                                endpoint_commands.send_next(&expired.endpoint_id, &mut write_stream)
+                            {
+                                shell.cancel_endpoint_request(&request_id);
+                            }
                         }
                         let (effects, notification_repaint) = shell.tick_notifications(now);
                         outcome.repaint |= notification_repaint | shell.tick_copy_feedback(now);

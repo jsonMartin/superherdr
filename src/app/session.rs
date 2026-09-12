@@ -11,6 +11,29 @@ enum SessionSaveJob {
 }
 
 impl App {
+    pub(crate) fn checkpoint_session_for_snooze(&mut self) -> std::io::Result<()> {
+        if !self.policy.persist_session {
+            return Ok(());
+        }
+        if let Some(thread) = self.session_save_thread.take() {
+            thread
+                .join()
+                .map_err(|_| std::io::Error::other("session save thread panicked"))?;
+        }
+        let snapshot = crate::persist::capture(
+            &self.state.workspaces,
+            &self.state.terminals,
+            &self.terminal_runtimes,
+            self.state.active,
+            self.state.selected,
+        );
+        let history = self.persist_pane_history.then(|| {
+            crate::persist::capture_history(&self.state.workspaces, &self.terminal_runtimes)
+        });
+        crate::persist::checkpoint_session_pair(&snapshot, history.as_ref())?;
+        Ok(())
+    }
+
     pub(super) fn schedule_session_save(&mut self) {
         if self.policy.persist_session {
             self.pane_exit_checkpoint_pending = false;

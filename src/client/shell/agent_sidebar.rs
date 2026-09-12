@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use crate::protocol::ClientShellAgent;
+
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -21,6 +23,14 @@ pub(super) fn ordered_agent_pane_ids(
     snapshot: &ClientShellSnapshot,
     sort: crate::config::AgentPanelSortConfig,
 ) -> Vec<String> {
+    ordered_agent_pane_ids_with_filter(snapshot, sort, |_| true)
+}
+
+pub(super) fn ordered_agent_pane_ids_with_filter(
+    snapshot: &ClientShellSnapshot,
+    sort: crate::config::AgentPanelSortConfig,
+    filter: impl Fn(&ClientShellAgent) -> bool,
+) -> Vec<String> {
     if snapshot.agent_view_label.is_some() {
         return snapshot
             .agent_order
@@ -29,12 +39,16 @@ pub(super) fn ordered_agent_pane_ids(
                 snapshot
                     .agents
                     .iter()
-                    .any(|agent| agent.pane_id == pane_id.as_str())
+                    .any(|agent| agent.pane_id == pane_id.as_str() && filter(agent))
             })
             .cloned()
             .collect();
     }
-    let mut agents = snapshot.agents.iter().collect::<Vec<_>>();
+    let mut agents = snapshot
+        .agents
+        .iter()
+        .filter(|agent| filter(agent))
+        .collect::<Vec<_>>();
     if sort == crate::config::AgentPanelSortConfig::Priority {
         agents.sort_by_key(|agent| {
             (
@@ -57,6 +71,26 @@ pub(super) fn render_agent_panel(
     agent_scroll: &mut usize,
     hits: &mut ShellHitMap,
 ) {
+    render_agent_panel_with_filter(
+        buffer,
+        area,
+        snapshot,
+        config,
+        agent_scroll,
+        hits,
+        |_| true,
+    );
+}
+
+pub(super) fn render_agent_panel_with_filter(
+    buffer: &mut Buffer,
+    area: Rect,
+    snapshot: &ClientShellSnapshot,
+    config: &ClientShellConfig,
+    agent_scroll: &mut usize,
+    hits: &mut ShellHitMap,
+    filter: impl Fn(&ClientShellAgent) -> bool,
+) {
     if !render_agent_panel_header(
         buffer,
         area,
@@ -67,7 +101,7 @@ pub(super) fn render_agent_panel(
         return;
     }
 
-    let rows = agent_rows(snapshot, config, None);
+    let rows = agent_rows_with_filter(snapshot, config, None, filter);
     render_agent_list(
         buffer,
         area,
@@ -239,7 +273,16 @@ pub(super) fn agent_rows(
     config: &ClientShellConfig,
     machine: Option<&str>,
 ) -> Vec<AgentRow> {
-    ordered_agent_pane_ids(snapshot, config.agent_panel_sort)
+    agent_rows_with_filter(snapshot, config, machine, |_| true)
+}
+
+pub(super) fn agent_rows_with_filter(
+    snapshot: &ClientShellSnapshot,
+    config: &ClientShellConfig,
+    machine: Option<&str>,
+    filter: impl Fn(&ClientShellAgent) -> bool,
+) -> Vec<AgentRow> {
+    ordered_agent_pane_ids_with_filter(snapshot, config.agent_panel_sort, filter)
         .into_iter()
         .filter_map(|pane_id| {
             let agent = snapshot

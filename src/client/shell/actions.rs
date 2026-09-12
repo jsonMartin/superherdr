@@ -141,6 +141,18 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return;
                 }
+                if matches!(
+                    action,
+                    crate::input::KeybindAction::FocusProject
+                        | crate::input::KeybindAction::ClearProjectFocus
+                        | crate::input::KeybindAction::SnoozeWorkspace
+                        | crate::input::KeybindAction::SnoozeProject
+                        | crate::input::KeybindAction::ShowSnoozed
+                        | crate::input::KeybindAction::ResetFocusSnooze
+                ) {
+                    self.activate_launcher_action(action, outcome);
+                    return;
+                }
                 if action == crate::input::KeybindAction::CopyMode {
                     if self.enter_copy_mode(outcome) {
                         outcome.repaint = true;
@@ -344,12 +356,37 @@ impl ClientShellState {
         title: impl Into<String>,
         body: impl Into<String>,
     ) -> bool {
+        let boot_id = self
+            .snapshot
+            .as_deref()
+            .map(|snapshot| snapshot.boot_id.clone())
+            .unwrap_or_else(|| "disconnected".to_owned());
+        self.push_endpoint_notice_with_boot(&boot_id, kind, code, title, body)
+    }
+
+    fn push_endpoint_notice_for(
+        &mut self,
+        endpoint_id: &ClientEndpointId,
+        boot_id: &str,
+        kind: ClientEndpointNoticeKind,
+        code: impl Into<String>,
+        title: impl Into<String>,
+        body: impl Into<String>,
+    ) -> bool {
+        let boot_id = format!("{}:{boot_id}", endpoint_id.storage_key());
+        self.push_endpoint_notice_with_boot(&boot_id, kind, code, title, body)
+    }
+
+    fn push_endpoint_notice_with_boot(
+        &mut self,
+        boot_id: &str,
+        kind: ClientEndpointNoticeKind,
+        code: impl Into<String>,
+        title: impl Into<String>,
+        body: impl Into<String>,
+    ) -> bool {
         let key = ClientEndpointNoticeKey {
-            boot_id: self
-                .snapshot
-                .as_deref()
-                .map(|snapshot| snapshot.boot_id.clone())
-                .unwrap_or_else(|| "disconnected".to_owned()),
+            boot_id: boot_id.to_owned(),
             kind,
             code: code.into(),
         };
@@ -385,26 +422,82 @@ impl ClientShellState {
         kind: PendingEndpointKind,
         outcome: &mut ClientShellInput,
     ) -> bool {
-        if !self.endpoint_is_online(&self.active_endpoint_id) {
+        let endpoint_id = self.active_endpoint_id.clone();
+        let Some(boot_id) = self.endpoint_boot_id(&endpoint_id).map(str::to_owned) else {
             let label = self.active_endpoint_label().to_owned();
             outcome.repaint |= self.receive_endpoint_unavailable(format!("{label} is not ready"));
             return false;
+        };
+        self.push_endpoint_method_for(&endpoint_id, boot_id, method, kind, outcome)
+    }
+
+    pub(super) fn push_endpoint_method_for(
+        &mut self,
+        endpoint_id: &ClientEndpointId,
+        boot_id: String,
+        method: crate::api::schema::Method,
+        kind: PendingEndpointKind,
+        outcome: &mut ClientShellInput,
+    ) -> bool {
+        let inactive_shared = endpoint_id != &self.active_endpoint_id
+            && crate::client::endpoint_commands::is_shared_snooze_method(&method);
+        if endpoint_id != &self.active_endpoint_id && !inactive_shared {
+            return false;
+        }
+        if !self.endpoint_is_online(endpoint_id) {
+            let label = self.endpoint_label(endpoint_id).to_owned();
+            let body = format!("{label} is not ready");
+            outcome.repaint |= if crate::client::endpoint_commands::is_shared_snooze_method(&method)
+            {
+                self.push_endpoint_notice_for(
+                    endpoint_id,
+                    &boot_id,
+                    ClientEndpointNoticeKind::Unavailable,
+                    body.clone(),
+                    "Endpoint unavailable",
+                    body,
+                )
+            } else {
+                self.receive_endpoint_unavailable(body)
+            };
+            return false;
         }
         let method_name = crate::api::api_method_name(&method).to_owned();
-        if !self.supports_endpoint_method(&method) {
-            outcome.repaint |= self.push_endpoint_notice(
-                ClientEndpointNoticeKind::Unsupported,
-                method_name.clone(),
-                "Action unavailable",
-                format!(
-                    "This server does not support {method_name} yet. Update and restart it to enable this action."
-                ),
+        if !self.supports_endpoint_method_for(endpoint_id, &method) {
+            let body = format!(
+                "This server does not support {method_name} yet. Update and restart it to enable this action."
             );
+            outcome.repaint |= if crate::client::endpoint_commands::is_shared_snooze_method(&method)
+            {
+                self.push_endpoint_notice_for(
+                    endpoint_id,
+                    &boot_id,
+                    ClientEndpointNoticeKind::Unsupported,
+                    method_name.clone(),
+                    "Action unavailable",
+                    body,
+                )
+            } else {
+                self.push_endpoint_notice(
+                    ClientEndpointNoticeKind::Unsupported,
+                    method_name.clone(),
+                    "Action unavailable",
+                    body,
+                )
+            };
             return false;
         }
-        let Some(snapshot) = self.snapshot.as_deref() else {
+        let Some(snapshot) = self
+            .endpoints
+            .iter()
+            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+            .and_then(|endpoint| endpoint.snapshot.as_deref())
+        else {
             return false;
         };
+        if snapshot.boot_id != boot_id {
+            return false;
+        }
         let confirmation_workspace_id = match &method {
             crate::api::schema::Method::TabClose(target) => snapshot
                 .tabs
@@ -427,11 +520,17 @@ impl ClientShellState {
                 boot_id: snapshot.boot_id.clone(),
                 method_name,
                 confirmation_workspace_id,
-                kind,
+                kind: if inactive_shared && matches!(&kind, PendingEndpointKind::Generic) {
+                    PendingEndpointKind::SharedSnooze {
+                        endpoint_id: endpoint_id.clone(),
+                    }
+                } else {
+                    kind
+                },
             },
         );
         outcome.actions.push(ClientShellAction::Endpoint {
-            endpoint_id: self.active_endpoint_id.clone(),
+            endpoint_id: endpoint_id.clone(),
             boot_id: snapshot.boot_id.clone(),
             request: Box::new(crate::api::schema::Request {
                 id: request_id,
@@ -502,6 +601,33 @@ impl ClientShellState {
         repaint
     }
 
+    pub(crate) fn endpoint_request_can_complete(
+        &self,
+        endpoint_id: &ClientEndpointId,
+        request_id: &str,
+    ) -> bool {
+        self.endpoint_is_active(endpoint_id)
+            || self
+                .pending_requests
+                .get(request_id)
+                .is_some_and(|pending| {
+                    matches!(
+                        &pending.kind,
+                        PendingEndpointKind::SharedSnooze {
+                            endpoint_id: pending_endpoint_id,
+                        }
+                            | PendingEndpointKind::SnoozeReset {
+                                endpoint_id: pending_endpoint_id,
+                                ..
+                            }
+                            | PendingEndpointKind::SnoozeManagementWake {
+                                endpoint_id: pending_endpoint_id,
+                                ..
+                            } if pending_endpoint_id == endpoint_id
+                    )
+                })
+    }
+
     pub(crate) fn handle_endpoint_result(
         &mut self,
         boot_id: &str,
@@ -511,20 +637,38 @@ impl ClientShellState {
         let Some(pending) = self.pending_requests.remove(request_id) else {
             return (false, Vec::new());
         };
+        let shared_snooze_endpoint = match &pending.kind {
+            PendingEndpointKind::SharedSnooze { endpoint_id }
+            | PendingEndpointKind::SnoozeReset { endpoint_id, .. }
+            | PendingEndpointKind::SnoozeManagementWake { endpoint_id, .. } => Some(endpoint_id),
+            _ => None,
+        };
+        let target_snapshot = shared_snooze_endpoint
+            .map(|endpoint_id| {
+                self.endpoints
+                    .iter()
+                    .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+                    .and_then(|endpoint| endpoint.snapshot.as_deref())
+            })
+            .unwrap_or_else(|| self.snapshot.as_deref());
         if pending.boot_id != boot_id
-            || self
-                .snapshot
-                .as_deref()
-                .is_none_or(|snapshot| snapshot.boot_id != boot_id)
+            || target_snapshot.is_none_or(|snapshot| snapshot.boot_id != boot_id)
         {
             return (false, Vec::new());
         }
         if result.is_ok() {
-            let timeout_key = ClientEndpointNoticeKey {
-                boot_id: boot_id.to_owned(),
-                kind: ClientEndpointNoticeKind::Timeout,
-                code: pending.method_name.clone(),
-            };
+            let timeout_key = shared_snooze_endpoint.map_or_else(
+                || ClientEndpointNoticeKey {
+                    boot_id: boot_id.to_owned(),
+                    kind: ClientEndpointNoticeKind::Timeout,
+                    code: pending.method_name.clone(),
+                },
+                |endpoint_id| ClientEndpointNoticeKey {
+                    boot_id: format!("{}:{boot_id}", endpoint_id.storage_key()),
+                    kind: ClientEndpointNoticeKind::Timeout,
+                    code: pending.method_name.clone(),
+                },
+            );
             self.endpoint_notice_seen.remove(&timeout_key);
         }
         if let Err(error) = &result {
@@ -559,11 +703,217 @@ impl ClientShellState {
                         error.message.clone(),
                     ),
                 };
-                self.push_endpoint_notice(kind, notice_code, title, body);
+                let body = shared_snooze_endpoint
+                    .filter(|endpoint_id| *endpoint_id != &self.active_endpoint_id)
+                    .map_or(body.clone(), |endpoint_id| {
+                        format!("{}: {body}", self.endpoint_label(endpoint_id))
+                    });
+                if let Some(endpoint_id) = shared_snooze_endpoint {
+                    self.push_endpoint_notice_for(
+                        endpoint_id,
+                        boot_id,
+                        kind,
+                        notice_code,
+                        title,
+                        body,
+                    );
+                } else {
+                    self.push_endpoint_notice(kind, notice_code, title, body);
+                }
             }
         }
         match pending.kind {
             PendingEndpointKind::Generic => {}
+            PendingEndpointKind::SharedSnooze { endpoint_id } => {
+                let state = match result {
+                    Ok(crate::api::schema::ResponseResult::WorkspaceSnooze { state })
+                    | Ok(crate::api::schema::ResponseResult::WorkspaceWake { state }) => state,
+                    _ => return (true, Vec::new()),
+                };
+                if state.boot_id != boot_id {
+                    return (false, Vec::new());
+                }
+                let current_revision = self
+                    .endpoints
+                    .iter()
+                    .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+                    .and_then(|endpoint| endpoint.snooze_state.as_ref())
+                    .filter(|current| current.boot_id == boot_id)
+                    .map_or(0, |current| current.revision);
+                let mut outcome = ClientShellInput::default();
+                if state.revision >= current_revision {
+                    outcome
+                        .actions
+                        .extend(self.set_endpoint_snooze_state(&endpoint_id, state));
+                }
+                return (true, outcome.actions);
+            }
+            PendingEndpointKind::SnoozeManagementWake {
+                endpoint_id,
+                label,
+                project_key,
+                covered_by_project,
+                focus_target,
+            } => {
+                let management_active = matches!(
+                    self.overlay.as_ref(),
+                    Some(ClientShellOverlay::SnoozeManagement(management))
+                        if management.endpoint_id == endpoint_id
+                            && management.boot_id == boot_id
+                );
+                match result {
+                    Ok(crate::api::schema::ResponseResult::WorkspaceWake { state }) => {
+                        if state.boot_id != boot_id {
+                            return (false, Vec::new());
+                        }
+                        let current_revision = self
+                            .endpoints
+                            .iter()
+                            .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+                            .and_then(|endpoint| endpoint.snooze_state.as_ref())
+                            .filter(|current| current.boot_id == boot_id)
+                            .map_or(0, |current| current.revision);
+                        let mut outcome = ClientShellInput::default();
+                        if state.revision >= current_revision {
+                            outcome
+                                .actions
+                                .extend(self.set_endpoint_snooze_state(&endpoint_id, state));
+                        }
+                        let endpoint_snapshot = self
+                            .endpoints
+                            .iter()
+                            .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+                            .and_then(|endpoint| endpoint.snapshot.as_deref());
+                        let retained = management_active
+                            .then_some(covered_by_project)
+                            .and_then(|covered| covered.then_some(project_key))
+                            .flatten()
+                            .and_then(|project_key| {
+                                let project = self
+                                    .endpoints
+                                    .iter()
+                                    .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+                                    .and_then(|endpoint| endpoint.snooze_state.as_ref())?
+                                    .project_records
+                                    .iter()
+                                    .find(|project| {
+                                        project.boot_id == boot_id
+                                            && project.project_key == project_key
+                                    })?;
+                                let project_label = endpoint_snapshot
+                                    .and_then(|snapshot| {
+                                        snapshot.workspaces.iter().find(|workspace| {
+                                            workspace
+                                                .worktree
+                                                .as_ref()
+                                                .is_some_and(|worktree| worktree.key == project_key)
+                                        })
+                                    })
+                                    .and_then(|workspace| workspace.worktree.as_ref())
+                                    .map(|worktree| worktree.label.clone())
+                                    .unwrap_or_else(|| project_key.clone());
+                                Some(ClientSnoozeManagementRecord {
+                                    target: ClientSnoozeManagementTarget::Project {
+                                        project_key: project_key.clone(),
+                                        revision: project.revision,
+                                    },
+                                    label: label.clone(),
+                                    scope: "Workspace".to_owned(),
+                                    project_label: Some(project_label),
+                                    deadline_unix_ms: project.deadline_unix_ms,
+                                    available: false,
+                                    outside_focus: false,
+                                    covered_by_project: true,
+                                    project_key: Some(project_key),
+                                    project_revision: Some(project.revision),
+                                    workspace_id: None,
+                                })
+                            });
+                        let outside_focus = self.snooze_management_currently_outside_focus(
+                            &endpoint_id,
+                            &boot_id,
+                            focus_target.as_ref(),
+                        );
+                        let message = retained.as_ref().map_or_else(
+                            || if outside_focus {
+                                format!("Woke {label}. It remains outside current Focus.")
+                            } else {
+                                format!("Woke {label}.")
+                            },
+                            |record| if outside_focus {
+                                format!("Woke {label}. Still snoozed by project {}; it remains outside current Focus.", record.project_label.as_deref().unwrap_or("parent"))
+                            } else {
+                                format!("Woke {label}. Still snoozed by project {}.", record.project_label.as_deref().unwrap_or("parent"))
+                            },
+                        );
+                        if management_active {
+                            self.open_snooze_management_for_endpoint(
+                                endpoint_id.clone(),
+                                Some(message),
+                            );
+                            if let Some(retained) = retained {
+                                if let Some(ClientShellOverlay::SnoozeManagement(management)) =
+                                    self.overlay.as_mut()
+                                {
+                                    management.parent_action = Some(retained);
+                                }
+                            }
+                        }
+                        return (true, outcome.actions);
+                    }
+                    Err(error) => {
+                        if let Some(ClientShellOverlay::SnoozeManagement(management)) =
+                            self.overlay.as_mut().filter(|overlay| {
+                                matches!(
+                                    overlay,
+                                    ClientShellOverlay::SnoozeManagement(management)
+                                        if management.endpoint_id == endpoint_id
+                                            && management.boot_id == boot_id
+                                )
+                            })
+                        {
+                            management.restriction = Some(error.message);
+                        }
+                        return (true, Vec::new());
+                    }
+                    _ => return (true, Vec::new()),
+                }
+            }
+            PendingEndpointKind::SnoozeReset {
+                endpoint_id,
+                captured_focus,
+            } => {
+                if !self.endpoint_is_online(&endpoint_id)
+                    || self.endpoint_boot_id(&endpoint_id) != Some(boot_id)
+                {
+                    return (false, Vec::new());
+                }
+                let state = match result {
+                    Ok(crate::api::schema::ResponseResult::WorkspaceSnooze { state })
+                    | Ok(crate::api::schema::ResponseResult::WorkspaceWake { state }) => state,
+                    _ => return (true, Vec::new()),
+                };
+                if state.boot_id != boot_id {
+                    return (true, Vec::new());
+                }
+                let current_revision = self
+                    .endpoints
+                    .iter()
+                    .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+                    .and_then(|endpoint| endpoint.snooze_state.as_ref())
+                    .filter(|current| current.boot_id == boot_id)
+                    .map_or(0, |current| current.revision);
+                let mut outcome = ClientShellInput::default();
+                if state.revision >= current_revision {
+                    outcome
+                        .actions
+                        .extend(self.set_endpoint_snooze_state(&endpoint_id, state));
+                }
+                if self.focus_scope == captured_focus {
+                    outcome.actions.extend(self.clear_focus_scope());
+                }
+                return (true, outcome.actions);
+            }
             PendingEndpointKind::ProductAnnouncementDismiss { version, id } => {
                 return match result {
                     Ok(_) => (false, Vec::new()),
@@ -912,6 +1262,13 @@ impl ClientShellState {
         let focused_workspace = snapshot.focused_workspace_id.clone()?;
         let focused_tab = snapshot.focused_tab_id.clone();
         let focused_pane = snapshot.focused_pane_id.clone();
+        let visible_workspaces = super::focus_snooze::visible_workspace_ids(
+            self.focus_scope.as_ref(),
+            self.snooze_state.as_ref(),
+            &self.active_endpoint_id,
+            Some(snapshot.boot_id.as_str()),
+            &snapshot.workspaces,
+        );
         let direction = |action| match action {
             KeybindAction::FocusPaneLeft
             | KeybindAction::SwapPaneLeft
@@ -930,18 +1287,20 @@ impl ClientShellState {
 
         match action {
             KeybindAction::FocusAgent(index) => {
-                let agents = super::agent_sidebar::ordered_agent_pane_ids(
+                let agents = super::agent_sidebar::ordered_agent_pane_ids_with_filter(
                     snapshot,
                     self.config.agent_panel_sort,
+                    |agent| visible_workspaces.contains(&agent.workspace_id),
                 );
                 Some(Method::PaneFocus(PaneTarget {
                     pane_id: agents.get(index)?.clone(),
                 }))
             }
             KeybindAction::PreviousAgent | KeybindAction::NextAgent => {
-                let agents = super::agent_sidebar::ordered_agent_pane_ids(
+                let agents = super::agent_sidebar::ordered_agent_pane_ids_with_filter(
                     snapshot,
                     self.config.agent_panel_sort,
+                    |agent| visible_workspaces.contains(&agent.workspace_id),
                 );
                 if agents.is_empty() {
                     return None;
@@ -976,6 +1335,7 @@ impl ClientShellState {
                     .get(entries.get(index)?.index)?
                     .workspace_id
                     .clone();
+                self.empty_presentation = false;
                 self.reveal_workspace(&workspace_id);
                 Some(Method::WorkspaceFocus(WorkspaceTarget { workspace_id }))
             }
@@ -999,6 +1359,7 @@ impl ClientShellState {
                 let workspace_id = snapshot.workspaces[entries[next].index]
                     .workspace_id
                     .clone();
+                self.empty_presentation = false;
                 self.reveal_workspace(&workspace_id);
                 Some(Method::WorkspaceFocus(WorkspaceTarget { workspace_id }))
             }

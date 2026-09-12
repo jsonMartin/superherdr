@@ -1334,6 +1334,89 @@ impl ClientShellState {
             }
             return;
         }
+        if matches!(self.overlay, Some(ClientShellOverlay::SnoozeManagement(_))) {
+            let row_hit = self
+                .hits
+                .snooze_management_rows
+                .iter()
+                .find(|(rect, _)| super::contains(*rect, point))
+                .copied();
+            match mouse.kind {
+                MouseEventKind::Moved => {
+                    if let Some((_, index)) = row_hit {
+                        self.select_snooze_management_record(index);
+                        outcome.repaint = true;
+                    }
+                }
+                MouseEventKind::ScrollUp => {
+                    self.move_snooze_management_selection(-1);
+                    outcome.repaint = true;
+                }
+                MouseEventKind::ScrollDown => {
+                    self.move_snooze_management_selection(1);
+                    outcome.repaint = true;
+                }
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if let Some((_, index)) = row_hit {
+                        self.select_snooze_management_record(index);
+                    } else if super::contains(self.hits.overlay_primary, point) {
+                        self.activate_snooze_management_wake(outcome);
+                    } else if super::contains(self.hits.snooze_management_wake_all, point) {
+                        self.activate_snooze_management_wake_all();
+                    } else if super::contains(self.hits.snooze_management_wake_parent, point) {
+                        self.activate_snooze_management_parent(outcome);
+                    } else if super::contains(self.hits.snooze_management_reset, point) {
+                        let Some(ClientShellOverlay::SnoozeManagement(management)) =
+                            self.overlay.as_ref()
+                        else {
+                            return;
+                        };
+                        self.open_reset_confirmation(
+                            management.endpoint_id.clone(),
+                            management.boot_id.clone(),
+                            management.expected_revision,
+                            management.records.len(),
+                        );
+                    } else if super::contains(self.hits.snooze_management_previous, point) {
+                        self.cycle_snooze_management_endpoint(-1);
+                    } else if super::contains(self.hits.snooze_management_next, point) {
+                        self.cycle_snooze_management_endpoint(1);
+                    } else if super::contains(self.hits.overlay_cancel, point)
+                        || !super::contains(self.hits.snooze_management_popup, point)
+                    {
+                        self.overlay = None;
+                    }
+                    outcome.repaint = true;
+                }
+                _ => {}
+            }
+            return;
+        }
+        if matches!(self.overlay, Some(ClientShellOverlay::Snooze(_))) {
+            let choice_hit = self
+                .hits
+                .snooze_choice_rows
+                .iter()
+                .find(|(rect, _)| super::contains(*rect, point))
+                .copied();
+            if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+                if let Some((_, index)) = choice_hit {
+                    if let Some(ClientShellOverlay::Snooze(snooze)) = self.overlay.as_mut() {
+                        snooze.selected = index;
+                    }
+                    outcome.repaint = true;
+                } else if super::contains(self.hits.overlay_primary, point) {
+                    self.submit_snooze_overlay(outcome);
+                    outcome.repaint = true;
+                } else if super::contains(self.hits.overlay_cancel, point)
+                    || !super::contains(self.hits.snooze_popup, point)
+                {
+                    self.overlay = None;
+                    outcome.repaint = true;
+                }
+            }
+            return;
+        }
         if matches!(
             self.overlay,
             Some(
@@ -1613,6 +1696,10 @@ impl ClientShellState {
                         );
                         outcome.repaint = true;
                     }
+                    Some(ClientShellOverlay::ConfirmWakeSharedSnoozes(_)) => {
+                        self.submit_wake_shared_snoozes(outcome);
+                        outcome.repaint = true;
+                    }
                     _ => {}
                 }
             } else if super::contains(self.hits.overlay_clear, point) {
@@ -1626,6 +1713,38 @@ impl ClientShellState {
                 outcome.repaint = true;
             }
             return;
+        }
+
+        if self.config.mouse_capture {
+            let recovery_bar = self
+                .last_composed_size
+                .map(|(cols, rows)| self.layout(cols, rows).recovery_bar)
+                .unwrap_or_default();
+            if super::contains(recovery_bar, point) {
+                if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+                    if super::contains(self.hits.feature_clear_focus, point) {
+                        outcome.actions.extend(self.clear_focus_scope());
+                        outcome.repaint = true;
+                    } else if super::contains(self.hits.feature_show_snoozed, point) {
+                        self.open_snooze_recovery(mouse.column, mouse.row);
+                        outcome.repaint = true;
+                    }
+                }
+                return;
+            }
+        }
+
+        if self.empty_presentation && mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+            if super::contains(self.hits.empty_recovery, point) {
+                self.open_snooze_recovery(mouse.column, mouse.row);
+                outcome.repaint = true;
+                return;
+            }
+            if super::contains(self.hits.empty_clear_focus, point) {
+                outcome.actions.extend(self.clear_focus_scope());
+                outcome.repaint = true;
+                return;
+            }
         }
 
         if mouse.kind == MouseEventKind::Drag(MouseButton::Left) {
@@ -1718,11 +1837,14 @@ impl ClientShellState {
                 if !self.config.mouse_capture {
                     return;
                 }
-                let workspace_id = (!self.sidebar_collapsed)
-                    .then(|| self.active_endpoint_workspace_at(point))
-                    .flatten();
-                if let Some(workspace_id) = workspace_id {
-                    self.open_workspace_context_menu(workspace_id, mouse.column, mouse.row);
+                let workspace = self.endpoint_workspace_at(point);
+                if let Some((endpoint_id, workspace_id)) = workspace {
+                    self.open_endpoint_workspace_context_menu(
+                        endpoint_id,
+                        workspace_id,
+                        mouse.column,
+                        mouse.row,
+                    );
                     outcome.repaint = true;
                     return;
                 }
@@ -2259,6 +2381,9 @@ impl ClientShellState {
         let Some(kind) = crate::protocol::ClientMouseKind::from_crossterm(mouse.kind) else {
             return;
         };
+        if self.empty_presentation && !matches!(kind, crate::protocol::ClientMouseKind::Up(_)) {
+            return;
+        }
         let position = self.pane_mouse_position(hit, mouse);
         let geometry = matches!(position, ClientMousePosition::Pixels { .. }).then_some(
             crate::protocol::ClientMouseGeometry {

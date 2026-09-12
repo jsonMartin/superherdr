@@ -1,4 +1,6 @@
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use tracing::warn;
 
@@ -14,6 +16,8 @@ fn session_path() -> PathBuf {
 fn session_history_path() -> PathBuf {
     crate::session::data_dir().join("session-history.json")
 }
+
+static NEXT_CHECKPOINT_TEMP: AtomicU64 = AtomicU64::new(1);
 
 // Follow symlinks manually so a write through a (possibly dangling) symlink
 // lands on the target. `fs::canonicalize` requires the target to exist, which
@@ -43,6 +47,55 @@ fn resolve_write_target(path: &Path) -> std::io::Result<PathBuf> {
 
 pub(super) fn save_to_path(path: &Path, snapshot: &SessionSnapshot) -> std::io::Result<()> {
     save_json_to_path(path, snapshot)
+}
+
+fn checkpoint_json_to_path<T: serde::Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
+    let target = resolve_write_target(path)?;
+    let parent = target
+        .parent()
+        .ok_or_else(|| std::io::Error::other("session path has no parent"))?;
+    std::fs::create_dir_all(parent)?;
+    let sequence = NEXT_CHECKPOINT_TEMP.fetch_add(1, Ordering::Relaxed);
+    let name = target
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("session.json");
+    let temp = parent.join(format!(".{name}.snooze.{sequence}.tmp"));
+    let mut file = crate::platform::create_private_state_file(&temp)?;
+    let json = serde_json::to_vec_pretty(value)?;
+    if let Err(err) = file.write_all(&json).and_then(|()| file.sync_all()) {
+        drop(file);
+        let _ = std::fs::remove_file(&temp);
+        return Err(err);
+    }
+    drop(file);
+    if let Err(err) = crate::platform::replace_file(&temp, &target) {
+        let _ = std::fs::remove_file(&temp);
+        return Err(err);
+    }
+    crate::platform::sync_parent_directory(parent)
+}
+
+pub(crate) fn checkpoint_session_pair(
+    snapshot: &SessionSnapshot,
+    history: Option<&SessionHistorySnapshot>,
+) -> std::io::Result<()> {
+    checkpoint_session_pair_to_paths(&session_path(), &session_history_path(), snapshot, history)
+}
+
+pub(super) fn checkpoint_session_pair_to_paths(
+    session: &Path,
+    history_path: &Path,
+    snapshot: &SessionSnapshot,
+    history: Option<&SessionHistorySnapshot>,
+) -> std::io::Result<()> {
+    checkpoint_json_to_path(session, snapshot)?;
+    if let Some(history) = history {
+        checkpoint_json_to_path(history_path, history)?;
+    } else {
+        clear_path(history_path)?;
+    }
+    Ok(())
 }
 
 fn save_json_to_path<T: serde::Serialize>(path: &Path, snapshot: &T) -> std::io::Result<()> {
@@ -225,6 +278,44 @@ mod tests {
                 }],
             }],
         }
+    }
+
+    #[test]
+    fn snooze_checkpoint_replaces_history_and_propagates_history_failure() {
+        let (session, history) = temp_session_paths("snooze-pair");
+        save_to_paths(
+            &session,
+            &history,
+            &empty_snapshot(),
+            Some(&history_snapshot("old")),
+        )
+        .unwrap();
+        checkpoint_session_pair_to_paths(
+            &session,
+            &history,
+            &empty_snapshot(),
+            Some(&history_snapshot("HISTORY_SENTINEL")),
+        )
+        .unwrap();
+        let saved: SessionHistorySnapshot =
+            serde_json::from_slice(&std::fs::read(&history).unwrap()).unwrap();
+        assert_eq!(
+            saved.workspaces[0].tabs[0].panes[&0].ansi,
+            "HISTORY_SENTINEL"
+        );
+        std::fs::remove_file(&history).unwrap();
+        std::fs::create_dir(&history).unwrap();
+        assert!(checkpoint_session_pair_to_paths(
+            &session,
+            &history,
+            &empty_snapshot(),
+            Some(&history_snapshot("new"))
+        )
+        .is_err());
+        std::fs::remove_dir(&history).unwrap();
+        checkpoint_session_pair_to_paths(&session, &history, &empty_snapshot(), None).unwrap();
+        assert!(!history.exists());
+        std::fs::remove_dir_all(session.parent().unwrap()).unwrap();
     }
 
     #[test]

@@ -17,10 +17,23 @@ pub(super) fn dispatch_client_shell_actions(
                 boot_id,
                 request,
             } => {
-                if let Some(connection) = endpoints.connection(&endpoint_id).filter(|_| {
-                    endpoints.active_id() == &endpoint_id && endpoints.active_surface_available()
-                }) {
-                    endpoint_commands.enqueue(endpoint_id, connection.generation, boot_id, request);
+                let inactive_shared = !endpoint_id.eq(endpoints.active_id())
+                    && endpoint_commands::is_shared_snooze_method(&request.method);
+                let generation = endpoints.connection(&endpoint_id).and_then(|connection| {
+                    (inactive_shared
+                        || (endpoints.active_id() == &endpoint_id
+                            && endpoints.active_surface_available()))
+                    .then_some(connection.generation)
+                });
+                if let Some(generation) = generation {
+                    let request_id = request.id.clone();
+                    endpoint_commands.enqueue(endpoint_id.clone(), generation, boot_id, request);
+                    for request_id in endpoint_commands.send_next(&endpoint_id, endpoints) {
+                        if let Some(shell) = shell.as_deref_mut() {
+                            repaint |= shell.cancel_endpoint_request(&request_id);
+                        }
+                    }
+                    debug!(%request_id, ?endpoint_id, "queued endpoint request");
                 } else if let Some(shell) = shell.as_deref_mut() {
                     repaint |= shell.cancel_endpoint_request(&request.id);
                 }
@@ -304,17 +317,21 @@ pub(super) fn complete_endpoint_activation(
         let Some(activation) = pending.as_mut() else {
             return Ok(None);
         };
+        let explicit_workspace_target = activation
+            .explicit_workspace_focus_target()
+            .map(str::to_owned);
         let Some(shell) = state.shell.as_mut() else {
             return Ok(None);
         };
         match activation.complete(shell, endpoints) {
-            Ok(completion) => completion,
+            Ok(completion) => (completion, explicit_workspace_target),
             Err(error) => {
                 shell.receive_endpoint_unavailable(error);
                 return Ok(None);
             }
         }
     };
+    let (completion, explicit_workspace_target) = completion;
 
     if matches!(
         completion,
@@ -349,6 +366,13 @@ pub(super) fn complete_endpoint_activation(
     }
 
     let _ = pending.take();
+    if completion == endpoint::ActivationCompletion::Activated {
+        if let Some(workspace_id) = explicit_workspace_target {
+            if let Some(shell) = state.shell.as_mut() {
+                shell.commit_explicit_workspace_focus(&workspace_id);
+            }
+        }
+    }
     endpoints.unfreeze_input();
     let successor = match completion {
         endpoint::ActivationCompletion::RestoredSource {

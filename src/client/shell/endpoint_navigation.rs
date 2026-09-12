@@ -1,6 +1,17 @@
 use super::*;
 
 impl ClientShellState {
+    pub(super) fn endpoint_workspace_at(
+        &self,
+        point: (u16, u16),
+    ) -> Option<(ClientEndpointId, String)> {
+        self.hits
+            .workspaces
+            .iter()
+            .find(|hit| super::contains(hit.rect, point))
+            .map(|hit| (hit.endpoint_id.clone(), hit.workspace_id.clone()))
+    }
+
     pub(super) fn active_endpoint_workspace_at(&self, point: (u16, u16)) -> Option<String> {
         self.hits
             .workspaces
@@ -35,6 +46,7 @@ impl ClientShellState {
         press: ClientWorkspacePress,
         outcome: &mut ClientShellInput,
     ) {
+        self.empty_presentation = false;
         if press.endpoint_id == self.active_endpoint_id {
             self.push_endpoint_method(
                 crate::api::schema::Method::WorkspaceFocus(crate::api::schema::WorkspaceTarget {
@@ -140,17 +152,25 @@ impl ClientShellState {
                         .snapshot
                         .as_deref()
                         .map_or_else(Vec::new, |snapshot| {
-                            render::workspace_entries(snapshot, &HashSet::new())
-                                .into_iter()
-                                .filter_map(|entry| {
-                                    snapshot.workspaces.get(entry.index).map(|workspace| {
-                                        (
-                                            endpoint.endpoint_id.clone(),
-                                            workspace.workspace_id.clone(),
-                                        )
-                                    })
+                            let visible_workspaces = super::focus_snooze::visible_workspace_ids(
+                                endpoint.focus_scope.as_ref(),
+                                endpoint.snooze_state.as_ref(),
+                                &endpoint.endpoint_id,
+                                Some(snapshot.boot_id.as_str()),
+                                &snapshot.workspaces,
+                            );
+                            render::workspace_entries_with_filter(
+                                snapshot,
+                                &HashSet::new(),
+                                |workspace| visible_workspaces.contains(&workspace.workspace_id),
+                            )
+                            .into_iter()
+                            .filter_map(|entry| {
+                                snapshot.workspaces.get(entry.index).map(|workspace| {
+                                    (endpoint.endpoint_id.clone(), workspace.workspace_id.clone())
                                 })
-                                .collect()
+                            })
+                            .collect()
                         })
                 })
                 .collect::<Vec<_>>();
@@ -263,6 +283,7 @@ impl ClientShellState {
             return false;
         }
         if endpoint_id == self.active_endpoint_id {
+            self.empty_presentation = false;
             let method = match target {
                 ClientEndpointFocusTarget::Workspace(workspace_id) => {
                     crate::api::schema::Method::WorkspaceFocus(

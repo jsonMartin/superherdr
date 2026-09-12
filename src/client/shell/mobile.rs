@@ -751,7 +751,18 @@ fn mobile_items(
         palette,
     ));
     for endpoint in super::aggregate_navigation::cached_endpoint_snapshots(endpoints) {
-        for entry in super::render::workspace_entries(endpoint.snapshot, &HashSet::new()) {
+        let visible_workspaces = super::focus_snooze::visible_workspace_ids(
+            endpoint.focus_scope,
+            endpoint.snooze_state,
+            endpoint.endpoint_id,
+            Some(endpoint.snapshot.boot_id.as_str()),
+            &endpoint.snapshot.workspaces,
+        );
+        for entry in super::render::workspace_entries_with_filter(
+            endpoint.snapshot,
+            &HashSet::new(),
+            |workspace| visible_workspaces.contains(&workspace.workspace_id),
+        ) {
             let Some(workspace) = endpoint.snapshot.workspaces.get(entry.index) else {
                 continue;
             };

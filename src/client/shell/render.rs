@@ -7,10 +7,14 @@ pub(in crate::client::shell) mod sidebar;
 #[path = "../shell/tabs.rs"]
 mod tabs;
 
-pub(super) use super::agent_sidebar::{ordered_agent_pane_ids, render_agent_panel};
 pub(super) use super::aggregate_navigation::navigator_rows as client_navigator_rows;
+pub(super) use super::agent_sidebar::{
+    ordered_agent_pane_ids_with_filter, render_agent_panel_with_filter,
+};
 pub(super) use overlays::{render_client_overlay, render_context_menu, render_global_menu};
-pub(super) use sidebar::{render_collapsed_sidebar, render_sidebar, workspace_entries};
+pub(super) use sidebar::{
+    render_collapsed_sidebar, render_sidebar, workspace_entries, workspace_entries_with_filter,
+};
 pub(super) use tabs::{render_tab_bar, tab_bar_status_width};
 
 pub(in crate::client::shell) fn render_sidebar_background(
@@ -226,6 +230,8 @@ pub(super) struct ShellRenderState<'a> {
     pub(super) selected_workspace_id: Option<&'a str>,
     pub(super) dragged_workspace_id: Option<&'a str>,
     pub(super) workspace_drop_indicator_row: Option<u16>,
+    pub(super) focus_scope: Option<&'a ClientFocusScope>,
+    pub(super) snooze_state: Option<&'a crate::api::schema::WorkspaceSnoozeState>,
 }
 
 pub(super) fn render_shell(
@@ -272,6 +278,8 @@ pub(super) fn render_shell(
                 snapshot,
                 config,
                 state.selected_workspace_id,
+                state.focus_scope,
+                state.snooze_state,
                 &mut hits,
             );
         } else {

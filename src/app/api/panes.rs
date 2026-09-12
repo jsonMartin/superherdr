@@ -955,6 +955,9 @@ impl App {
         let recovery_context = PaneMoveRecoveryContext {
             source_ws_idx,
             previous_workspace_id: previous_workspace_id.clone(),
+            previous_workspace_lifetime_id: self.state.workspaces[source_ws_idx]
+                .lifetime_id
+                .clone(),
             previous_workspace_label: self.state.workspaces[source_ws_idx].custom_name.clone(),
             previous_tab_label: self.state.workspaces[source_ws_idx].tabs[source_tab_idx]
                 .custom_name
@@ -1367,6 +1370,7 @@ impl App {
                 self.render_dirty.clone(),
             );
             workspace.id = context.previous_workspace_id;
+            workspace.lifetime_id = context.previous_workspace_lifetime_id;
             workspace.worktree_space = context.previous_worktree_space;
             let insert_idx = context.source_ws_idx.min(self.state.workspaces.len());
             if let Some(active) = self.state.active {
@@ -2123,6 +2127,7 @@ enum ResolvedPaneMoveDestination {
 struct PaneMoveRecoveryContext {
     source_ws_idx: usize,
     previous_workspace_id: String,
+    previous_workspace_lifetime_id: String,
     previous_workspace_label: Option<String>,
     previous_tab_label: Option<String>,
     previous_worktree_space: Option<crate::workspace::WorktreeSpaceMembership>,
@@ -3628,9 +3633,11 @@ mod tests {
             .unwrap()
             .clone();
         let previous_workspace_id = app.public_workspace_id(0);
+        let previous_workspace_lifetime_id = app.state.workspaces[0].lifetime_id.clone();
         let context = PaneMoveRecoveryContext {
             source_ws_idx: 0,
             previous_workspace_id: previous_workspace_id.clone(),
+            previous_workspace_lifetime_id: previous_workspace_lifetime_id.clone(),
             previous_workspace_label: app.state.workspaces[0].custom_name.clone(),
             previous_tab_label: app.state.workspaces[0].tabs[0].custom_name.clone(),
             previous_worktree_space: app.state.workspaces[0].worktree_space.clone(),
@@ -3647,6 +3654,10 @@ mod tests {
 
         assert_eq!(app.state.workspaces.len(), 1);
         assert_eq!(app.state.workspaces[0].id, previous_workspace_id);
+        assert_eq!(
+            app.state.workspaces[0].lifetime_id,
+            previous_workspace_lifetime_id
+        );
         assert_eq!(
             app.state.workspaces[0].tabs[0].terminal_id(source),
             Some(&source_terminal)
