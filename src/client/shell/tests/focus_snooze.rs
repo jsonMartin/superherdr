@@ -497,16 +497,8 @@ fn inactive_wake_shared_confirmation_targets_captured_endpoint() {
         notice: None,
     });
     state.set_endpoint_snooze_state(&remote, remote_state);
-    state.open_endpoint_workspace_context_menu(remote.clone(), "ws_2".into(), 10, 5);
-    let index = match state.overlay.as_ref() {
-        Some(ClientShellOverlay::ContextMenu(menu)) => menu
-            .items()
-            .iter()
-            .position(|item| item.action == ClientContextMenuAction::WakeSharedSnoozes)
-            .expect("wake shared menu item"),
-        _ => panic!("expected context menu"),
-    };
-    state.activate_context_menu_item(index, &mut ClientShellInput::default());
+    state.open_snooze_management_for_endpoint(remote.clone(), None);
+    state.activate_snooze_management_wake_all();
     let text = composed_text(&state.compose(100, 30).unwrap());
     assert!(text.contains("2 records on Remote"), "{text}");
 
@@ -673,7 +665,7 @@ fn incidental_empty_click_does_not_wake_and_narrow_recovery_is_labeled() {
 }
 
 #[test]
-fn snoozed_records_menu_is_reachable_while_another_workspace_is_visible() {
+fn snoozed_records_footer_is_reachable_while_another_workspace_is_visible() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     let mut snapshot = two_workspace_snapshot();
     snapshot.workspaces[0].worktree = Some(ClientShellWorktree {
@@ -703,16 +695,19 @@ fn snoozed_records_menu_is_reachable_while_another_workspace_is_visible() {
     state.set_pane_surface(surface());
 
     state.open_workspace_context_menu("ws_2".into(), 0, 0);
-    state.compose(80, 20).expect("workspace menu frame");
-    let show_index = match state.overlay.as_ref() {
-        Some(ClientShellOverlay::ContextMenu(menu)) => menu
-            .items()
+    if let Some(ClientShellOverlay::ContextMenu(menu)) = state.overlay.as_ref() {
+        let labels: Vec<_> = menu.items().into_iter().map(|item| item.label).collect();
+        assert!(labels.contains(&"Snooze workspace".to_owned()));
+        assert!(!labels
             .iter()
-            .position(|item| item.label == "Show snoozed records")
-            .expect("show records action"),
-        _ => panic!("expected workspace menu"),
-    };
-    let show_row = state.hits.context_menu_rows[show_index].0;
+            .any(|label| label.contains("Show snoozed") || label.contains("Wake shared")));
+    } else {
+        panic!("expected workspace menu");
+    }
+    state.overlay = None;
+    state.compose(80, 20).expect("workspace frame");
+    let show_row = state.hits.feature_show_snoozed;
+    assert!(show_row.width > 0);
     let opened = state.handle_raw_events(vec![crate::raw_input::RawInputEvent::Mouse(
         crossterm::event::MouseEvent {
             kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
@@ -728,6 +723,17 @@ fn snoozed_records_menu_is_reachable_while_another_workspace_is_visible() {
         Some(ClientShellOverlay::SnoozeManagement(_))
     ));
     assert!(composed_text(&frame).contains("repo-a"));
+    // The tree selects the project parent row first; move to the covered workspace row
+    // that has a covering parent before pressing P.
+    let covered_index = match state.overlay.as_ref() {
+        Some(ClientShellOverlay::SnoozeManagement(view)) => view
+            .records
+            .iter()
+            .position(|record| record.workspace_id.as_deref() == Some("ws_1"))
+            .expect("covered workspace row"),
+        _ => panic!("expected records management"),
+    };
+    state.select_snooze_management_record(covered_index);
     let selected = state.handle_raw_events(vec![crate::raw_input::RawInputEvent::Key(
         crate::input::TerminalKey::new(KeyCode::Char('p'), KeyModifiers::empty()),
     )]);
@@ -801,94 +807,124 @@ fn local_agent_shortcuts_skip_hidden_workspaces() {
 
 #[test]
 fn focus_snooze_footer_keeps_surface_height_and_stays_on_sidebar_row() {
-    for (sidebar_collapsed, focus_glyph) in [(false, "🎯"), (true, "◉")] {
-        let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-        state.set_snapshot(Box::new(two_workspace_snapshot()));
-        state.sidebar_collapsed = sidebar_collapsed;
-        let baseline = state.surface_size(100, 30);
-        state.set_focus_scope(Some(ClientFocusScope::StandaloneWorkspace {
-            endpoint_id: ClientEndpointId::Local,
-            boot_id: "boot-1".into(),
-            workspace_id: "ws_1".into(),
-        }));
-        state.set_snooze_state(snooze_state(&["ws_2"], 1));
-        assert_eq!(
-            state.surface_size(100, 30),
-            baseline,
-            "focus/snooze must not resize the pane surface"
-        );
-        state.set_pane_surface(surface());
-        let frame = state.compose(100, 30).expect("focused frame");
-        let footer_row: String = frame.cells
-            .iter()
-            .skip(100usize * 29)
-            .map(|cell| cell.symbol.as_str())
-            .collect();
-        assert!(footer_row.contains(focus_glyph), "{footer_row}");
-        let clear = state.hits.feature_clear_focus;
-        let show = state.hits.feature_show_snoozed;
-        let toggle = state.hits.sidebar_toggle;
-        assert!(clear.width > 0 && show.width > 0);
-        assert_eq!(clear.y, 29);
-        assert_eq!(show.y, 29);
-        let overlaps = |left: Rect, right: Rect| {
-            left.x < right.right()
-                && right.x < left.right()
-                && left.y < right.bottom()
-                && right.y < left.bottom()
-        };
-        assert!(!overlaps(clear, toggle), "{clear:?} overlaps {toggle:?}");
-        assert!(!overlaps(show, toggle), "{show:?} overlaps {toggle:?}");
-        assert!(!overlaps(clear, show), "{clear:?} overlaps {show:?}");
-        assert!(toggle.width > 0, "sidebar toggle must stay clickable");
-        let sidebar = state.layout(100, 30).sidebar;
-        assert!(clear.right() <= sidebar.right() && show.right() <= sidebar.right());
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(two_workspace_snapshot()));
+    let baseline = state.surface_size(100, 30);
+    state.set_focus_scope(Some(ClientFocusScope::StandaloneWorkspace {
+        endpoint_id: ClientEndpointId::Local,
+        boot_id: "boot-1".into(),
+        workspace_id: "ws_1".into(),
+    }));
+    state.set_snooze_state(snooze_state(&["ws_2"], 1));
+    assert_eq!(
+        state.surface_size(100, 30),
+        baseline,
+        "focus/snooze must not resize the pane surface"
+    );
+    state.set_pane_surface(surface());
+    let frame = state.compose(100, 30).expect("focused frame");
+    let footer_row: String = frame
+        .cells
+        .iter()
+        .skip(100usize * 29)
+        .map(|cell| cell.symbol.as_str())
+        .collect();
+    assert!(footer_row.contains("🎯"), "{footer_row}");
+    assert!(footer_row.contains("Snoozed · 1"), "{footer_row}");
+    let clear = state.hits.feature_clear_focus;
+    let show = state.hits.feature_show_snoozed;
+    let toggle = state.hits.sidebar_toggle;
+    assert!(clear.width > 0 && show.width > 0);
+    assert_eq!(clear.y, 29);
+    assert_eq!(show.y, 29);
+    let overlaps = |left: Rect, right: Rect| {
+        left.x < right.right()
+            && right.x < left.right()
+            && left.y < right.bottom()
+            && right.y < left.bottom()
+    };
+    assert!(!overlaps(clear, toggle), "{clear:?} overlaps {toggle:?}");
+    assert!(!overlaps(show, toggle), "{show:?} overlaps {toggle:?}");
+    assert!(!overlaps(clear, show), "{clear:?} overlaps {show:?}");
+    assert!(toggle.width > 0, "sidebar toggle must stay clickable");
+    let sidebar = state.layout(100, 30).sidebar;
+    assert!(clear.right() <= sidebar.right() && show.right() <= sidebar.right());
+    let show_outcome = state.handle_raw_events(vec![crate::raw_input::RawInputEvent::Mouse(
+        crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: show.x,
+            row: show.y,
+            modifiers: KeyModifiers::empty(),
+        },
+    )]);
+    assert!(show_outcome.actions.is_empty());
+    assert!(show_outcome.requests.is_empty());
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::SnoozeManagement(_))
+    ));
+    state.overlay = None;
+    state.compose(100, 30).unwrap();
+    let clear_outcome = state.handle_raw_events(vec![crate::raw_input::RawInputEvent::Mouse(
+        crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: clear.x,
+            row: clear.y,
+            modifiers: KeyModifiers::empty(),
+        },
+    )]);
+    assert!(state.focus_scope.is_none());
+    assert_eq!(state.snooze_state.as_ref().unwrap().records.len(), 1);
+    assert!(
+        !clear_outcome.resize,
+        "clearing Focus must not resize the pane surface"
+    );
+    assert!(
+        state.pane_surface.is_some(),
+        "clearing Focus must not invalidate the composed surface"
+    );
+    assert!(clear_outcome.requests.is_empty());
+}
 
-        if !sidebar_collapsed {
-            assert!(footer_row.contains("Snoozed(1)"), "{footer_row}");
-        }
-        let show_outcome =
-            state.handle_raw_events(vec![crate::raw_input::RawInputEvent::Mouse(
-                crossterm::event::MouseEvent {
-                    kind: crossterm::event::MouseEventKind::Down(
-                        crossterm::event::MouseButton::Left,
-                    ),
-                    column: show.x,
-                    row: show.y,
-                    modifiers: KeyModifiers::empty(),
-                },
-            )]);
-        assert!(show_outcome.actions.is_empty());
-        assert!(show_outcome.requests.is_empty());
-        assert!(matches!(
-            state.overlay,
-            Some(ClientShellOverlay::SnoozeManagement(_))
-        ));
-        state.overlay = None;
-        state.compose(100, 30).unwrap();
-        let clear_outcome =
-            state.handle_raw_events(vec![crate::raw_input::RawInputEvent::Mouse(
-                crossterm::event::MouseEvent {
-                    kind: crossterm::event::MouseEventKind::Down(
-                        crossterm::event::MouseButton::Left,
-                    ),
-                    column: clear.x,
-                    row: clear.y,
-                    modifiers: KeyModifiers::empty(),
-                },
-            )]);
-        assert!(state.focus_scope.is_none());
-        assert_eq!(state.snooze_state.as_ref().unwrap().records.len(), 1);
-        assert!(
-            !clear_outcome.resize,
-            "clearing Focus must not resize the pane surface"
-        );
-        assert!(
-            state.pane_surface.is_some(),
-            "clearing Focus must not invalidate the composed surface"
-        );
-        assert!(clear_outcome.requests.is_empty());
-    }
+#[test]
+fn compact_sidebar_bottom_row_keeps_only_the_expand_toggle() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(two_workspace_snapshot()));
+    state.sidebar_collapsed = true;
+    let baseline = state.surface_size(100, 30);
+    state.set_focus_scope(Some(ClientFocusScope::StandaloneWorkspace {
+        endpoint_id: ClientEndpointId::Local,
+        boot_id: "boot-1".into(),
+        workspace_id: "ws_1".into(),
+    }));
+    state.set_snooze_state(snooze_state(&["ws_2"], 1));
+    assert_eq!(
+        state.surface_size(100, 30),
+        baseline,
+        "compact sidebars must not lose terminal height for feature controls"
+    );
+    state.set_pane_surface(surface());
+    let frame = state.compose(100, 30).expect("compact frame");
+    let footer_row: String = frame
+        .cells
+        .iter()
+        .skip(100usize * 29)
+        .map(|cell| cell.symbol.as_str())
+        .collect();
+    assert!(footer_row.contains("»"), "{footer_row}");
+    assert!(
+        !footer_row.contains("◉")
+            && !footer_row.contains("○")
+            && !footer_row.contains("🎯")
+            && !footer_row.contains("Snoozed"),
+        "compact bottom row must stay feature-free: {footer_row}"
+    );
+    assert_eq!(
+        state.hits.feature_clear_focus.width, 0,
+        "compact sidebars register no feature controls"
+    );
+    assert_eq!(state.hits.feature_show_snoozed.width, 0);
+    assert!(state.hits.sidebar_toggle.width > 0);
 }
 
 #[test]
@@ -897,7 +933,8 @@ fn focus_snooze_footer_all_projects_glyph_focuses_current_workspace() {
     state.set_snapshot(Box::new(two_workspace_snapshot()));
     state.set_pane_surface(surface());
     let frame = state.compose(100, 30).expect("all-projects frame");
-    let footer_row: String = frame.cells
+    let footer_row: String = frame
+        .cells
         .iter()
         .skip(100usize * 29)
         .map(|cell| cell.symbol.as_str())
@@ -987,7 +1024,7 @@ fn focus_snooze_recovery_bar_counts_explicit_persisted_records_once() {
     state.set_snooze_state(shared);
     let frame = state.compose(100, 30).unwrap();
     let text = composed_text(&frame);
-    assert!(text.contains("Snoozed(1)"), "{text}");
+    assert!(text.contains("Snoozed · 1"), "{text}");
     assert!(state.hits.feature_show_snoozed.width > 0);
 }
 
@@ -1002,12 +1039,13 @@ fn snooze_persistence_failure_shows_warning_marker_at_zero_count() {
     });
     state.set_snooze_state(shared);
     let frame = state.compose(100, 30).unwrap();
-    let footer_row: String = frame.cells
+    let footer_row: String = frame
+        .cells
         .iter()
         .skip(100usize * 29)
         .map(|cell| cell.symbol.as_str())
         .collect();
-    assert!(footer_row.contains("Snoozed(0) ⚠"), "{footer_row}");
+    assert!(footer_row.contains("Snoozed · 0 ⚠"), "{footer_row}");
     assert!(state.hits.feature_show_snoozed.width > 0);
     let show = state.hits.feature_show_snoozed;
     let outcome = state.handle_raw_events(vec![crate::raw_input::RawInputEvent::Mouse(
@@ -1560,9 +1598,7 @@ fn focus_project_context_menu_selects_clicked_workspace_exactly_once() {
     );
     match &outcome.actions[..] {
         [ClientShellAction::Endpoint {
-            request,
-            boot_id,
-            ..
+            request, boot_id, ..
         }] => match &request.method {
             crate::api::schema::Method::WorkspaceFocus(target) => {
                 assert_eq!(target.workspace_id, "ws_3");
@@ -1732,25 +1768,25 @@ fn sidebar_footer_row_is_reserved_from_agent_projections() {
 }
 
 #[test]
-fn collapsed_sidebar_sections_keep_workspace_and_agent_rows_off_the_footer_row() {
+fn collapsed_sidebar_sections_reserve_the_toggle_row_at_all_heights() {
     for height in 1..=8u16 {
         let area = Rect::new(0, 0, 4, height);
         let (workspace_area, divider_y, detail_area) =
             crate::client::shell::sidebar::collapsed_sidebar_sections(area);
-        let footer_limit = area.bottom().saturating_sub(1);
+        let toggle_limit = area.bottom().saturating_sub(1);
         for rect in [workspace_area, detail_area] {
             if !rect.is_empty() {
                 assert!(
-                    rect.bottom() <= footer_limit,
-                    "height {height}: {rect:?} reaches the footer row (limit {footer_limit})"
+                    rect.bottom() <= toggle_limit,
+                    "height {height}: {rect:?} reaches the toggle row (limit {toggle_limit})"
                 );
                 assert!(rect.right() <= area.right(), "height {height}: {rect:?}");
             }
         }
         if let Some(divider_y) = divider_y {
             assert!(
-                divider_y < footer_limit,
-                "height {height}: divider {divider_y} sits on the footer row"
+                divider_y < toggle_limit,
+                "height {height}: divider {divider_y} sits on the toggle row"
             );
         }
     }
@@ -1758,3 +1794,55 @@ fn collapsed_sidebar_sections_keep_workspace_and_agent_rows_off_the_footer_row()
 
 #[path = "snooze_management.rs"]
 mod snooze_management_tests;
+
+#[test]
+fn focused_header_names_scope_and_clears_without_waking() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut snapshot = two_workspace_snapshot();
+    snapshot.workspaces[0].label = "Timelace".into();
+    state.set_snapshot(Box::new(snapshot));
+    let frame = state.compose(100, 30).unwrap();
+    let normal_header: String = frame
+        .cells
+        .iter()
+        .take(25)
+        .map(|cell| cell.symbol.as_str())
+        .collect();
+    state.set_focus_scope(Some(ClientFocusScope::StandaloneWorkspace {
+        endpoint_id: ClientEndpointId::Local,
+        boot_id: "boot-1".into(),
+        workspace_id: "ws_1".into(),
+    }));
+    state.set_snooze_state(snooze_state(&["ws_2"], 1));
+    let frame = state.compose(100, 30).unwrap();
+    let header: String = frame
+        .cells
+        .iter()
+        .take(25)
+        .map(|cell| cell.symbol.as_str())
+        .collect();
+    assert!(header.contains("Focused: Timelace"), "{header}");
+    assert!(header.contains("×"), "{header}");
+    let hit = state.hits.focus_header_clear;
+    let outcome = state.handle_raw_events(vec![crate::raw_input::RawInputEvent::Mouse(
+        crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: hit.x,
+            row: hit.y,
+            modifiers: KeyModifiers::empty(),
+        },
+    )]);
+    assert!(state.focus_scope.is_none());
+    assert!(outcome.requests.is_empty());
+    assert!(!outcome.resize);
+    assert_eq!(state.snooze_state.as_ref().unwrap().records.len(), 1);
+    let frame = state.compose(100, 30).unwrap();
+    let header: String = frame
+        .cells
+        .iter()
+        .take(25)
+        .map(|cell| cell.symbol.as_str())
+        .collect();
+    assert_eq!(header, normal_header);
+    assert_eq!(state.hits.focus_header_clear, Rect::default());
+}

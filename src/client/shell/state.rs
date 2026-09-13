@@ -175,6 +175,7 @@ pub(super) struct ShellHitMap {
     pub(super) empty_recovery: Rect,
     pub(super) empty_clear_focus: Rect,
     pub(super) feature_clear_focus: Rect,
+    pub(super) focus_header_clear: Rect,
     pub(super) feature_show_snoozed: Rect,
     pub(super) global_menu_rows: Vec<(Rect, usize)>,
     pub(super) context_menu_rows: Vec<(Rect, usize)>,
@@ -664,10 +665,17 @@ pub(super) enum ClientSnoozeManagementTarget {
         record_id: String,
         deadline_unix_ms: i64,
     },
+    /// Display-only row for a workspace covered by its project's explicit snooze. Never a
+    /// server record: waking it must not issue any endpoint mutation.
+    Inherited {
+        workspace_id: String,
+        project_key: String,
+    },
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct ClientSnoozeManagementRecord {
+    pub(super) created_unix_ms: Option<i64>,
     pub(super) target: ClientSnoozeManagementTarget,
     pub(super) label: String,
     pub(super) scope: String,
@@ -689,6 +697,8 @@ pub(super) enum ClientSnoozeManagementFocusTarget {
 
 #[derive(Debug)]
 pub(super) struct ClientSnoozeManagementOverlay {
+    pub(super) now_unix_ms: i64,
+    pub(super) host_count: usize,
     pub(super) endpoint_id: ClientEndpointId,
     pub(super) boot_id: String,
     pub(super) endpoint_label: String,
@@ -1410,24 +1420,21 @@ impl ClientShellState {
         else {
             return self.reconcile_active_workspace_visibility(true);
         };
-        let preferred_visible = endpoint
-            .snapshot
-            .as_deref()
-            .is_some_and(|snapshot| {
-                snapshot
-                    .workspaces
-                    .iter()
-                    .find(|workspace| workspace.workspace_id == workspace_id)
-                    .is_some_and(|workspace| {
-                        workspace_is_visible(
-                            self.focus_scope.as_ref(),
-                            endpoint.snooze_state.as_ref(),
-                            &endpoint_id,
-                            Some(snapshot.boot_id.as_str()),
-                            workspace,
-                        )
-                    })
-            });
+        let preferred_visible = endpoint.snapshot.as_deref().is_some_and(|snapshot| {
+            snapshot
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.workspace_id == workspace_id)
+                .is_some_and(|workspace| {
+                    workspace_is_visible(
+                        self.focus_scope.as_ref(),
+                        endpoint.snooze_state.as_ref(),
+                        &endpoint_id,
+                        Some(snapshot.boot_id.as_str()),
+                        workspace,
+                    )
+                })
+        });
         if endpoint_id == self.active_endpoint_id {
             if !preferred_visible {
                 return self.reconcile_active_workspace_visibility(true);
@@ -1449,28 +1456,23 @@ impl ClientShellState {
             let target = if preferred_visible {
                 Some(ClientEndpointFocusTarget::Workspace(workspace_id))
             } else {
-                endpoint
-                    .snapshot
-                    .as_deref()
-                    .and_then(|snapshot| {
-                        snapshot
-                            .workspaces
-                            .iter()
-                            .find(|workspace| {
-                                workspace_is_visible(
-                                    self.focus_scope.as_ref(),
-                                    endpoint.snooze_state.as_ref(),
-                                    &endpoint_id,
-                                    Some(snapshot.boot_id.as_str()),
-                                    workspace,
-                                )
-                            })
-                            .map(|workspace| {
-                                ClientEndpointFocusTarget::Workspace(
-                                    workspace.workspace_id.clone(),
-                                )
-                            })
-                    })
+                endpoint.snapshot.as_deref().and_then(|snapshot| {
+                    snapshot
+                        .workspaces
+                        .iter()
+                        .find(|workspace| {
+                            workspace_is_visible(
+                                self.focus_scope.as_ref(),
+                                endpoint.snooze_state.as_ref(),
+                                &endpoint_id,
+                                Some(snapshot.boot_id.as_str()),
+                                workspace,
+                            )
+                        })
+                        .map(|workspace| {
+                            ClientEndpointFocusTarget::Workspace(workspace.workspace_id.clone())
+                        })
+                })
             };
             vec![ClientShellAction::ActivateEndpoint {
                 endpoint_id,

@@ -11,6 +11,22 @@ fn focus_belongs_to_endpoint(focus: &ClientFocusScope, endpoint_id: &ClientEndpo
     )
 }
 
+impl ClientSnoozeManagementOverlay {
+    /// Wake-all and reset confirmations count explicit snooze records only; inherited
+    /// coverage rows are presentation and never inflate a destructive count.
+    pub(super) fn explicit_record_count(&self) -> usize {
+        self.records
+            .iter()
+            .filter(|record| {
+                !matches!(
+                    record.target,
+                    ClientSnoozeManagementTarget::Inherited { .. }
+                )
+            })
+            .count()
+    }
+}
+
 fn snooze_management_targets_match(
     left: &ClientSnoozeManagementTarget,
     right: &ClientSnoozeManagementTarget,
@@ -46,7 +62,76 @@ fn snooze_management_targets_match(
                 deadline_unix_ms: right_deadline,
             },
         ) => left_id == right_id && left_deadline == right_deadline,
+        // Inherited identity is the covered workspace plus its project; parent deadline or
+        // revision changes must not lose the selection during refresh.
+        (
+            ClientSnoozeManagementTarget::Inherited {
+                workspace_id: left_workspace,
+                project_key: left_key,
+            },
+            ClientSnoozeManagementTarget::Inherited {
+                workspace_id: right_workspace,
+                project_key: right_key,
+            },
+        ) => left_workspace == right_workspace && left_key == right_key,
         _ => false,
+    }
+}
+
+/// Builds the management row for an explicit workspace snooze record, shared by the
+/// project-tree pass (covered children) and the leftover pass (unparented records).
+#[allow(clippy::too_many_arguments)]
+fn workspace_management_row(
+    record: &crate::api::schema::WorkspaceSnoozeRecord,
+    workspace: Option<&ClientShellWorkspace>,
+    stored: Option<&crate::api::schema::SnoozeStoredRecordInfo>,
+    endpoint_online: bool,
+    outside_focus: bool,
+    project_key: Option<String>,
+    covered_by_project: bool,
+    project_revision: Option<u64>,
+) -> ClientSnoozeManagementRecord {
+    ClientSnoozeManagementRecord {
+        created_unix_ms: stored.map(|stored| stored.created_unix_ms),
+        target: stored.map_or_else(
+            || ClientSnoozeManagementTarget::Workspace {
+                workspace_id: record.workspace_id.clone(),
+                revision: record.revision,
+            },
+            |stored| ClientSnoozeManagementTarget::Persisted {
+                record_id: stored.record_id.clone(),
+                deadline_unix_ms: record.deadline_unix_ms,
+            },
+        ),
+        label: stored.map_or_else(
+            || {
+                workspace.map_or_else(
+                    || record.workspace_id.clone(),
+                    |workspace| workspace.label.clone(),
+                )
+            },
+            |stored| stored.label.clone(),
+        ),
+        scope: "Workspace".to_owned(),
+        project_label: stored
+            .and_then(|stored| stored.project_label.clone())
+            .or_else(|| {
+                workspace.and_then(|workspace| {
+                    workspace
+                        .worktree
+                        .as_ref()
+                        .map(|worktree| worktree.label.clone())
+                })
+            }),
+        deadline_unix_ms: record.deadline_unix_ms,
+        available: endpoint_online
+            && workspace.is_some()
+            && stored.is_none_or(|stored| stored.available),
+        outside_focus,
+        covered_by_project,
+        project_key,
+        project_revision,
+        workspace_id: Some(record.workspace_id.clone()),
     }
 }
 
@@ -155,12 +240,131 @@ impl ClientShellState {
         let endpoint_online = endpoint.status == ClientEndpointStatus::Online;
         let mut records = Vec::new();
         let focus = self.focus_scope.as_ref();
+        // Workspace ids already placed under their project parent in the tree; the leftover
+        // pass must not repeat them.
+        let mut emitted_workspaces = HashSet::new();
 
+        // Explicit project snoozes become tree parents; their current member workspaces are
+        // listed underneath in canonical snapshot order. Children with their own explicit
+        // workspace record keep that real record (own deadline, wake keeps the parent
+        // restriction); everyone else gets a display-only inherited row carrying the
+        // parent's deadline and identity.
+        for record in state
+            .project_records
+            .iter()
+            .filter(|record| record.boot_id == boot_id)
+        {
+            let workspace = worktree_by_key.get(record.project_key.as_str()).copied();
+            let stored = persisted_by_project
+                .as_ref()
+                .and_then(|records| records.get(record.project_key.as_str()).copied());
+            let outside_focus = focus.is_some_and(|focus| {
+                !focus_belongs_to_endpoint(focus, &endpoint_id)
+                    || workspace.is_some_and(|workspace| {
+                        !focus.matches_workspace(&endpoint_id, Some(&boot_id), workspace)
+                    })
+            });
+            let project_label = stored.map_or_else(
+                || {
+                    workspace
+                        .and_then(|workspace| workspace.worktree.as_ref())
+                        .map_or_else(
+                            || record.project_key.clone(),
+                            |worktree| worktree.label.clone(),
+                        )
+                },
+                |stored| {
+                    stored
+                        .project_label
+                        .clone()
+                        .unwrap_or_else(|| stored.label.clone())
+                },
+            );
+            records.push(ClientSnoozeManagementRecord {
+                created_unix_ms: stored.map(|stored| stored.created_unix_ms),
+                target: stored.map_or_else(
+                    || ClientSnoozeManagementTarget::Project {
+                        project_key: record.project_key.clone(),
+                        revision: record.revision,
+                    },
+                    |stored| ClientSnoozeManagementTarget::Persisted {
+                        record_id: stored.record_id.clone(),
+                        deadline_unix_ms: record.deadline_unix_ms,
+                    },
+                ),
+                label: project_label.clone(),
+                scope: "Project".to_owned(),
+                project_label: None,
+                deadline_unix_ms: record.deadline_unix_ms,
+                available: endpoint_online
+                    && workspace.is_some()
+                    && stored.is_none_or(|stored| stored.available),
+                outside_focus,
+                covered_by_project: false,
+                project_key: Some(record.project_key.clone()),
+                project_revision: Some(record.revision),
+                workspace_id: None,
+            });
+            for member in workspaces.iter().filter(|workspace| {
+                workspace
+                    .worktree
+                    .as_ref()
+                    .is_some_and(|worktree| worktree.key == record.project_key)
+            }) {
+                if !emitted_workspaces.insert(member.workspace_id.clone()) {
+                    continue;
+                }
+                let own = state.records.iter().find(|candidate| {
+                    candidate.boot_id == boot_id && candidate.workspace_id == member.workspace_id
+                });
+                let member_outside_focus = focus.is_some_and(|focus| {
+                    !focus_belongs_to_endpoint(focus, &endpoint_id)
+                        || !focus.matches_workspace(&endpoint_id, Some(&boot_id), member)
+                });
+                if let Some(own) = own {
+                    let member_stored = persisted_by_workspace
+                        .as_ref()
+                        .and_then(|records| records.get(member.workspace_id.as_str()).copied());
+                    records.push(workspace_management_row(
+                        own,
+                        Some(member),
+                        member_stored,
+                        endpoint_online,
+                        member_outside_focus,
+                        Some(record.project_key.clone()),
+                        true,
+                        Some(record.revision),
+                    ));
+                } else {
+                    records.push(ClientSnoozeManagementRecord {
+                        created_unix_ms: stored.map(|stored| stored.created_unix_ms),
+                        target: ClientSnoozeManagementTarget::Inherited {
+                            workspace_id: member.workspace_id.clone(),
+                            project_key: record.project_key.clone(),
+                        },
+                        label: member.label.clone(),
+                        scope: "Inherited".to_owned(),
+                        project_label: Some(project_label.clone()),
+                        deadline_unix_ms: record.deadline_unix_ms,
+                        available: endpoint_online,
+                        outside_focus: member_outside_focus,
+                        covered_by_project: true,
+                        project_key: Some(record.project_key.clone()),
+                        project_revision: Some(record.revision),
+                        workspace_id: Some(member.workspace_id.clone()),
+                    });
+                }
+            }
+        }
+        // Workspace records without a same-boot project parent stay standalone rows.
         for record in state
             .records
             .iter()
             .filter(|record| record.boot_id == boot_id)
         {
+            if emitted_workspaces.contains(&record.workspace_id) {
+                continue;
+            }
             let workspace = workspace_by_id.get(record.workspace_id.as_str()).copied();
             let stored = persisted_by_workspace
                 .as_ref()
@@ -181,102 +385,16 @@ impl ClientShellState {
                         !focus.matches_workspace(&endpoint_id, Some(&boot_id), workspace)
                     })
             });
-            records.push(ClientSnoozeManagementRecord {
-                target: stored.map_or_else(
-                    || ClientSnoozeManagementTarget::Workspace {
-                        workspace_id: record.workspace_id.clone(),
-                        revision: record.revision,
-                    },
-                    |stored| ClientSnoozeManagementTarget::Persisted {
-                        record_id: stored.record_id.clone(),
-                        deadline_unix_ms: record.deadline_unix_ms,
-                    },
-                ),
-                label: stored.map_or_else(
-                    || {
-                        workspace.map_or_else(
-                            || record.workspace_id.clone(),
-                            |workspace| workspace.label.clone(),
-                        )
-                    },
-                    |stored| stored.label.clone(),
-                ),
-                scope: "Workspace".to_owned(),
-                project_label: stored
-                    .and_then(|stored| stored.project_label.clone())
-                    .or_else(|| {
-                        workspace.and_then(|workspace| {
-                            workspace
-                                .worktree
-                                .as_ref()
-                                .map(|worktree| worktree.label.clone())
-                        })
-                    }),
-                deadline_unix_ms: record.deadline_unix_ms,
-                available: endpoint_online
-                    && workspace.is_some()
-                    && stored.is_none_or(|stored| stored.available),
+            records.push(workspace_management_row(
+                record,
+                workspace,
+                stored,
+                endpoint_online,
                 outside_focus,
+                project_key,
                 covered_by_project,
-                project_key: project_key.clone(),
                 project_revision,
-                workspace_id: Some(record.workspace_id.clone()),
-            });
-        }
-        for record in state
-            .project_records
-            .iter()
-            .filter(|record| record.boot_id == boot_id)
-        {
-            let workspace = worktree_by_key.get(record.project_key.as_str()).copied();
-            let stored = persisted_by_project
-                .as_ref()
-                .and_then(|records| records.get(record.project_key.as_str()).copied());
-            let outside_focus = focus.is_some_and(|focus| {
-                !focus_belongs_to_endpoint(focus, &endpoint_id)
-                    || workspace.is_some_and(|workspace| {
-                        !focus.matches_workspace(&endpoint_id, Some(&boot_id), workspace)
-                    })
-            });
-            records.push(ClientSnoozeManagementRecord {
-                target: stored.map_or_else(
-                    || ClientSnoozeManagementTarget::Project {
-                        project_key: record.project_key.clone(),
-                        revision: record.revision,
-                    },
-                    |stored| ClientSnoozeManagementTarget::Persisted {
-                        record_id: stored.record_id.clone(),
-                        deadline_unix_ms: record.deadline_unix_ms,
-                    },
-                ),
-                label: stored.map_or_else(
-                    || {
-                        workspace
-                            .and_then(|workspace| workspace.worktree.as_ref())
-                            .map_or_else(
-                                || record.project_key.clone(),
-                                |worktree| worktree.label.clone(),
-                            )
-                    },
-                    |stored| {
-                        stored
-                            .project_label
-                            .clone()
-                            .unwrap_or_else(|| stored.label.clone())
-                    },
-                ),
-                scope: "Project".to_owned(),
-                project_label: None,
-                deadline_unix_ms: record.deadline_unix_ms,
-                available: endpoint_online
-                    && workspace.is_some()
-                    && stored.is_none_or(|stored| stored.available),
-                outside_focus,
-                covered_by_project: false,
-                project_key: Some(record.project_key.clone()),
-                project_revision: Some(record.revision),
-                workspace_id: None,
-            });
+            ));
         }
         if let Some(persistence) = state.persistence.as_ref() {
             for record in persistence
@@ -299,6 +417,7 @@ impl ClientShellState {
                     continue;
                 }
                 records.push(ClientSnoozeManagementRecord {
+                    created_unix_ms: Some(record.created_unix_ms),
                     target: ClientSnoozeManagementTarget::Persisted {
                         record_id: record.record_id.clone(),
                         deadline_unix_ms: record.deadline_unix_ms,
@@ -322,14 +441,17 @@ impl ClientShellState {
                 .as_ref()
                 .and_then(|persistence| persistence.notice.clone())
         });
-        let notice = notice.or_else(|| {
-            records
-                .is_empty()
-                .then(|| "No snoozed records on this server.".to_owned())
-        });
+        let notice = notice.or_else(|| records.is_empty().then(|| "Nothing snoozed.".to_owned()));
         let endpoint_label = self.endpoint_label(&endpoint_id).to_owned();
         self.overlay = Some(ClientShellOverlay::SnoozeManagement(
             ClientSnoozeManagementOverlay {
+                now_unix_ms: (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000)
+                    as i64,
+                host_count: self
+                    .endpoints
+                    .iter()
+                    .filter(|endpoint| endpoint.snooze_state.is_some())
+                    .count(),
                 endpoint_id,
                 boot_id,
                 endpoint_label,
@@ -408,7 +530,7 @@ impl ClientShellState {
         } else {
             visible_height
         })
-        .saturating_sub(12)
+        .saturating_sub(13)
         .max(1);
         self.select_snooze_management_record(selected);
         if let Some(ClientShellOverlay::SnoozeManagement(management)) = self.overlay.as_mut() {
@@ -479,6 +601,19 @@ impl ClientShellState {
         let project_key = record.project_key.clone();
         let covered_by_project = record.covered_by_project;
         let method = match record.target {
+            // Inherited rows are display-only coverage; waking one must never mutate the
+            // endpoint. The explicit covering action stays on Wake project (P).
+            ClientSnoozeManagementTarget::Inherited { project_key, .. } => {
+                self.set_snooze_management_restriction(&format!(
+                    "{} is snoozed by project {}. Use Wake project (P) to wake it.",
+                    label,
+                    record
+                        .project_label
+                        .as_deref()
+                        .unwrap_or(project_key.as_str())
+                ));
+                return;
+            }
             ClientSnoozeManagementTarget::Workspace {
                 workspace_id,
                 revision,
@@ -568,6 +703,14 @@ impl ClientShellState {
                     current.record_id == *record_id && current.deadline_unix_ms == *deadline_unix_ms
                 })
             }),
+            // Display-only coverage exists while its captured parent project record does.
+            ClientSnoozeManagementTarget::Inherited { project_key, .. } => {
+                record.project_revision.is_some_and(|revision| {
+                    state.project_records.iter().any(|current| {
+                        current.project_key == *project_key && current.revision == revision
+                    })
+                })
+            }
         }
     }
 
@@ -676,7 +819,7 @@ impl ClientShellState {
         let endpoint_id = management.endpoint_id.clone();
         let boot_id = management.boot_id.clone();
         let expected_revision = management.expected_revision;
-        let count = management.records.len();
+        let count = management.explicit_record_count();
         let endpoint_label = management.endpoint_label.clone();
         self.overlay = Some(ClientShellOverlay::ConfirmWakeSharedSnoozes(
             ClientConfirmWakeSharedSnoozesOverlay {
@@ -688,5 +831,19 @@ impl ClientShellState {
                 endpoint_label,
             },
         ));
+    }
+}
+
+impl ClientShellState {
+    pub(crate) fn tick_snooze_management_clock(&mut self) -> bool {
+        let Some(ClientShellOverlay::SnoozeManagement(view)) = self.overlay.as_mut() else {
+            return false;
+        };
+        let now = (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64;
+        if now.div_euclid(1_000) == view.now_unix_ms.div_euclid(1_000) {
+            return false;
+        }
+        view.now_unix_ms = now;
+        true
     }
 }

@@ -1375,7 +1375,7 @@ impl ClientShellState {
                             management.endpoint_id.clone(),
                             management.boot_id.clone(),
                             management.expected_revision,
-                            management.records.len(),
+                            management.explicit_record_count(),
                         );
                     } else if super::contains(self.hits.snooze_management_previous, point) {
                         self.cycle_snooze_management_endpoint(-1);
@@ -2096,7 +2096,9 @@ impl ClientShellState {
                 }
                 // Sidebar footer focus toggle: 🎯 (focus active) clears only the Focus scope;
                 // 🌐 (all projects) focuses the current valid workspace via the shared action.
-                if super::contains(self.hits.feature_clear_focus, point) {
+                if super::contains(self.hits.feature_clear_focus, point)
+                    || super::contains(self.hits.focus_header_clear, point)
+                {
                     if self.focus_scope.is_some() {
                         outcome.actions.extend(self.clear_focus_scope());
                     } else {

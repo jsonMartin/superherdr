@@ -11,8 +11,8 @@ pub(in crate::client::shell) fn collapsed_sidebar_sections(
     if content.is_empty() {
         return (Rect::default(), None, Rect::default());
     }
-    // The bottom row hosts the focus/snooze footer; workspace and agent rows must stay
-    // above it at every height, including the height < 7 all-workspace fallback.
+    // The bottom row hosts the » expand toggle; workspace and agent rows must stay above
+    // it at every height, including the height < 7 all-workspace fallback.
     let body_height = content.height.saturating_sub(1);
     if body_height == 0 {
         return (Rect::default(), None, Rect::default());
@@ -125,13 +125,12 @@ pub(crate) fn render_collapsed_sidebar(
         );
     }
 
-    // The footer row is already excluded by collapsed_sidebar_sections.
+    // The » toggle row is already excluded by collapsed_sidebar_sections.
     let detail_content = detail_area;
-    for (index, pane_id) in super::ordered_agent_pane_ids_with_filter(
-        snapshot,
-        config.agent_panel_sort,
-        |agent| visible_workspaces.contains(&agent.workspace_id),
-    )
+    for (index, pane_id) in
+        super::ordered_agent_pane_ids_with_filter(snapshot, config.agent_panel_sort, |agent| {
+            visible_workspaces.contains(&agent.workspace_id)
+        })
         .into_iter()
         .take(detail_content.height as usize)
         .enumerate()
@@ -174,11 +173,6 @@ pub(crate) fn render_collapsed_sidebar(
         );
         hits.agents.push((rect, pane_id));
     }
-    let footer = super::recovery_bar::SidebarFooter::for_active_snooze(
-        focus_scope.is_some(),
-        snooze_state,
-    );
-    super::recovery_bar::render_sidebar_footer(buffer, area, config, &footer, true, hits);
     hits.sidebar_toggle = if area.is_empty() || workspace_area.width == 0 {
         Rect::default()
     } else {
@@ -227,15 +221,13 @@ pub(crate) fn render_sidebar(
     detail_area.height = detail_area.height.saturating_sub(1);
     hits.sidebar_section_divider =
         crate::ui::sidebar_section_divider_rect(area, state.sidebar_section_split);
-    put_text(
+    super::recovery_bar::render_focus_header(
         buffer,
-        workspace_area.x,
-        workspace_area.y,
-        workspace_area.width,
+        workspace_area,
         " spaces",
-        Style::default()
-            .fg(palette.overlay0)
-            .add_modifier(Modifier::BOLD),
+        config,
+        state,
+        hits,
     );
 
     let visible_workspaces = super::focus_snooze::visible_workspace_ids(
@@ -471,7 +463,7 @@ pub(crate) fn render_sidebar(
         state.focus_scope.is_some(),
         state.endpoints,
     );
-    super::recovery_bar::render_sidebar_footer(buffer, area, config, &footer, false, hits);
+    super::recovery_bar::render_sidebar_footer(buffer, area, config, &footer, hits);
 
     hits.sidebar_toggle = Rect::new(
         area.right().saturating_sub(2),
@@ -570,11 +562,11 @@ pub(crate) fn workspace_entries_with_filter(
             continue;
         }
         if collapsed_groups.contains(&worktree.key) {
-            if let Some(active) = group_members
-                .iter()
-                .copied()
-                .find(|member| *member != parent && snapshot.workspaces[*member].focused && filter(&snapshot.workspaces[*member]))
-            {
+            if let Some(active) = group_members.iter().copied().find(|member| {
+                *member != parent
+                    && snapshot.workspaces[*member].focused
+                    && filter(&snapshot.workspaces[*member])
+            }) {
                 entries.push(WorkspaceEntry {
                     index: active,
                     indented: true,

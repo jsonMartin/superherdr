@@ -93,6 +93,17 @@ pub(crate) fn render_client_overlay(
     }
 }
 
+/// Scope wording for a management row; inherited coverage spells out its parent project.
+fn snooze_scope_text(record: &ClientSnoozeManagementRecord) -> String {
+    match &record.target {
+        ClientSnoozeManagementTarget::Inherited { .. } => format!(
+            "Inherited from {}",
+            record.project_label.as_deref().unwrap_or("its project")
+        ),
+        _ => record.scope.clone(),
+    }
+}
+
 fn render_snooze_management_overlay(
     b: &mut Buffer,
     management: &ClientSnoozeManagementOverlay,
@@ -120,7 +131,7 @@ fn render_snooze_management_overlay(
                 |record| {
                     (
                         record.label.clone(),
-                        record.scope.clone(),
+                        snooze_scope_text(record),
                         record
                             .project_label
                             .clone()
@@ -145,7 +156,7 @@ fn render_snooze_management_overlay(
         } else {
             format!("{scope} · {status}")
         };
-        let navigation = i.width >= 16;
+        let navigation = management.host_count > 1 && i.width >= 16;
         let title_width = i.width.saturating_sub(if navigation { 5 } else { 0 });
         let heading = format!(" Snoozed · {}", management.endpoint_label);
         let target_line = management
@@ -234,46 +245,60 @@ fn render_snooze_management_overlay(
             ..OverlayRender::default()
         });
     }
-    let navigation = i.width >= 52;
-    let title_width = i.width.saturating_sub(if navigation { 18 } else { 0 });
+    let navigation = management.host_count > 1 && i.width >= 40;
+    let host_label = format!("Host: {} ›", management.endpoint_label);
+    let host_width = display_width(&host_label).min(i.width / 2);
     put_text(
         b,
         i.x,
         i.y,
-        title_width,
-        &format!(" Snoozed records · {}", management.endpoint_label),
+        i.width
+            .saturating_sub(if navigation { host_width + 1 } else { 0 }),
+        " Snoozed",
         Style::default()
             .fg(p.text)
             .bg(p.panel_bg)
             .add_modifier(Modifier::BOLD),
     );
-    let previous = if navigation {
-        Rect::new(i.x + i.width - 18, i.y, 7, 1)
-    } else {
-        Rect::default()
-    };
+    let previous = Rect::default();
     let next = if navigation {
-        Rect::new(i.x + i.width - 10, i.y, 8, 1)
+        Rect::new(i.right() - host_width, i.y, host_width, 1)
     } else {
         Rect::default()
     };
     if navigation {
-        let nav_style = Style::default()
-            .fg(p.accent)
-            .bg(p.panel_bg)
-            .add_modifier(Modifier::UNDERLINED);
         put_text(
             b,
-            previous.x,
-            previous.y,
-            previous.width,
-            "‹ prev",
-            nav_style,
+            next.x,
+            next.y,
+            next.width,
+            &host_label,
+            Style::default()
+                .fg(p.accent)
+                .bg(p.panel_bg)
+                .add_modifier(Modifier::UNDERLINED),
         );
-        put_text(b, next.x, next.y, next.width, "next ›", nav_style);
+    }
+    let table = i.width >= 64;
+    let name_width = if table {
+        i.width.saturating_sub(38)
+    } else {
+        i.width
+    };
+    if !management.records.is_empty() {
+        let style = Style::default()
+            .fg(p.overlay0)
+            .bg(p.panel_bg)
+            .add_modifier(Modifier::BOLD);
+        put_text(b, i.x, i.y + 2, name_width, " Spaces", style);
+        if table {
+            put_text(b, i.x + name_width, i.y + 2, 14, "Snoozed", style);
+            put_text(b, i.x + name_width + 14, i.y + 2, 10, "Time left", style);
+            put_text(b, i.x + name_width + 24, i.y + 2, 14, "Wakes", style);
+        }
     }
     let mut rows = Vec::new();
-    let list_height = i.height.saturating_sub(10).max(1) as usize;
+    let list_height = i.height.saturating_sub(11).max(1) as usize;
     let start = management
         .scroll
         .min(management.records.len().saturating_sub(list_height));
@@ -285,7 +310,7 @@ fn render_snooze_management_overlay(
         .take(list_height)
         .enumerate()
     {
-        let y = i.y.saturating_add(2 + visible as u16);
+        let y = i.y.saturating_add(3 + visible as u16);
         let row = Rect::new(i.x, y, i.width, 1);
         let style = if index == management.selected {
             Style::default()
@@ -295,28 +320,97 @@ fn render_snooze_management_overlay(
         } else {
             Style::default().fg(p.text).bg(p.panel_bg)
         };
-        let status = if record.available {
-            "Available"
+        // Tree children (explicit or inherited) indent under their project parent; branch
+        // connectors show whether another sibling child follows.
+        let child = record.covered_by_project && record.workspace_id.is_some();
+        let sibling_follows = management.records.get(index + 1).is_some_and(|next| {
+            next.covered_by_project
+                && next.workspace_id.is_some()
+                && next.project_key == record.project_key
+        });
+        let indent = if child {
+            if sibling_follows {
+                "   ├─ "
+            } else {
+                "   └─ "
+            }
         } else {
-            "Unavailable / reassociation needed"
+            " "
         };
-        let label = format!(" {} · {} · {}", record.label, record.scope, status);
+        let inherited = matches!(
+            record.target,
+            ClientSnoozeManagementTarget::Inherited { .. }
+        );
+        let scope = if inherited {
+            String::new()
+        } else {
+            format!(" · {}", record.scope)
+        };
+        let warning = if !record.available {
+            " · Unavailable"
+        } else if record.outside_focus {
+            " · Outside Focus"
+        } else {
+            ""
+        };
+        let label = format!("{indent}{}{scope}{warning}", record.label);
         b.set_style(row, style);
-        put_text(b, row.x, row.y, row.width, &label, style);
+        put_text(b, row.x, row.y, name_width.saturating_sub(1), &label, style);
+        if table {
+            let created = if inherited {
+                "Via project".to_owned()
+            } else {
+                record
+                    .created_unix_ms
+                    .map(snooze_table_time)
+                    .unwrap_or_else(|| "—".to_owned())
+            };
+            put_text(b, row.x + name_width, row.y, 13, &created, style);
+            put_text(
+                b,
+                row.x + name_width + 14,
+                row.y,
+                9,
+                &snooze_time_left(record.deadline_unix_ms, management.now_unix_ms),
+                style,
+            );
+            put_text(
+                b,
+                row.x + name_width + 24,
+                row.y,
+                14,
+                &snooze_table_time(record.deadline_unix_ms),
+                style,
+            );
+        }
         rows.push((row, index));
     }
     if let Some(record) = management.records.get(management.selected) {
         let detail_y = i.y + i.height.saturating_sub(7);
         let details = [
-            format!(" Target: {}", record.label),
             format!(
-                " Scope: {}{}",
-                record.scope,
+                " Snoozed: {} · Time left: {}",
                 record
-                    .project_label
-                    .as_deref()
-                    .map_or(String::new(), |project| format!(" · project {project}"))
+                    .created_unix_ms
+                    .map(snooze_table_time)
+                    .unwrap_or_else(|| "unknown".to_owned()),
+                snooze_time_left(record.deadline_unix_ms, management.now_unix_ms)
             ),
+            if matches!(
+                record.target,
+                ClientSnoozeManagementTarget::Inherited { .. }
+            ) {
+                format!(" Scope: {}", snooze_scope_text(record))
+            } else {
+                format!(
+                    " Scope: {}{}",
+                    record.scope,
+                    record
+                        .project_label
+                        .as_deref()
+                        .map_or(String::new(), |project| format!(" · project {project}"))
+                )
+            },
             format!(
                 " Wake at: {}",
                 super::snooze_presets::wake_label_for_deadline(record.deadline_unix_ms)
@@ -324,7 +418,7 @@ fn render_snooze_management_overlay(
             format!(
                 " {}{}",
                 if record.available {
-                    "Available"
+                    ""
                 } else {
                     "Unavailable / reassociation needed"
                 },
@@ -402,6 +496,24 @@ fn render_snooze_management_overlay(
         vec![i.width.saturating_sub(3) / 4; 4]
     };
     let button_rects = row(button_row, &widths, 1, 0);
+    // Standalone wake is disabled for inherited rows; the covering Wake project action (P)
+    // is the supported path there.
+    let wake_style = if management
+        .records
+        .get(management.selected)
+        .is_some_and(|record| {
+            matches!(
+                record.target,
+                ClientSnoozeManagementTarget::Inherited { .. }
+            )
+        }) {
+        Style::default().fg(p.overlay0).bg(p.surface0)
+    } else {
+        Style::default()
+            .fg(contrast(p))
+            .bg(p.accent)
+            .add_modifier(Modifier::BOLD)
+    };
     let mut render = OverlayRender {
         snooze_management_popup: q,
         snooze_management_rows: rows,
@@ -422,15 +534,7 @@ fn render_snooze_management_overlay(
         let [wake, all, reset, cancel] = button_rects.as_slice() else {
             return Some(render);
         };
-        button(
-            b,
-            *wake,
-            " wake now ",
-            Style::default()
-                .fg(contrast(p))
-                .bg(p.accent)
-                .add_modifier(Modifier::BOLD),
-        );
+        button(b, *wake, " wake now ", wake_style);
         button(
             b,
             *all,
@@ -466,15 +570,7 @@ fn render_snooze_management_overlay(
         let [wake, all, reset, cancel] = button_rects.as_slice() else {
             return Some(render);
         };
-        button(
-            b,
-            *wake,
-            " wake ",
-            Style::default()
-                .fg(contrast(p))
-                .bg(p.accent)
-                .add_modifier(Modifier::BOLD),
-        );
+        button(b, *wake, " wake ", wake_style);
         button(
             b,
             *all,
@@ -1794,4 +1890,37 @@ fn render_confirm_wake_shared_snoozes_overlay(
         cancel: *cancel,
         ..OverlayRender::default()
     })
+}
+
+fn snooze_table_time(timestamp: i64) -> String {
+    let label = super::snooze_presets::wake_label_for_deadline(timestamp);
+    label.get(5..16).unwrap_or(&label).to_owned()
+}
+
+fn snooze_time_left(deadline: i64, now: i64) -> String {
+    let millis = deadline.saturating_sub(now);
+    if millis <= 0 {
+        return "Due".to_owned();
+    }
+    let minutes = millis.saturating_add(59_999) / 60_000;
+    if minutes >= 1_440 {
+        format!("{}d {}h", minutes / 1_440, minutes % 1_440 / 60)
+    } else if minutes >= 60 {
+        format!("{}h {}m", minutes / 60, minutes % 60)
+    } else {
+        format!("{minutes}m")
+    }
+}
+
+#[cfg(test)]
+mod snooze_time_tests {
+    use super::snooze_time_left;
+    #[test]
+    fn remaining_time_rounds_up_and_stops_at_deadline() {
+        assert_eq!(snooze_time_left(0, 0), "Due");
+        assert_eq!(snooze_time_left(0, 1), "Due");
+        assert_eq!(snooze_time_left(1, 0), "1m");
+        assert_eq!(snooze_time_left(3_600_000, 0), "1h 0m");
+        assert_eq!(snooze_time_left(86_400_000, 0), "1d 0h");
+    }
 }

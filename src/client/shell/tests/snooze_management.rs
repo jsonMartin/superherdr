@@ -159,7 +159,7 @@ fn snooze_management_shows_details_and_clicking_only_selects() {
     for label in [
         "Workspace Beta",
         "Project Beta",
-        "Available",
+        "Time left",
         "Outside current Focus",
     ] {
         assert!(text.contains(label), "missing {label}: {text}");
@@ -207,10 +207,24 @@ fn snooze_management_child_wake_preserves_parent_and_focus_then_offers_parent_wa
     let Some(ClientShellOverlay::SnoozeManagement(view)) = &state.overlay else {
         panic!("management retained");
     };
+    // The wakened child stays visible as an inherited coverage row; the parent project and
+    // the unavailable record remain the only explicit records.
     assert_eq!(
-        view.records.len(),
+        view.explicit_record_count(),
         2,
-        "a wake receipt must not become a duplicate snoozed row"
+        "parent plus unavailable record, no duplicate wake receipt"
+    );
+    assert_eq!(
+        view.records
+            .iter()
+            .filter(|record| matches!(
+                &record.target,
+                ClientSnoozeManagementTarget::Inherited { workspace_id, .. }
+                    if workspace_id == "ws_2"
+            ))
+            .count(),
+        1,
+        "exactly one inherited coverage row for ws_2"
     );
     assert!(!view
         .records
@@ -258,6 +272,10 @@ fn snooze_management_selection_clears_retained_parent_for_keyboard_and_mouse() {
         if mouse {
             click_text(&mut state, "Old Space");
         } else {
+            // Move to the uncovered "Old Space" row; the tree puts the inherited ws_2 row
+            // between the project parent and it.
+            let selected = key(&mut state, KeyCode::Down);
+            assert!(selected.actions.is_empty() && selected.requests.is_empty());
             let selected = key(&mut state, KeyCode::Down);
             assert!(selected.actions.is_empty() && selected.requests.is_empty());
         }
@@ -320,6 +338,8 @@ fn snooze_management_compact_actions_have_separate_wake_reset_and_close_hits() {
         let (_, footer_y) = visible_text_position(&mut state, 24, rows, "↵Wake");
         assert_eq!(footer_y, wake.y);
 
+        // The tree selects the project parent first; move to the explicit child record.
+        let _ = key(&mut state, KeyCode::Down);
         let wake_outcome = click_visible_text(&mut state, 24, rows, "Wake");
         record_request(&wake_outcome, WORKSPACE_RECORD, 5);
 
@@ -417,7 +437,8 @@ fn snooze_management_empty_narrow_and_no_mouse_keep_input_owned() {
         assert!(composed_text(&frame).contains("Snoozed"));
         if cols == 24 {
             let text = composed_text(&frame);
-            let wake = super::super::super::snooze_presets::wake_label_for_deadline(4_000_000);
+            // The tree selects the project parent row first; its deadline is 5_000_000.
+            let wake = super::super::super::snooze_presets::wake_label_for_deadline(5_000_000);
             assert!(
                 text.contains(&wake[..16]),
                 "compact view must show the complete wake date and minute: {text}"
@@ -585,6 +606,193 @@ fn snooze_management_changed_parent_cannot_be_woken_by_old_action() {
     );
 }
 
+fn project_only_state() -> ClientShellState {
+    let mut state = reset_ready_state();
+    // reset_ready_state advertises only snooze.reset/workspace.wake; this fixture's flow
+    // also exercises the explicit parent project wake.
+    state.set_endpoint_methods(Some(vec![
+        "snooze.reset".into(),
+        "workspace.wake".into(),
+        "project.wake".into(),
+    ]));
+    let mut shared = snooze_state(&[], 5);
+    shared.project_records = vec![ProjectSnoozeRecord {
+        project_key: "repo-b".into(),
+        boot_id: "boot-1".into(),
+        deadline_unix_ms: 5_000_000,
+        revision: 4,
+    }];
+    state.set_snooze_state(shared);
+    state
+}
+
+#[test]
+fn project_only_snooze_shows_tree_with_inherited_children_and_explicit_counts() {
+    let mut state = project_only_state();
+    state.open_snooze_recovery(0, 0);
+    {
+        let Some(ClientShellOverlay::SnoozeManagement(view)) = state.overlay.as_ref() else {
+            panic!("expected management overlay");
+        };
+        assert_eq!(
+            view.records.len(),
+            2,
+            "parent plus its current member workspace: {:?}",
+            view.records
+        );
+        match &view.records[0].target {
+            ClientSnoozeManagementTarget::Project {
+                project_key,
+                revision,
+            } => {
+                assert_eq!(project_key, "repo-b");
+                assert_eq!(*revision, 4);
+            }
+            other => panic!("expected project parent row: {other:?}"),
+        }
+        match &view.records[1].target {
+            ClientSnoozeManagementTarget::Inherited {
+                workspace_id,
+                project_key,
+            } => {
+                assert_eq!(workspace_id, "ws_2");
+                assert_eq!(project_key, "repo-b");
+            }
+            other => panic!("expected inherited child row: {other:?}"),
+        }
+        assert_eq!(
+            view.records[1].deadline_unix_ms, 5_000_000,
+            "inherited rows carry the parent deadline"
+        );
+        assert_eq!(view.records[1].scope, "Inherited");
+        assert!(view.records[1].covered_by_project);
+        assert_eq!(view.records[1].project_revision, Some(4));
+        assert_eq!(
+            view.explicit_record_count(),
+            1,
+            "inherited rows are not explicit records"
+        );
+    }
+    let text = composed_text(&state.compose(100, 30).unwrap());
+    assert!(
+        text.contains("└─"),
+        "children indent under the project: {text}"
+    );
+    assert!(
+        text.contains("Via project"),
+        "inherited rows identify project coverage in the timing column: {text}"
+    );
+    let _ = key(&mut state, KeyCode::Char('a'));
+    let Some(ClientShellOverlay::ConfirmWakeSharedSnoozes(confirm)) = state.overlay.as_ref() else {
+        panic!("expected wake-all confirmation");
+    };
+    assert_eq!(
+        confirm.count, 1,
+        "inherited rows must not inflate the wake-all count"
+    );
+}
+
+#[test]
+fn inherited_row_wake_is_inert_and_parent_wake_targets_captured_project() {
+    let mut state = project_only_state();
+    state.open_snooze_recovery(0, 0);
+    click_text(&mut state, "workspace-2");
+    let enter = key(&mut state, KeyCode::Enter);
+    assert!(
+        enter.actions.is_empty() && enter.requests.is_empty(),
+        "inherited Wake now/Enter must never mutate the endpoint"
+    );
+    let text = composed_text(&state.compose(100, 30).unwrap());
+    assert!(
+        text.contains("Wake project"),
+        "covering Wake project action must be shown: {text}"
+    );
+    state.refresh_snooze_management_endpoint_status(&ClientEndpointId::Local);
+    let Some(ClientShellOverlay::SnoozeManagement(view)) = state.overlay.as_ref() else {
+        panic!("management retained");
+    };
+    assert!(matches!(
+        &view.records[view.selected].target,
+        ClientSnoozeManagementTarget::Inherited { workspace_id, .. } if workspace_id == "ws_2"
+    ));
+    let parent = key(&mut state, KeyCode::Char('p'));
+    assert!(parent.requests.is_empty());
+    let [ClientShellAction::Endpoint { request, .. }] = parent.actions.as_slice() else {
+        panic!("expected explicit parent wake: {:?}", parent.actions);
+    };
+    assert!(
+        matches!(&request.method, crate::api::schema::Method::ProjectWake(params)
+        if params.project_key == "repo-b" && params.expected_revision == 4)
+    );
+}
+
+#[test]
+fn explicit_child_snooze_displays_once_with_own_wake_under_project() {
+    let mut state = management_state();
+    state.open_snooze_recovery(0, 0);
+    {
+        let Some(ClientShellOverlay::SnoozeManagement(view)) = state.overlay.as_ref() else {
+            panic!("expected management overlay");
+        };
+        assert_eq!(
+            view.records.len(),
+            3,
+            "project parent, explicit child, unavailable record"
+        );
+        // management_state persists the project snooze, so the parent row targets the
+        // stored record while keeping the captured project identity/revision.
+        assert!(matches!(
+            &view.records[0].target,
+            ClientSnoozeManagementTarget::Persisted { record_id, .. } if record_id == PROJECT_RECORD
+        ));
+        assert_eq!(view.records[0].project_key.as_deref(), Some("repo-b"));
+        assert_eq!(view.records[0].project_revision, Some(4));
+        assert!(matches!(
+            &view.records[1].target,
+            ClientSnoozeManagementTarget::Persisted { record_id, .. }
+                if record_id == WORKSPACE_RECORD
+        ));
+        assert!(view.records[1].covered_by_project);
+        assert_eq!(view.records[1].project_revision, Some(4));
+        assert_eq!(
+            view.records
+                .iter()
+                .filter(|record| record.workspace_id.as_deref() == Some("ws_2"))
+                .count(),
+            1,
+            "covered workspace appears exactly once, no inherited duplicate"
+        );
+    }
+    click_text(&mut state, "Workspace Beta");
+    let outcome = key(&mut state, KeyCode::Enter);
+    record_request(&outcome, WORKSPACE_RECORD, 5);
+}
+
+#[test]
+fn stale_boot_project_does_not_infer_children() {
+    let mut state = management_state();
+    let mut shared = state.snooze_state.clone().unwrap();
+    shared.project_records[0].boot_id = "other-boot".into();
+    state.set_snooze_state(shared);
+    state.open_snooze_recovery(0, 0);
+    let Some(ClientShellOverlay::SnoozeManagement(view)) = state.overlay.as_ref() else {
+        panic!("expected management overlay");
+    };
+    assert!(
+        view.records.iter().all(|record| !matches!(
+            record.target,
+            ClientSnoozeManagementTarget::Inherited { .. }
+        )),
+        "different-boot project metadata must not create inherited rows"
+    );
+    let workspace_row = view
+        .records
+        .iter()
+        .find(|record| record.workspace_id.as_deref() == Some("ws_2"))
+        .expect("workspace row stays reachable");
+    assert!(!workspace_row.covered_by_project);
+}
+
 fn inactive_management_state() -> (ClientShellState, ClientEndpointId) {
     use crate::client::endpoint::{ClientEndpointStatus, ProfileId, SavedSshEndpoint};
 
@@ -652,7 +860,10 @@ fn snooze_management_refreshes_availability_on_endpoint_status_change() {
     assert_eq!(state.active_endpoint_id, active_before);
     assert_eq!(management.selected, 1);
     assert_eq!(management.scroll, 3);
-    assert_eq!(management.restriction.as_deref(), Some("preserve restriction"));
+    assert_eq!(
+        management.restriction.as_deref(),
+        Some("preserve restriction")
+    );
     assert!(management.parent_action.is_some());
     assert!(!management.records[management.selected].available);
 
@@ -666,7 +877,10 @@ fn snooze_management_refreshes_availability_on_endpoint_status_change() {
     assert_eq!(management.endpoint_id, remote);
     assert_eq!(state.active_endpoint_id, active_before);
     assert_eq!(management.selected, 1);
-    assert_eq!(management.restriction.as_deref(), Some("preserve restriction"));
+    assert_eq!(
+        management.restriction.as_deref(),
+        Some("preserve restriction")
+    );
     assert!(management.parent_action.is_some());
     assert!(management.records[management.selected].available);
 }
@@ -686,17 +900,17 @@ fn inactive_only_recovery_is_aggregate_and_navigable_at_both_sizes() {
     assert_eq!(view.endpoint_label, "Remote build");
     let wide = composed_text(&state.compose(100, 30).unwrap());
     assert!(wide.contains("Remote build"), "{wide}");
-    assert!(wide.contains("next ›"), "{wide}");
+    assert!(wide.contains("Host: Remote build ›"), "{wide}");
     assert!(state.hits.snooze_management_next.width > 0);
     let active_before = state.active_endpoint_id.clone();
-    let _ = click_visible_text(&mut state, 100, 30, "next ›");
+    let _ = click_visible_text(&mut state, 100, 30, "Host: Remote build ›");
     assert_eq!(state.active_endpoint_id, active_before);
     assert!(matches!(
         state.overlay.as_ref(),
         Some(ClientShellOverlay::SnoozeManagement(view))
             if view.endpoint_id == ClientEndpointId::Local
     ));
-    let _ = click_visible_text(&mut state, 100, 30, "‹ prev");
+    let _ = click_visible_text(&mut state, 100, 30, "Host: Local ›");
     assert!(matches!(
         state.overlay.as_ref(),
         Some(ClientShellOverlay::SnoozeManagement(view))
@@ -713,10 +927,7 @@ fn inactive_only_recovery_is_aggregate_and_navigable_at_both_sizes() {
     };
     assert_eq!(view.endpoint_id, ClientEndpointId::Local);
     assert!(view.records.is_empty());
-    assert_eq!(
-        view.notice.as_deref(),
-        Some("No snoozed records on this server.")
-    );
+    assert_eq!(view.notice.as_deref(), Some("Nothing snoozed."));
 }
 
 #[test]
@@ -806,4 +1017,27 @@ fn remote_reset_clears_unchanged_local_focus_after_success() {
         Ok(crate::api::schema::ResponseResult::WorkspaceWake { state: reply }),
     );
     assert!(state.focus_scope.is_none());
+}
+
+#[test]
+fn snooze_table_has_timing_and_only_nonempty_sections() {
+    let mut state = management_state();
+    state.open_snooze_recovery(0, 0);
+    let text = composed_text(&state.compose(100, 30).unwrap());
+    for label in ["Spaces", "Snoozed", "Time left", "Wakes"] {
+        assert!(text.contains(label), "missing {label}: {text}");
+    }
+    assert!(!text.contains("Agents"));
+    assert!(!text.contains("Available"));
+    assert!(!text.contains("prev"));
+    assert_eq!(state.hits.snooze_management_next, Rect::default());
+    let Some(ClientShellOverlay::SnoozeManagement(view)) = state.overlay.as_mut() else {
+        panic!()
+    };
+    view.records.clear();
+    view.notice = Some("Nothing snoozed.".into());
+    let text = composed_text(&state.compose(100, 30).unwrap());
+    assert!(text.contains("Nothing snoozed."));
+    assert!(!text.contains("Spaces"));
+    assert!(!text.contains("Agents"));
 }

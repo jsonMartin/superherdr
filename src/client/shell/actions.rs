@@ -813,6 +813,7 @@ impl ClientShellState {
                                     .map(|worktree| worktree.label.clone())
                                     .unwrap_or_else(|| project_key.clone());
                                 Some(ClientSnoozeManagementRecord {
+                                    created_unix_ms: None,
                                     target: ClientSnoozeManagementTarget::Project {
                                         project_key: project_key.clone(),
                                         revision: project.revision,
@@ -1020,7 +1021,7 @@ impl ClientShellState {
                         text,
                     }) if returned_pane_id == pane_id => text,
                     Ok(crate::api::schema::ResponseResult::PaneSelection { .. }) => {
-                        return (false, Vec::new())
+                        return (false, Vec::new());
                     }
                     Ok(_) => {
                         self.endpoint_error = Some(

@@ -960,7 +960,7 @@ impl ClientShellState {
                         management.endpoint_id.clone(),
                         management.boot_id.clone(),
                         management.expected_revision,
-                        management.records.len(),
+                        management.explicit_record_count(),
                     );
                 }
                 _ => return,

@@ -19,7 +19,6 @@ impl ClientContextMenuOverlay {
                 can_clear_focus,
                 workspace_record_revision,
                 project_record_revision,
-                has_snoozed_records,
                 ..
             } => {
                 let mut items = Vec::new();
@@ -44,9 +43,9 @@ impl ClientContextMenuOverlay {
                     }
                 }
 
-                items.push(item("Snooze workspace…", Action::Snooze30Minutes));
-                if worktree_key.is_some() {
-                    items.push(item("Snooze project…", Action::SnoozeProject30Minutes));
+                items.push(item("Snooze workspace", Action::Snooze30Minutes));
+                if worktree_key.is_some() && !*is_linked_worktree {
+                    items.push(item("Snooze project", Action::SnoozeProject30Minutes));
                 }
                 if workspace_record_revision.is_some() {
                     items.push(item("Wake workspace", Action::WakeWorkspace));
@@ -54,10 +53,6 @@ impl ClientContextMenuOverlay {
                 if project_record_revision.is_some() {
                     items.push(item("Wake project", Action::WakeProject));
                 }
-                if *has_snoozed_records {
-                    items.push(item("Show snoozed records", Action::ShowSnoozedRecords));
-                }
-                items.push(item("Wake shared snoozes", Action::WakeSharedSnoozes));
 
                 if worktree_key.is_some() {
                     items.push(item("Focus project", Action::FocusProject));
@@ -182,10 +177,12 @@ impl ClientShellState {
                         workspace_id: workspace_id.clone(),
                     },
                 };
-                outcome.actions.extend(self.set_focus_scope_with_preferred_target(
-                    Some(scope),
-                    Some((endpoint_id, workspace_id)),
-                ));
+                outcome
+                    .actions
+                    .extend(self.set_focus_scope_with_preferred_target(
+                        Some(scope),
+                        Some((endpoint_id, workspace_id)),
+                    ));
             }
             KeybindAction::SnoozeWorkspace => {
                 self.open_snooze_overlay(endpoint_id, boot_id, workspace_id, None);
@@ -702,10 +699,12 @@ impl ClientShellState {
                         boot_id,
                         worktree_key: key,
                     };
-                    outcome.actions.extend(self.set_focus_scope_with_preferred_target(
-                        Some(scope),
-                        Some((endpoint_id, workspace_id)),
-                    ));
+                    outcome
+                        .actions
+                        .extend(self.set_focus_scope_with_preferred_target(
+                            Some(scope),
+                            Some((endpoint_id, workspace_id)),
+                        ));
                 }
             }
             ClientContextMenuAction::FocusWorkspace => {
@@ -714,10 +713,12 @@ impl ClientShellState {
                     boot_id,
                     workspace_id: workspace_id.clone(),
                 };
-                outcome.actions.extend(self.set_focus_scope_with_preferred_target(
-                    Some(scope),
-                    Some((endpoint_id, workspace_id)),
-                ));
+                outcome
+                    .actions
+                    .extend(self.set_focus_scope_with_preferred_target(
+                        Some(scope),
+                        Some((endpoint_id, workspace_id)),
+                    ));
             }
             ClientContextMenuAction::ClearFocus => {
                 let actions = self.clear_focus_scope();
