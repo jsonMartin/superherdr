@@ -800,43 +800,64 @@ fn local_agent_shortcuts_skip_hidden_workspaces() {
 }
 
 #[test]
-fn focus_snooze_recovery_bar_reserves_surface_and_keeps_both_actions_reachable() {
-    for (cols, rows) in [(100, 30), (44, 20), (24, 8)] {
+fn focus_snooze_footer_keeps_surface_height_and_stays_on_sidebar_row() {
+    for (sidebar_collapsed, focus_glyph) in [(false, "🎯"), (true, "◉")] {
         let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
         state.set_snapshot(Box::new(two_workspace_snapshot()));
-        let baseline = state.surface_size(cols, rows);
+        state.sidebar_collapsed = sidebar_collapsed;
+        let baseline = state.surface_size(100, 30);
         state.set_focus_scope(Some(ClientFocusScope::StandaloneWorkspace {
             endpoint_id: ClientEndpointId::Local,
             boot_id: "boot-1".into(),
             workspace_id: "ws_1".into(),
         }));
         state.set_snooze_state(snooze_state(&["ws_2"], 1));
+        assert_eq!(
+            state.surface_size(100, 30),
+            baseline,
+            "focus/snooze must not resize the pane surface"
+        );
         state.set_pane_surface(surface());
-        let frame = state.compose(cols, rows).expect("focused frame");
-        let focused_size = state.surface_size(cols, rows);
-        assert_eq!(focused_size.rows + 1, baseline.rows);
-        let clear = state.hits.feature_clear_focus;
-        let show = state.hits.feature_show_snoozed;
-        assert!(clear.width > 0 && show.width > 0);
-        assert_eq!(clear.y, rows - 1);
-        assert_eq!(show.y, rows - 1);
-        assert!(state.layout(cols, rows).pane_surface.bottom() <= clear.y);
-        let footer: String = frame
-            .cells
+        let frame = state.compose(100, 30).expect("focused frame");
+        let footer_row: String = frame.cells
             .iter()
-            .skip(usize::from(cols) * usize::from(rows - 1))
+            .skip(100usize * 29)
             .map(|cell| cell.symbol.as_str())
             .collect();
-        assert!(footer.contains("Clear"), "{footer}");
-        assert!(footer.contains("Show"), "{footer}");
-        let show_outcome = state.handle_raw_events(vec![crate::raw_input::RawInputEvent::Mouse(
-            crossterm::event::MouseEvent {
-                kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
-                column: show.x,
-                row: show.y,
-                modifiers: KeyModifiers::empty(),
-            },
-        )]);
+        assert!(footer_row.contains(focus_glyph), "{footer_row}");
+        let clear = state.hits.feature_clear_focus;
+        let show = state.hits.feature_show_snoozed;
+        let toggle = state.hits.sidebar_toggle;
+        assert!(clear.width > 0 && show.width > 0);
+        assert_eq!(clear.y, 29);
+        assert_eq!(show.y, 29);
+        let overlaps = |left: Rect, right: Rect| {
+            left.x < right.right()
+                && right.x < left.right()
+                && left.y < right.bottom()
+                && right.y < left.bottom()
+        };
+        assert!(!overlaps(clear, toggle), "{clear:?} overlaps {toggle:?}");
+        assert!(!overlaps(show, toggle), "{show:?} overlaps {toggle:?}");
+        assert!(!overlaps(clear, show), "{clear:?} overlaps {show:?}");
+        assert!(toggle.width > 0, "sidebar toggle must stay clickable");
+        let sidebar = state.layout(100, 30).sidebar;
+        assert!(clear.right() <= sidebar.right() && show.right() <= sidebar.right());
+
+        if !sidebar_collapsed {
+            assert!(footer_row.contains("Snoozed(1)"), "{footer_row}");
+        }
+        let show_outcome =
+            state.handle_raw_events(vec![crate::raw_input::RawInputEvent::Mouse(
+                crossterm::event::MouseEvent {
+                    kind: crossterm::event::MouseEventKind::Down(
+                        crossterm::event::MouseButton::Left,
+                    ),
+                    column: show.x,
+                    row: show.y,
+                    modifiers: KeyModifiers::empty(),
+                },
+            )]);
         assert!(show_outcome.actions.is_empty());
         assert!(show_outcome.requests.is_empty());
         assert!(matches!(
@@ -844,28 +865,78 @@ fn focus_snooze_recovery_bar_reserves_surface_and_keeps_both_actions_reachable()
             Some(ClientShellOverlay::SnoozeManagement(_))
         ));
         state.overlay = None;
-        state.compose(cols, rows).unwrap();
-        let clear_outcome = state.handle_raw_events(vec![crate::raw_input::RawInputEvent::Mouse(
-            crossterm::event::MouseEvent {
-                kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
-                column: clear.x,
-                row: clear.y,
-                modifiers: KeyModifiers::empty(),
-            },
-        )]);
+        state.compose(100, 30).unwrap();
+        let clear_outcome =
+            state.handle_raw_events(vec![crate::raw_input::RawInputEvent::Mouse(
+                crossterm::event::MouseEvent {
+                    kind: crossterm::event::MouseEventKind::Down(
+                        crossterm::event::MouseButton::Left,
+                    ),
+                    column: clear.x,
+                    row: clear.y,
+                    modifiers: KeyModifiers::empty(),
+                },
+            )]);
         assert!(state.focus_scope.is_none());
         assert_eq!(state.snooze_state.as_ref().unwrap().records.len(), 1);
         assert!(
             !clear_outcome.resize,
-            "Snooze keeps the existing reserved row"
+            "clearing Focus must not resize the pane surface"
+        );
+        assert!(
+            state.pane_surface.is_some(),
+            "clearing Focus must not invalidate the composed surface"
         );
         assert!(clear_outcome.requests.is_empty());
     }
 }
 
 #[test]
-fn focus_snooze_recovery_bar_clear_last_filter_requests_resize() {
+fn focus_snooze_footer_all_projects_glyph_focuses_current_workspace() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(two_workspace_snapshot()));
+    state.set_pane_surface(surface());
+    let frame = state.compose(100, 30).expect("all-projects frame");
+    let footer_row: String = frame.cells
+        .iter()
+        .skip(100usize * 29)
+        .map(|cell| cell.symbol.as_str())
+        .collect();
+    assert!(footer_row.contains("🌐"), "{footer_row}");
+    let focus = state.hits.feature_clear_focus;
+    assert!(focus.width > 0 && focus.y == 29);
+    let outcome = state.handle_raw_events(vec![crate::raw_input::RawInputEvent::Mouse(
+        crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: focus.x,
+            row: focus.y,
+            modifiers: KeyModifiers::empty(),
+        },
+    )]);
+    assert!(outcome.actions.is_empty() && outcome.requests.is_empty());
+    assert!(matches!(
+        &state.focus_scope,
+        Some(ClientFocusScope::StandaloneWorkspace { workspace_id, .. }) if workspace_id == "ws_1"
+    ));
+    state.compose(100, 30).unwrap();
+    let clear = state.hits.feature_clear_focus;
+    let clear_outcome = state.handle_raw_events(vec![crate::raw_input::RawInputEvent::Mouse(
+        crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: clear.x,
+            row: clear.y,
+            modifiers: KeyModifiers::empty(),
+        },
+    )]);
+    assert!(clear_outcome.actions.is_empty() && clear_outcome.requests.is_empty());
+    assert!(state.focus_scope.is_none());
+}
+
+#[test]
+fn recovery_bar_still_reserves_row_and_requests_resize_without_sidebar() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.config.sidebar_collapsed_mode = crate::config::SidebarCollapsedModeConfig::Hidden;
+    state.sidebar_collapsed = true;
     state.set_snapshot(Box::new(two_workspace_snapshot()));
     let baseline = state.surface_size(100, 30);
     state.set_focus_scope(Some(ClientFocusScope::StandaloneWorkspace {
@@ -873,9 +944,11 @@ fn focus_snooze_recovery_bar_clear_last_filter_requests_resize() {
         boot_id: "boot-1".into(),
         workspace_id: "ws_1".into(),
     }));
+    assert_eq!(state.surface_size(100, 30).rows + 1, baseline.rows);
     state.set_pane_surface(surface());
     state.compose(100, 30).unwrap();
     let clear = state.hits.feature_clear_focus;
+    assert!(clear.width > 0 && clear.y == 29);
     let outcome = state.handle_raw_events(vec![crate::raw_input::RawInputEvent::Mouse(
         crossterm::event::MouseEvent {
             kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
@@ -914,8 +987,42 @@ fn focus_snooze_recovery_bar_counts_explicit_persisted_records_once() {
     state.set_snooze_state(shared);
     let frame = state.compose(100, 30).unwrap();
     let text = composed_text(&frame);
-    assert!(text.contains("Snoozed: 1"), "{text}");
+    assert!(text.contains("Snoozed(1)"), "{text}");
     assert!(state.hits.feature_show_snoozed.width > 0);
+}
+
+#[test]
+fn snooze_persistence_failure_shows_warning_marker_at_zero_count() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(two_workspace_snapshot()));
+    let mut shared = snooze_state(&[], 2);
+    shared.persistence = Some(crate::api::schema::SnoozePersistenceInfo {
+        records: Vec::new(),
+        notice: Some("disk unavailable".into()),
+    });
+    state.set_snooze_state(shared);
+    let frame = state.compose(100, 30).unwrap();
+    let footer_row: String = frame.cells
+        .iter()
+        .skip(100usize * 29)
+        .map(|cell| cell.symbol.as_str())
+        .collect();
+    assert!(footer_row.contains("Snoozed(0) ⚠"), "{footer_row}");
+    assert!(state.hits.feature_show_snoozed.width > 0);
+    let show = state.hits.feature_show_snoozed;
+    let outcome = state.handle_raw_events(vec![crate::raw_input::RawInputEvent::Mouse(
+        crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: show.x,
+            row: show.y,
+            modifiers: KeyModifiers::empty(),
+        },
+    )]);
+    assert!(outcome.actions.is_empty() && outcome.requests.is_empty());
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::SnoozeManagement(_))
+    ));
 }
 
 #[test]
@@ -937,7 +1044,7 @@ fn focus_snooze_recovery_bar_survives_unavailable_endpoint_without_mouse_leaks()
 }
 
 #[test]
-fn focus_snooze_recovery_bar_does_not_label_remote_focus_from_local_id_collision() {
+fn focus_snooze_footer_does_not_label_remote_focus_from_local_id_collision() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     let mut snapshot = two_workspace_snapshot();
     snapshot.workspaces[0].label = "WRONG_LOCAL_LABEL".into();
@@ -957,16 +1064,23 @@ fn focus_snooze_recovery_bar_does_not_label_remote_focus_from_local_id_collision
         .map(|cell| cell.symbol.as_str())
         .collect();
     assert!(!footer.contains("WRONG_LOCAL_LABEL"), "{footer}");
-    assert!(footer.contains("Clear"), "{footer}");
+    assert!(footer.contains("🎯"), "{footer}");
+    assert!(
+        !footer.contains("Focus:"),
+        "sidebar footer must stay label-free: {footer}"
+    );
 }
 
 #[test]
-fn focus_snooze_recovery_bar_reserves_bottom_tab_and_sidebar_geometry() {
+fn recovery_bar_without_sidebar_keeps_bottom_tab_and_sidebar_geometry() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.config.sidebar_collapsed_mode = crate::config::SidebarCollapsedModeConfig::Hidden;
+    state.sidebar_collapsed = true;
     state.config.tab_bar_position = crate::config::TabBarPositionConfig::Bottom;
     state.set_snapshot(Box::new(two_workspace_snapshot()));
     state.set_snooze_state(snooze_state(&["ws_2"], 1));
     let layout = state.layout(100, 30);
+    assert_eq!(layout.sidebar.width, 0, "hidden mode has no sidebar");
     assert!(layout.pane_surface.bottom() <= 29);
     assert!(layout.sidebar.bottom() <= 29);
     assert!(
@@ -1409,6 +1523,237 @@ fn snooze_reset_client_confirmation_counts_unavailable_records_and_requires_meta
         "cannot invent a reset revision before server metadata arrives"
     );
     assert!(state.endpoint_error.is_some() || state.visible_endpoint_notice.is_some());
+}
+
+#[test]
+fn focus_project_context_menu_selects_clicked_workspace_exactly_once() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut snapshot = two_workspace_snapshot();
+    let mut third = snapshot.workspaces[1].clone();
+    third.workspace_id = "ws_3".into();
+    third.number = 3;
+    third.focused = false;
+    snapshot.workspaces.push(third);
+    state.set_snapshot(Box::new(snapshot));
+    state.set_pane_surface(surface());
+
+    // Active project (ws_1) differs from the clicked project (repo-b, members ws_2 and
+    // ws_3). The clicked member is not the first eligible one, so the old fallback-then-
+    // explicit sequence emitted two selections with the wrong one first.
+    state.open_workspace_context_menu("ws_3".into(), 0, 0);
+    let index = match state.overlay.as_ref() {
+        Some(ClientShellOverlay::ContextMenu(menu)) => menu
+            .items()
+            .iter()
+            .position(|item| item.action == ClientContextMenuAction::FocusProject)
+            .expect("focus project menu item"),
+        _ => panic!("expected context menu"),
+    };
+    let mut outcome = ClientShellInput::default();
+    state.activate_context_menu_item(index, &mut outcome);
+
+    assert_eq!(
+        outcome.actions.len(),
+        1,
+        "exactly one selection action: {:?}",
+        outcome.actions
+    );
+    match &outcome.actions[..] {
+        [ClientShellAction::Endpoint {
+            request,
+            boot_id,
+            ..
+        }] => match &request.method {
+            crate::api::schema::Method::WorkspaceFocus(target) => {
+                assert_eq!(target.workspace_id, "ws_3");
+                assert_eq!(boot_id, "boot-1");
+            }
+            other => panic!("expected workspace focus, got {other:?}"),
+        },
+        other => panic!("expected a single endpoint focus, got {other:?}"),
+    }
+    assert!(
+        matches!(
+            &state.focus_scope,
+            Some(ClientFocusScope::Worktree { worktree_key, .. }) if worktree_key == "repo-b"
+        ),
+        "{:?}",
+        state.focus_scope
+    );
+}
+
+#[test]
+fn focus_project_context_menu_on_fully_snoozed_project_requests_no_hidden_target() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(two_workspace_snapshot()));
+    state.set_snooze_state(WorkspaceSnoozeState {
+        boot_id: "boot-1".into(),
+        revision: 2,
+        records: Vec::new(),
+        project_records: vec![ProjectSnoozeRecord {
+            project_key: "repo-b".into(),
+            boot_id: "boot-1".into(),
+            deadline_unix_ms: 4_000_000,
+            revision: 1,
+        }],
+        persistence: None,
+    });
+    state.set_pane_surface(surface());
+
+    state.open_workspace_context_menu("ws_2".into(), 0, 0);
+    let index = match state.overlay.as_ref() {
+        Some(ClientShellOverlay::ContextMenu(menu)) => menu
+            .items()
+            .iter()
+            .position(|item| item.action == ClientContextMenuAction::FocusProject)
+            .expect("focus project menu item"),
+        _ => panic!("expected context menu"),
+    };
+    let mut outcome = ClientShellInput::default();
+    state.activate_context_menu_item(index, &mut outcome);
+
+    assert!(
+        outcome.actions.is_empty(),
+        "snoozed target must not enqueue selection requests: {:?}",
+        outcome.actions
+    );
+    assert!(matches!(
+        &state.focus_scope,
+        Some(ClientFocusScope::Worktree { worktree_key, .. }) if worktree_key == "repo-b"
+    ));
+    assert!(
+        state.empty_presentation,
+        "fully snoozed project falls back to the explicit empty view"
+    );
+    assert!(state.pane_surface.is_none());
+}
+
+#[test]
+fn focus_project_context_menu_cross_endpoint_activates_only_captured_endpoint() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(two_workspace_snapshot()));
+    let profile = crate::client::endpoint::SavedSshEndpoint {
+        id: crate::client::endpoint::ProfileId::parse("0123456789abcdef0123456789abcdef").unwrap(),
+        label: "Remote".into(),
+        target: "remote".into(),
+        session: "agents".into(),
+        enabled: true,
+    };
+    let remote = ClientEndpointId::Ssh(profile.id.clone());
+    state.set_endpoint_catalog(&[profile]);
+    state.set_endpoint_status(
+        &remote,
+        crate::client::endpoint::ClientEndpointStatus::Online,
+    );
+    let mut remote_snapshot = two_workspace_snapshot();
+    remote_snapshot.boot_id = "remote-boot".into();
+    state.set_endpoint_snapshot(&remote, Box::new(remote_snapshot));
+
+    state.open_endpoint_workspace_context_menu(remote.clone(), "ws_2".into(), 0, 0);
+    let index = match state.overlay.as_ref() {
+        Some(ClientShellOverlay::ContextMenu(menu)) => menu
+            .items()
+            .iter()
+            .position(|item| item.action == ClientContextMenuAction::FocusProject)
+            .expect("focus project menu item"),
+        _ => panic!("expected context menu"),
+    };
+    let mut outcome = ClientShellInput::default();
+    state.activate_context_menu_item(index, &mut outcome);
+
+    assert_eq!(
+        outcome.actions.len(),
+        1,
+        "only the captured endpoint may be activated: {:?}",
+        outcome.actions
+    );
+    match &outcome.actions[..] {
+        [ClientShellAction::ActivateEndpoint {
+            endpoint_id,
+            target: Some(crate::client::shell::ClientEndpointFocusTarget::Workspace(workspace_id)),
+        }] => {
+            assert_eq!(endpoint_id, &remote);
+            assert_eq!(workspace_id, "ws_2");
+        }
+        other => panic!("expected one captured endpoint activation, got {other:?}"),
+    }
+    assert!(
+        !outcome.actions.iter().any(|action| matches!(
+            action,
+            ClientShellAction::Endpoint {
+                request,
+                ..
+            } if matches!(&request.method, crate::api::schema::Method::WorkspaceFocus(_))
+        )),
+        "no workspace focus may be issued against the previously active endpoint"
+    );
+}
+
+#[test]
+fn sidebar_footer_row_is_reserved_from_agent_projections() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut snapshot = two_workspace_snapshot();
+    for index in 0..14 {
+        snapshot.agents.push(ClientShellAgent {
+            pane_id: format!("pane_extra_{index}"),
+            workspace_id: "ws_1".into(),
+            tab_id: "tab_1".into(),
+            name: Some(format!("agent-extra-{index}")),
+            display_agent: None,
+            agent: Some("claude".into()),
+            title: None,
+            terminal_title: None,
+            terminal_title_stripped: None,
+            agent_status: AgentStatus::Working,
+            state_change_seq: 10 + index as u64,
+            state_labels: Vec::new(),
+            tokens: Vec::new(),
+            focused: false,
+        });
+    }
+    state.set_snapshot(Box::new(snapshot));
+    state.set_pane_surface(surface());
+    state.compose(100, 30).expect("footer frame");
+
+    let footer_y = state.layout(100, 30).sidebar.bottom().saturating_sub(1);
+    assert!(state.hits.feature_clear_focus.y == footer_y);
+    for (rect, _) in &state.hits.agents {
+        assert!(
+            rect.bottom() <= footer_y,
+            "agent row {rect:?} overlaps the footer row {footer_y}"
+        );
+    }
+    for (rect, _, _) in &state.hits.endpoint_agents {
+        assert!(
+            rect.bottom() <= footer_y,
+            "agent row {rect:?} overlaps the footer row {footer_y}"
+        );
+    }
+}
+
+#[test]
+fn collapsed_sidebar_sections_keep_workspace_and_agent_rows_off_the_footer_row() {
+    for height in 1..=8u16 {
+        let area = Rect::new(0, 0, 4, height);
+        let (workspace_area, divider_y, detail_area) =
+            crate::client::shell::sidebar::collapsed_sidebar_sections(area);
+        let footer_limit = area.bottom().saturating_sub(1);
+        for rect in [workspace_area, detail_area] {
+            if !rect.is_empty() {
+                assert!(
+                    rect.bottom() <= footer_limit,
+                    "height {height}: {rect:?} reaches the footer row (limit {footer_limit})"
+                );
+                assert!(rect.right() <= area.right(), "height {height}: {rect:?}");
+            }
+        }
+        if let Some(divider_y) = divider_y {
+            assert!(
+                divider_y < footer_limit,
+                "height {height}: divider {divider_y} sits on the footer row"
+            );
+        }
+    }
 }
 
 #[path = "snooze_management.rs"]

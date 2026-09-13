@@ -130,6 +130,7 @@ pub(super) fn render_collapsed(
             Style::default().fg(palette.surface_dim),
         );
     }
+    // The footer row is already excluded by collapsed_sidebar_sections.
     super::endpoint_agents::render_collapsed(
         buffer,
         detail_area,
@@ -138,6 +139,11 @@ pub(super) fn render_collapsed(
         config,
         hits,
     );
+    let footer = super::recovery_bar::SidebarFooter::for_endpoints(
+        state.focus_scope.is_some(),
+        state.endpoints,
+    );
+    super::recovery_bar::render_sidebar_footer(buffer, area, config, &footer, true, hits);
     hits.sidebar_toggle = if area.is_empty() || workspace_area.width == 0 {
         Rect::default()
     } else {
@@ -173,8 +179,11 @@ pub(super) fn render_expanded(
     } else {
         Rect::new(area.right().saturating_sub(1), area.y, 1, area.height)
     };
-    let (workspace_area, detail_area) =
+    let (workspace_area, mut detail_area) =
         crate::ui::expanded_sidebar_sections(area, state.sidebar_section_split);
+    // Reserve the bottom row for the focus/snooze footer so no clickable agent row
+    // sits underneath it.
+    detail_area.height = detail_area.height.saturating_sub(1);
     hits.sidebar_section_divider =
         crate::ui::sidebar_section_divider_rect(area, state.sidebar_section_split);
     put_text(
@@ -404,6 +413,11 @@ pub(super) fn render_expanded(
         state.agent_scroll,
         hits,
     );
+    let footer = super::recovery_bar::SidebarFooter::for_endpoints(
+        state.focus_scope.is_some(),
+        state.endpoints,
+    );
+    super::recovery_bar::render_sidebar_footer(buffer, area, config, &footer, false, hits);
     hits.sidebar_toggle = Rect::new(
         area.right().saturating_sub(2),
         area.bottom().saturating_sub(1),

@@ -1382,13 +1382,101 @@ impl ClientShellState {
         &mut self,
         scope: Option<ClientFocusScope>,
     ) -> Vec<ClientShellAction> {
+        self.set_focus_scope_with_preferred_target(scope, None)
+    }
+
+    /// Applies a focus scope and selects `preferred_target` (the workspace the user acted on)
+    /// before any fallback pick, so a transition emits at most one workspace focus or endpoint
+    /// activation. A snoozed or stale target is never selected directly; the shared reconcile
+    /// then chooses an eligible member or the explicit empty view, keeping hidden work hidden.
+    pub(crate) fn set_focus_scope_with_preferred_target(
+        &mut self,
+        scope: Option<ClientFocusScope>,
+        preferred_target: Option<(ClientEndpointId, String)>,
+    ) -> Vec<ClientShellAction> {
         self.focus_scope = scope.clone();
         for endpoint in &mut self.endpoints {
             // Keep the qualified scope on every projection. A missing scope means unrestricted;
             // a scope for another endpoint must still reject this endpoint's rows.
             endpoint.focus_scope = scope.clone();
         }
-        self.reconcile_active_workspace_visibility(true)
+        let Some((endpoint_id, workspace_id)) = preferred_target else {
+            return self.reconcile_active_workspace_visibility(true);
+        };
+        let Some(endpoint) = self
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+        else {
+            return self.reconcile_active_workspace_visibility(true);
+        };
+        let preferred_visible = endpoint
+            .snapshot
+            .as_deref()
+            .is_some_and(|snapshot| {
+                snapshot
+                    .workspaces
+                    .iter()
+                    .find(|workspace| workspace.workspace_id == workspace_id)
+                    .is_some_and(|workspace| {
+                        workspace_is_visible(
+                            self.focus_scope.as_ref(),
+                            endpoint.snooze_state.as_ref(),
+                            &endpoint_id,
+                            Some(snapshot.boot_id.as_str()),
+                            workspace,
+                        )
+                    })
+            });
+        if endpoint_id == self.active_endpoint_id {
+            if !preferred_visible {
+                return self.reconcile_active_workspace_visibility(true);
+            }
+            let already_focused = self.snapshot.as_deref().is_some_and(|snapshot| {
+                snapshot.focused_workspace_id.as_deref() == Some(workspace_id.as_str())
+            });
+            if already_focused {
+                return self.reconcile_active_workspace_visibility(true);
+            }
+            // Match explicit workspace selection: leave the empty view for the confirmed
+            // focus instead of latching it while the request is in flight.
+            self.empty_presentation = false;
+            self.focus_endpoint_target(ClientEndpointFocusTarget::Workspace(workspace_id))
+        } else {
+            // Cross-endpoint: activate only the captured endpoint. A hidden preferred target
+            // falls back to an eligible member, or activates without a target so that endpoint
+            // shows its explicit empty view instead of revealing snoozed work.
+            let target = if preferred_visible {
+                Some(ClientEndpointFocusTarget::Workspace(workspace_id))
+            } else {
+                endpoint
+                    .snapshot
+                    .as_deref()
+                    .and_then(|snapshot| {
+                        snapshot
+                            .workspaces
+                            .iter()
+                            .find(|workspace| {
+                                workspace_is_visible(
+                                    self.focus_scope.as_ref(),
+                                    endpoint.snooze_state.as_ref(),
+                                    &endpoint_id,
+                                    Some(snapshot.boot_id.as_str()),
+                                    workspace,
+                                )
+                            })
+                            .map(|workspace| {
+                                ClientEndpointFocusTarget::Workspace(
+                                    workspace.workspace_id.clone(),
+                                )
+                            })
+                    })
+            };
+            vec![ClientShellAction::ActivateEndpoint {
+                endpoint_id,
+                target,
+            }]
+        }
     }
 
     pub(crate) fn clear_focus_scope(&mut self) -> Vec<ClientShellAction> {
@@ -1530,19 +1618,38 @@ impl ClientShellState {
     }
 
     pub(super) fn layout(&self, cols: u16, rows: u16) -> ClientShellLayout {
-        let recovery_bar_visible = recovery_bar::is_visible(self) && rows > 0;
-        let content_rows = rows.saturating_sub(if recovery_bar_visible { 1 } else { 0 });
         let mut layout = self.config.layout(
             cols,
-            content_rows,
+            rows,
             self.sidebar_collapsed,
             self.focused_tab_count(),
             self.sidebar_width,
         );
-        if recovery_bar_visible {
+        // The sidebar bottom row hosts the focus/snooze footer, so only sidebar-less layouts
+        // keep reserving a terminal row for the recovery bar. Reserving on sidebar layouts
+        // resized the pane surface on every focus/snooze transition, which invalidated the
+        // composed surface and flickered the terminal.
+        if layout.sidebar.width == 0 && recovery_bar::is_visible(self) && rows > 0 {
+            layout = self.config.layout(
+                cols,
+                rows.saturating_sub(1),
+                self.sidebar_collapsed,
+                self.focused_tab_count(),
+                self.sidebar_width,
+            );
             layout.recovery_bar = Rect::new(0, rows.saturating_sub(1), cols, 1);
         }
         layout
+    }
+
+    /// Whether the current layout reserves a terminal row for the recovery bar. Feature
+    /// visibility alone is not enough: sidebar layouts host the controls in the sidebar
+    /// footer without changing the pane surface size.
+    pub(super) fn recovery_row_reserved(&self) -> bool {
+        self.last_composed_size
+            .map_or(recovery_bar::is_visible(self), |(cols, rows)| {
+                !self.layout(cols, rows).recovery_bar.is_empty()
+            })
     }
 
     pub(crate) fn surface_size(&self, cols: u16, rows: u16) -> ClientSurfaceSize {

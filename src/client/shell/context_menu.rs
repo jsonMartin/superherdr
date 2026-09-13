@@ -172,17 +172,20 @@ impl ClientShellState {
             KeybindAction::FocusProject => {
                 let scope = match worktree_key {
                     Some(worktree_key) => ClientFocusScope::Worktree {
-                        endpoint_id,
+                        endpoint_id: endpoint_id.clone(),
                         boot_id,
                         worktree_key,
                     },
                     None => ClientFocusScope::StandaloneWorkspace {
-                        endpoint_id,
+                        endpoint_id: endpoint_id.clone(),
                         boot_id,
-                        workspace_id,
+                        workspace_id: workspace_id.clone(),
                     },
                 };
-                outcome.actions.extend(self.set_focus_scope(Some(scope)));
+                outcome.actions.extend(self.set_focus_scope_with_preferred_target(
+                    Some(scope),
+                    Some((endpoint_id, workspace_id)),
+                ));
             }
             KeybindAction::SnoozeWorkspace => {
                 self.open_snooze_overlay(endpoint_id, boot_id, workspace_id, None);
@@ -689,37 +692,32 @@ impl ClientShellState {
             }
             ClientContextMenuAction::FocusProject => {
                 if let Some(key) = worktree_key {
-                    let actions = self.set_focus_scope(Some(ClientFocusScope::Worktree {
+                    // The shared transition applies the scope with the clicked workspace as the
+                    // preferred target, emitting at most one selection action instead of a
+                    // reconcile fallback followed by the explicit focus (the double-selection
+                    // flicker). Snoozed targets fall back to an eligible member or the empty
+                    // view so hidden work is never revealed.
+                    let scope = ClientFocusScope::Worktree {
                         endpoint_id: endpoint_id.clone(),
-                        boot_id: boot_id.clone(),
+                        boot_id,
                         worktree_key: key,
-                    }));
-                    outcome.actions.extend(actions);
-                    if endpoint_id == self.active_endpoint_id {
-                        outcome.actions.extend(self.focus_endpoint_target(
-                            ClientEndpointFocusTarget::Workspace(workspace_id),
-                        ));
-                    } else {
-                        outcome.actions.push(ClientShellAction::ActivateEndpoint {
-                            endpoint_id,
-                            target: Some(ClientEndpointFocusTarget::Workspace(workspace_id)),
-                        });
-                    }
+                    };
+                    outcome.actions.extend(self.set_focus_scope_with_preferred_target(
+                        Some(scope),
+                        Some((endpoint_id, workspace_id)),
+                    ));
                 }
             }
             ClientContextMenuAction::FocusWorkspace => {
-                let actions = self.set_focus_scope(Some(ClientFocusScope::StandaloneWorkspace {
+                let scope = ClientFocusScope::StandaloneWorkspace {
                     endpoint_id: endpoint_id.clone(),
                     boot_id,
                     workspace_id: workspace_id.clone(),
-                }));
-                outcome.actions.extend(actions);
-                if endpoint_id != self.active_endpoint_id {
-                    outcome.actions.push(ClientShellAction::ActivateEndpoint {
-                        endpoint_id,
-                        target: Some(ClientEndpointFocusTarget::Workspace(workspace_id)),
-                    });
-                }
+                };
+                outcome.actions.extend(self.set_focus_scope_with_preferred_target(
+                    Some(scope),
+                    Some((endpoint_id, workspace_id)),
+                ));
             }
             ClientContextMenuAction::ClearFocus => {
                 let actions = self.clear_focus_scope();

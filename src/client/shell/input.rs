@@ -155,7 +155,7 @@ impl ClientShellState {
 
     pub(super) fn handle_raw_events(&mut self, events: Vec<RawInputEvent>) -> ClientShellInput {
         let mut outcome = ClientShellInput::default();
-        let recovery_bar_was_visible = super::recovery_bar::is_visible(self);
+        let recovery_row_was_reserved = self.recovery_row_reserved();
         if !events.is_empty() && self.endpoint_error.take().is_some() {
             outcome.repaint = true;
         }
@@ -285,7 +285,7 @@ impl ClientShellState {
             self.reconcile_input_source();
         }
         outcome.repaint |= self.resume_mobile_switcher_if_ready();
-        if recovery_bar_was_visible != super::recovery_bar::is_visible(self) {
+        if recovery_row_was_reserved != self.recovery_row_reserved() {
             self.invalidate_pane_surface();
             outcome.repaint = true;
             outcome.resize = true;

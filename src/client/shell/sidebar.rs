@@ -11,12 +11,22 @@ pub(in crate::client::shell) fn collapsed_sidebar_sections(
     if content.is_empty() {
         return (Rect::default(), None, Rect::default());
     }
-    if content.height < 7 {
-        return (content, None, Rect::default());
+    // The bottom row hosts the focus/snooze footer; workspace and agent rows must stay
+    // above it at every height, including the height < 7 all-workspace fallback.
+    let body_height = content.height.saturating_sub(1);
+    if body_height == 0 {
+        return (Rect::default(), None, Rect::default());
     }
-    let workspace_height = content.height.div_ceil(2);
+    if body_height < 7 {
+        return (
+            Rect::new(content.x, content.y, content.width, body_height),
+            None,
+            Rect::default(),
+        );
+    }
+    let workspace_height = body_height.div_ceil(2);
     let divider_y = content.y + workspace_height;
-    let detail_height = content.height.saturating_sub(workspace_height + 1);
+    let detail_height = body_height.saturating_sub(workspace_height + 1);
     (
         Rect::new(content.x, content.y, content.width, workspace_height),
         Some(divider_y),
@@ -115,12 +125,8 @@ pub(crate) fn render_collapsed_sidebar(
         );
     }
 
-    let detail_content = Rect::new(
-        detail_area.x,
-        detail_area.y,
-        detail_area.width,
-        detail_area.height.saturating_sub(1),
-    );
+    // The footer row is already excluded by collapsed_sidebar_sections.
+    let detail_content = detail_area;
     for (index, pane_id) in super::ordered_agent_pane_ids_with_filter(
         snapshot,
         config.agent_panel_sort,
@@ -168,6 +174,11 @@ pub(crate) fn render_collapsed_sidebar(
         );
         hits.agents.push((rect, pane_id));
     }
+    let footer = super::recovery_bar::SidebarFooter::for_active_snooze(
+        focus_scope.is_some(),
+        snooze_state,
+    );
+    super::recovery_bar::render_sidebar_footer(buffer, area, config, &footer, true, hits);
     hits.sidebar_toggle = if area.is_empty() || workspace_area.width == 0 {
         Rect::default()
     } else {
@@ -209,8 +220,11 @@ pub(crate) fn render_sidebar(
     } else {
         Rect::new(area.right().saturating_sub(1), area.y, 1, area.height)
     };
-    let (workspace_area, detail_area) =
+    let (workspace_area, mut detail_area) =
         crate::ui::expanded_sidebar_sections(area, state.sidebar_section_split);
+    // Reserve the bottom row for the focus/snooze footer so no clickable agent row
+    // sits underneath it.
+    detail_area.height = detail_area.height.saturating_sub(1);
     hits.sidebar_section_divider =
         crate::ui::sidebar_section_divider_rect(area, state.sidebar_section_split);
     put_text(
@@ -452,6 +466,12 @@ pub(crate) fn render_sidebar(
         hits,
         |agent| visible_workspaces.contains(&agent.workspace_id),
     );
+
+    let footer = super::recovery_bar::SidebarFooter::for_endpoints(
+        state.focus_scope.is_some(),
+        state.endpoints,
+    );
+    super::recovery_bar::render_sidebar_footer(buffer, area, config, &footer, false, hits);
 
     hits.sidebar_toggle = Rect::new(
         area.right().saturating_sub(2),

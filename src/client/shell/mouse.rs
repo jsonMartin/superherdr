@@ -2094,6 +2094,25 @@ impl ClientShellState {
                     self.persist_chrome_preferences(outcome);
                     return;
                 }
+                // Sidebar footer focus toggle: 🎯 (focus active) clears only the Focus scope;
+                // 🌐 (all projects) focuses the current valid workspace via the shared action.
+                if super::contains(self.hits.feature_clear_focus, point) {
+                    if self.focus_scope.is_some() {
+                        outcome.actions.extend(self.clear_focus_scope());
+                    } else {
+                        self.activate_launcher_action(
+                            crate::input::KeybindAction::FocusProject,
+                            outcome,
+                        );
+                    }
+                    outcome.repaint = true;
+                    return;
+                }
+                if super::contains(self.hits.feature_show_snoozed, point) {
+                    self.open_snooze_recovery(mouse.column, mouse.row);
+                    outcome.repaint = true;
+                    return;
+                }
                 for hit in &self.hits.workspaces {
                     if let Some((rect, key)) = &hit.group_toggle {
                         if super::contains(*rect, point) {

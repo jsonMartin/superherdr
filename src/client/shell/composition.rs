@@ -97,10 +97,12 @@ impl ClientShellState {
             &self.config.keybinds,
             &self.config.palette,
         );
-        let (clear_focus, show_snoozed) =
-            recovery_bar::render(&mut buffer, self, layout.recovery_bar);
-        self.hits.feature_clear_focus = clear_focus;
-        self.hits.feature_show_snoozed = show_snoozed;
+        if !layout.recovery_bar.is_empty() {
+            let (clear_focus, show_snoozed) =
+                recovery_bar::render(&mut buffer, self, layout.recovery_bar);
+            self.hits.feature_clear_focus = clear_focus;
+            self.hits.feature_show_snoozed = show_snoozed;
+        }
         if let Some(overlay) = self.overlay.as_ref() {
             if let ClientShellOverlay::ContextMenu(menu) = overlay {
                 self.hits.context_menu_rows =
@@ -276,10 +278,12 @@ impl ClientShellState {
             &self.config.keybinds,
             &self.config.palette,
         );
-        let (clear_focus, show_snoozed) =
-            recovery_bar::render(&mut buffer, self, layout.recovery_bar);
-        self.hits.feature_clear_focus = clear_focus;
-        self.hits.feature_show_snoozed = show_snoozed;
+        if !layout.recovery_bar.is_empty() {
+            let (clear_focus, show_snoozed) =
+                recovery_bar::render(&mut buffer, self, layout.recovery_bar);
+            self.hits.feature_clear_focus = clear_focus;
+            self.hits.feature_show_snoozed = show_snoozed;
+        }
         if let Some(overlay) = self.overlay.as_ref() {
             if let ClientShellOverlay::ContextMenu(menu) = overlay {
                 self.hits.context_menu_rows =
@@ -770,7 +774,7 @@ impl ClientShellState {
             self.hits.pane_splits.clear();
             self.hits.popup = None;
         }
-        if recovery_bar::is_visible(self) {
+        if !layout.recovery_bar.is_empty() {
             let mut composed = frame.to_ratatui_buffer()?;
             let (clear_focus, show_snoozed) =
                 recovery_bar::render(&mut composed, self, layout.recovery_bar);
