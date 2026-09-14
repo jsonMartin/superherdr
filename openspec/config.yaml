@@ -1,0 +1,22 @@
+schema: spec-driven
+
+context: |
+  Superherdr is a fork of Herdr, a terminal runtime for coding agents, written in Rust.
+  It adds Focus, shared Snooze and the Top-level Agents view, and ships its own binaries,
+  shell installer and Homebrew formula. Upstream Herdr releases are merged regularly with
+  `just sync-upstream`; inherited behavior is described by Herdr's documentation until a
+  Superherdr change specifies it.
+  The server owns shared runtime and session state; each TUI client owns presentation state.
+  HERDR_* environment variables, socket names, API/schema identifiers and frozen endpoint
+  codecs keep upstream names for compatibility.
+  Tests run with `just test`; OpenSpec validation runs with `just spec-check`.
+  Read AGENTS.md and CONTRIBUTING.md for project conventions and verification boundaries.
+
+rules:
+  specs:
+    - Describe observable behavior with SHALL/MUST requirements and WHEN/THEN scenarios.
+    - Use Lite specs by default. Use Full detail for API, socket, CLI or wire contracts, persisted formats, protocol and compatibility guarantees.
+    - Say whether state is client-local or shared by the server.
+    - Keep specs lightweight; cover main workflows and consequential failure cases, not every input combination.
+  proposal:
+    - State whether the change alters an inherited Herdr behavior, and how it affects upstream merges.

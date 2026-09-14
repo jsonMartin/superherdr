@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Feature requests and ideas
-    url: https://github.com/herdrdev/herdr/discussions
-    about: Start a discussion for feature requests, ideas, behavior changes, and product direction.
-  - name: Questions and contribution proposals
-    url: https://github.com/herdrdev/herdr/discussions
-    about: Use discussions for questions, contribution proposals, and anything that is not a reproducible bug.
+  - name: Propose a feature or material change
+    url: https://github.com/jsonMartin/superherdr/blob/main/CONTRIBUTING.md#propose-before-implementing
+    about: New features and material behavior changes start as an OpenSpec proposal pull request.
+  - name: Bug in inherited Herdr behavior
+    url: https://github.com/herdrdev/herdr/issues
+    about: If the bug also happens in Herdr and is not caused by Superherdr's changes, report it upstream.
