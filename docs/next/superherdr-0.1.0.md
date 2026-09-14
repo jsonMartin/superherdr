@@ -1,6 +1,6 @@
-# Superherdr 0.1.0 release-candidate notes
+# Superherdr 0.1.0 release notes
 
-Superherdr 0.1.0 is the first Superherdr release candidate. It is not yet published. Superherdr is a project built on [Herdr](https://github.com/herdrdev/herdr), with its own release versioning.
+Superherdr 0.1.0 is the first Superherdr release. Superherdr is a project built on [Herdr](https://github.com/herdrdev/herdr), with its own release versioning.
 
 ## What 0.1.0 adds
 
@@ -8,12 +8,30 @@ Superherdr 0.1.0 is the first Superherdr release candidate. It is not yet publis
 - **Snooze is shared.** A snoozed project or workspace stays hidden on every client until its wake time, without stopping its terminals. Snooze never stops processes, mutes notices, or acknowledges requests; runtime behavior is unaffected.
 - **All / Top-level Agents toggle.** Top-level hides agents in linked worktree workspaces when the same endpoint has a non-linked parent with the same worktree key. Parent, standalone, and orphan agents stay visible. Notices and runtime behavior are unchanged.
 
-## Artifacts, platform, and installation
+## Artifacts and platforms
 
-- The initial artifact is a macOS Apple Silicon build only. It declares a 13.0 macOS minimum matching its dependency, but it has actually been exercised only on macOS 27; older-OS validation is pending.
-- Binary self-update is disabled. The existing local Homebrew `superherdr` 0.9.0_1 remains the active installation while the 0.1.0 candidate is validated separately.
-- A matching Superherdr remote installation for SSH needs a separately prepared build for the remote platform; upstream installers install Herdr, not Superherdr.
+- `superherdr-0.1.0-macos-aarch64.tar.gz`: macOS Apple Silicon. It declares a macOS 13.0 minimum matching its dependency, but has been exercised only on macOS 27.
+- `superherdr-0.1.0-linux-x86_64.tar.gz`: Linux x86_64, statically linked with musl. It is a static-pie executable with no interpreter, no `DT_NEEDED` entries, and no glibc symbol dependencies. It has been exercised only on Arch Linux x86_64 (headless server, named session, real PTY roundtrip, TUI render); the SSH remote attach flow has not been exercised.
+- `superherdr-0.1.0.arm64_golden_gate.bottle.tar.gz`: the Homebrew bottle, assembled from the macOS archive's binary.
+- Linux aarch64, Intel macOS, Windows, and Android/Termux have no 0.1.0 build.
+- Each archive contains `superherdr`, `LICENSE`, and `licenses/`. `SHA256SUMS` lists every asset.
+- Binary self-update is disabled. Superherdr does not read Herdr update manifests.
 - Existing plugins retain the Herdr 0.9.0 compatibility level; Superherdr release numbers are separate.
 - `HERDR_*` environment variables, socket names, and protocol identifiers retain their inherited names for compatibility.
 
-The owned release repository is [jsonmartin/superherdr](https://github.com/jsonmartin/superherdr), and the shared Homebrew formula is staged in [jsonmartin/homebrew-tap](https://github.com/jsonmartin/homebrew-tap). The release uses `superherdr-v0.1.0` so inherited Herdr tags remain unchanged. Draft assets are not anonymously downloadable; the tap installation command must be verified after publication.
+## Shell installer
+
+`install.sh` (source: `distribution/install.sh`) installs from Superherdr's own GitHub releases on Linux x86_64 and macOS Apple Silicon:
+
+- It downloads `SHA256SUMS` and `superherdr-<version>-<target>.tar.gz` from the `superherdr-v<version>` release over HTTPS and verifies the checksum before extracting.
+- It installs `superherdr` and a `herdr` symlink into `~/.local/bin` (override with `SUPERHERDR_INSTALL_DIR`), and the licenses into `${XDG_DATA_HOME:-~/.local/share}/superherdr/licenses`. It needs no root.
+- The version defaults to 0.1.0; pass another version as the first argument or through `SUPERHERDR_VERSION`.
+- It updates only its own previous install: a regular `superherdr` binary plus a `herdr` symlink pointing at exactly that binary. It refuses symlinked or unpaired `superherdr` files, foreign `herdr` symlinks or files, and any `superherdr` or `herdr` found on `PATH` outside the install directory, such as a Homebrew or original Herdr installation.
+- It stages the new binary inside the install directory and renames it into place, so an interrupted install leaves the previous binary intact.
+- It does not touch configuration, state, or running sessions, and does not migrate original Herdr state.
+
+## Building the Linux artifact
+
+The Linux archive was built from commit `4f70b4fd22c007a9bdbee313701edb41141d36b2` with the repository-pinned Rust 1.96.1 toolchain plus the `x86_64-unknown-linux-musl` rust-std component, Zig 0.15.2 for the vendored libghostty-vt, `--locked` dependencies, `HERDR_BUILD_CHANNEL=stable`, and `-j4`. The build succeeded with `RUST_MIN_STACK=268435456` (256 MiB); an attempt at 128 MiB failed with a rustc SIGSEGV at the final crate. The cause was not diagnosed. The macOS binary was built from `9129dfad7d93c0ffc564920a5c8229da119c0b75`; the commits after it change only documentation and the installer.
+
+The release repository is [jsonmartin/superherdr](https://github.com/jsonmartin/superherdr), and the Homebrew formula is in [jsonmartin/homebrew-tap](https://github.com/jsonmartin/homebrew-tap). The release tag is `superherdr-v0.1.0`, so inherited Herdr tags remain unchanged.

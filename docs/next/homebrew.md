@@ -1,37 +1,35 @@
-# Local Homebrew installation
+# Homebrew installation
 
-Superherdr currently uses a machine-local Homebrew tap. It is not available from a published tap or Homebrew core.
-
-On a machine with the local tap and its archives already prepared:
+The shared tap is [jsonmartin/homebrew-tap](https://github.com/jsonmartin/homebrew-tap). Its formula uses versioned assets from [Superherdr releases](https://github.com/jsonmartin/superherdr/releases).
 
 ```sh
-brew install local/superherdr/superherdr local/superherdr/herdr-og
-```
-
-The Superherdr formula installs `superherdr` and a `herdr` executable symlink:
-
-```ruby
-bin.install "superherdr"
-bin.install_symlink bin/"superherdr" => "herdr"
-```
-
-`herdr-og` preserves a snapshot of the original executable. The original Homebrew `herdr` package remains installed but unlinked. Existing absolute executable paths remain intact for running sessions.
-
-The local shell puts the Superherdr formula's `bin` directory before the old standalone executable. Check a new shell with:
-
-```sh
-command -v herdr
+brew install jsonmartin/tap/superherdr
 herdr --version
 superherdr --version
-herdr-og --version
 ```
 
-Both `herdr` and `superherdr` should report `superherdr`; `herdr-og` should report `herdr`. Command names do not change configuration directories or inherited `HERDR_*` session overrides. Existing panes continue to address their existing session.
+Both commands report `superherdr 0.1.0`. The formula installs the `superherdr` binary and a `herdr` symlink.
 
-A Homebrew formula alias changes package lookup, not executable names. The executable symlink above supplies the command alias. There is no generic `brew install --as` option.
+The 0.1.0 formula supports macOS Apple Silicon, declares macOS 13 as its minimum, and was tested on macOS 27. Its macOS 27 bottle is assembled from the verified release binary. Linux users should use the release archive or shell installer.
 
-## Updating and sharing
+## Existing Herdr installations
 
-These packages are local snapshots. Keep the local formulas and archives available for reinstalls. Building new source does not update the installed package, and `brew upgrade` does not fetch unpublished project changes. Refresh the binary archive, checksum and bottle before reinstalling an updated local package.
+If the original Homebrew `herdr` formula is linked, first run:
 
-Do not commit machine-specific `file://` URLs, binary archives, Homebrew receipts, or shell backups. A shared formula needs an established release location and checksums for actual published artifacts. The shared formula is being prepared in [jsonmartin/homebrew-tap](https://github.com/jsonmartin/homebrew-tap), using assets from [jsonmartin/superherdr](https://github.com/jsonmartin/superherdr). Its release is still a draft. After publication and installation verification, the package command will be `brew install jsonmartin/tap/superherdr`; it will provide both `superherdr` and `herdr`. The personal `herdr-og` snapshot stays local.
+```sh
+brew unlink herdr
+brew install jsonmartin/tap/superherdr
+```
+
+Unlinking retains the original keg. Check `command -v herdr` if an older standalone executable appears earlier on PATH. Changing the executable does not migrate state or restart a running server. Superherdr uses separate state directories by default.
+
+## Updates
+
+```sh
+brew update
+brew upgrade jsonmartin/tap/superherdr
+```
+
+On Homebrew versions with `brew trust`, run `brew trust --formula jsonmartin/tap/superherdr` once so an unqualified `brew upgrade` includes this formula.
+
+Homebrew owns this installation; do not update it with the shell installer. Building source does not update a Homebrew keg. Binary self-update is disabled. A running server may continue using the previous executable until a compatible handoff or an appropriate restart; preserve active sessions when updating.
