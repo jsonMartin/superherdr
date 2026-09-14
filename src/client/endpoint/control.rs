@@ -22,7 +22,9 @@ pub(crate) fn decode_endpoint_control(
     }
     if kind == "workspace_snooze.state" {
         return match serde_json::from_str(data) {
-            Ok(state) => Ok(EndpointControlMessage::WorkspaceSnoozeState(Box::new(state))),
+            Ok(state) => Ok(EndpointControlMessage::WorkspaceSnoozeState(Box::new(
+                state,
+            ))),
             Err(error) => Ok(EndpointControlMessage::OptionalFeatureError {
                 feature: "workspace_snooze.state".into(),
                 error: format!("invalid endpoint workspace snooze state: {error}"),

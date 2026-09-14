@@ -230,7 +230,9 @@ impl HeadlessServer {
                     let (code, message) = self.snooze_action_error(error);
                     self.send_to_client(
                         client_id,
-                        crate::server::client_commands::error_message(boot_id, request_id, &code, message),
+                        crate::server::client_commands::error_message(
+                            boot_id, request_id, &code, message,
+                        ),
                     );
                     return false;
                 }
@@ -280,8 +282,8 @@ impl HeadlessServer {
                 }
                 Err(SnoozeWakeCommitError::Action(
                     crate::server::workspace_snooze::WorkspaceWakeError::StaleRevision {
-                    expected,
-                    current,
+                        expected,
+                        current,
                     },
                 )) => {
                     self.send_to_client(
@@ -434,13 +436,14 @@ impl HeadlessServer {
                 self.commit_snooze_wake_all(params.expected_revision, params.confirmed)
             } else {
                 self.commit_snooze_wake(|manager| {
-                    manager.wake_workspace(
-                        canonical_target.as_deref(),
-                        params.expected_revision,
-                        params.confirmed,
-                        project_key.as_deref(),
-                    )
-                    .map(|_| ())
+                    manager
+                        .wake_workspace(
+                            canonical_target.as_deref(),
+                            params.expected_revision,
+                            params.confirmed,
+                            project_key.as_deref(),
+                        )
+                        .map(|_| ())
                 })
             };
             match wake_result {
@@ -483,8 +486,8 @@ impl HeadlessServer {
                 }
                 Err(SnoozeWakeCommitError::Action(
                     crate::server::workspace_snooze::WorkspaceWakeError::StaleRevision {
-                    expected,
-                    current,
+                        expected,
+                        current,
                     },
                 )) => {
                     let message = crate::server::client_commands::error_message(
@@ -512,8 +515,8 @@ impl HeadlessServer {
                 }
                 Err(SnoozeWakeCommitError::Action(
                     crate::server::workspace_snooze::WorkspaceWakeError::StaleBoot {
-                    expected,
-                    current,
+                        expected,
+                        current,
                     },
                 )) => {
                     let message = crate::server::client_commands::error_message(
