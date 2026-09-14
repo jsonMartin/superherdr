@@ -526,7 +526,7 @@ impl SnoozeStore {
             .collect();
         expired
             .iter()
-            // `|` keeps removing every expired record after the first success.
+            // Not `.any()`: it short-circuits and would leave later expired records in place.
             .fold(false, |changed, id| self.remove_record(id) | changed)
     }
 
