@@ -41,7 +41,7 @@ Superherdr SHALL report the Herdr plugin compatibility level it inherits (`0.9.0
 - **THEN** Superherdr SHALL accept it
 
 ### Requirement: Upstream agent-detection catalog
-While Superherdr's detection engine and rules match Herdr's, Superherdr SHALL fetch agent-detection rule updates from Herdr's published catalog at startup when `update.manifest_check` is enabled, which is the default. It SHALL reject rules that require a newer detection engine and SHALL fall back to bundled rules when the catalog is unreachable. Setting `update.manifest_check = false` SHALL stop all catalog requests. A change that makes Superherdr's detection engine or rules diverge from Herdr's SHALL move the catalog to Superherdr-hosted infrastructure in the same change.
+While Superherdr's detection engine and rules match Herdr's, release builds of Superherdr SHALL fetch agent-detection rule updates from Herdr's published catalog at startup when `update.manifest_check` is enabled, which is the default. It SHALL reject rules that require a newer detection engine and SHALL fall back to bundled rules when the catalog is unreachable. Setting `update.manifest_check = false` SHALL stop all catalog requests. A change that makes Superherdr's detection engine or rules diverge from Herdr's SHALL move the catalog to Superherdr-hosted infrastructure in the same change.
 
 #### Scenario: Catalog unreachable
 - **WHEN** the catalog cannot be fetched at startup

@@ -29,7 +29,7 @@ For example, fixing a snoozed workspace that fails to reappear at its wake time 
 The OpenSpec proposal PR is the request for comments: reviewers discuss the proposed files, and agreed changes are made in those files before acceptance.
 
 1. Create the change and write its artifacts (see [Record the change in OpenSpec](#record-the-change-in-openspec)). The PR contains only files under `openspec/changes/<change-name>/`.
-2. Open the PR as a draft with an `RFC:` title while shaping the proposal. Mark it ready for review when you want a decision. No implementation code is needed.
+2. Open the PR as a draft with an `rfc:` title, for example `rfc: add pane snooze`, while shaping the proposal. Mark it ready for review when you want a decision. No implementation code is needed.
 3. A maintainer accepts the proposal by merging the proposal-only PR, or by commenting "Proposal accepted; continue implementation in this PR." A reaction, passing check, draft status, or silence is not acceptance.
 4. Implement in a separate PR that links the accepted proposal. A maintainer may request changes, defer, or decline a proposal and will record the reason.
 

@@ -85,9 +85,10 @@ fi
 base="$(git merge-base HEAD "$upstream_commit" || true)"
 
 merge_status=0
-git merge --no-ff --no-commit --quiet "$upstream_commit" >/dev/null 2>&1 || merge_status=$?
+merge_output="$(git merge --no-ff --no-commit "$upstream_commit" 2>&1)" || merge_status=$?
 if ! git rev-parse -q --verify MERGE_HEAD >/dev/null; then
-    echo "error: git merge failed before creating a merge (exit $merge_status)" >&2
+    echo "error: git merge failed before creating a merge (exit $merge_status):" >&2
+    echo "$merge_output" >&2
     exit 1
 fi
 
@@ -101,17 +102,19 @@ done < <(list_entries .upstream-sync/exclude)
 
 ported=()
 while IFS= read -r path; do
+    if ! git cat-file -e "HEAD:$path" 2>/dev/null; then
+        echo "warning: .upstream-sync/ours path is not tracked, skipping: $path" >&2
+        continue
+    fi
     if [ -n "$base" ] && ! git diff --quiet "$base" "$upstream_commit" -- "$path"; then
         ported+=("$path")
     fi
-    if git cat-file -e "HEAD:$path" 2>/dev/null; then
-        git checkout HEAD -- "$path"
-        git add -- "$path"
-    fi
+    git checkout HEAD -- "$path"
+    git add -- "$path"
 done < <(list_entries .upstream-sync/ours)
 
 conflicts="$(git diff --name-only --diff-filter=U)"
-new_workflows="$(git diff --cached --name-only --diff-filter=A HEAD -- .github/ || true)"
+added="$(git diff --cached --name-only --diff-filter=A HEAD || true)"
 
 write_report() {
     echo "## Merge Herdr $tag"
@@ -138,10 +141,10 @@ write_report() {
         echo "Inspect with \`git diff $base $upstream_commit -- <file>\`."
         echo
     fi
-    if [ -n "$new_workflows" ]; then
-        echo "### New upstream files under .github (decide whether to keep or exclude)"
+    if [ -n "$added" ]; then
+        echo "### New upstream files (add unwanted ones to .upstream-sync/exclude)"
         echo
-        echo "$new_workflows" | sed 's/^/- `/; s/$/`/'
+        echo "$added" | sed 's/^/- `/; s/$/`/'
         echo
     fi
 }

@@ -116,6 +116,18 @@ class SyncUpstreamTests(unittest.TestCase):
         self.assertTrue((self.fork / ".git" / "MERGE_HEAD").exists())
         self.assertNotIn("SPONSORS.md", git(self.fork, "ls-files").splitlines())
 
+    def test_untracked_owned_path_is_skipped_not_reported_as_kept(self) -> None:
+        write(self.fork, ".upstream-sync/ours", "README.md\nMISSING.md\n")
+        git(self.fork, "commit", "-q", "-am", "own a missing path")
+        self._release("v1.3.0", {"MISSING.md": "upstream file\n"})
+
+        result = self._sync("v1.3.0")
+
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn("not tracked, skipping: MISSING.md", result.stderr)
+        self.assertIn("### New upstream files", result.stdout)
+        self.assertNotIn("port by hand)\n\n- `MISSING.md`", result.stdout)
+
     def test_check_rejects_reintroduced_exclusion(self) -> None:
         self.assertEqual(self._sync("--check").returncode, 0)
         write(self.fork, "SPONSORS.md", "back again\n")

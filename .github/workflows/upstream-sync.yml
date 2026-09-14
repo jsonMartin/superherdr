@@ -1,9 +1,11 @@
 name: Upstream sync
 
 # Checks daily for a new Herdr release and opens a pull request that merges it
-# with scripts/sync_upstream.sh. Pull requests opened with the default token do
-# not start other workflows; set the UPSTREAM_SYNC_TOKEN secret (a fine-grained
-# token with contents and pull-request write access) so CI runs on sync PRs.
+# with scripts/sync_upstream.sh. Set the UPSTREAM_SYNC_TOKEN secret (a
+# fine-grained token with contents and pull-request write access). Without it,
+# the default token can open the PR only if "Allow GitHub Actions to create and
+# approve pull requests" is enabled, and CI does not run on the PR it opens.
+# A sync branch that already exists is skipped; delete it to retry that release.
 on:
   schedule:
     - cron: "17 6 * * *"

@@ -59,6 +59,8 @@ The client endpoint generation is independent from the private same-install prot
 
 Superherdr merges upstream Herdr releases with `just sync-upstream <tag>`, and a daily workflow opens a sync pull request when Herdr publishes a new release tag. The script applies `.upstream-sync/exclude` (paths removed from the fork on purpose, which must not come back) and `.upstream-sync/ours` (files Superherdr rewrote, whose upstream changes are shown for manual porting). CI runs `scripts/sync_upstream.sh --check` to reject reintroduced exclusions. Resolve genuine conflicts case by case. Merge sync pull requests with a merge commit, never squash or rebase, so the upstream history stays an ancestor and later syncs do not re-conflict. Never push upstream tags to this repository.
 
+Every upstream release is expected to conflict in `Cargo.toml` and `Cargo.lock`, because both sides change the package name and version. Keep Superherdr's `name` and `version`, take upstream's dependency changes, then run `cargo update -p superherdr --offline` to regenerate the lock entry.
+
 - Prefer keeping inherited code, even when Superherdr does not use it, so upstream merges stay simple. Guard it rather than deleting it.
 - Keep Superherdr-specific changes in clearly separated modules or small, well-named edits to inherited files.
 - Superherdr uses Herdr's agent-detection catalog at `herdr.dev` while its detection engine and rules match Herdr's. A change that makes them diverge must move the catalog to Superherdr-hosted infrastructure in the same change (see the compatibility spec).
