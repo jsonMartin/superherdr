@@ -283,7 +283,7 @@ command = ["sh", "-c", "sleep 5"]
     )
     .unwrap();
 
-    let superherdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
     wait_for_socket(&socket_path, Duration::from_secs(5));
     let workspace = run_cli_json(
         &socket_path,

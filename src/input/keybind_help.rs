@@ -120,7 +120,10 @@ pub(crate) fn keybind_help_groups(
                     binding_label(&keybinds.clear_project_focus),
                     "stop focusing",
                 ),
-                entry(binding_label(&keybinds.snooze_workspace), "snooze workspace"),
+                entry(
+                    binding_label(&keybinds.snooze_workspace),
+                    "snooze workspace",
+                ),
                 entry(binding_label(&keybinds.snooze_project), "snooze project"),
                 entry(binding_label(&keybinds.show_snoozed), "show snoozed items"),
                 entry(

@@ -1,9 +1,9 @@
 use super::*;
 
-#[path = "project_snooze.rs"]
-mod project_snooze_tests;
 #[path = "pane_graphics.rs"]
 mod pane_graphics_tests;
+#[path = "project_snooze.rs"]
+mod project_snooze_tests;
 #[path = "surface_interest.rs"]
 mod surface_interest_tests;
 #[path = "workspace_snooze.rs"]

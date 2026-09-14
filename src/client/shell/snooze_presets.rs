@@ -12,8 +12,8 @@ pub(super) fn snooze_choices(now_ms: i64) -> Result<Vec<SnoozeChoice>, String> {
 
     let now = crate::platform::local_datetime_at(now_ms.div_euclid(1_000))
         .ok_or_else(|| "local clock cannot represent the picker time".to_string())?;
-    let ten_am = time::Time::from_hms(10, 0, 0)
-        .map_err(|_| "invalid fixed snooze time".to_string())?;
+    let ten_am =
+        time::Time::from_hms(10, 0, 0).map_err(|_| "invalid fixed snooze time".to_string())?;
     let mut choices = Vec::with_capacity(6);
     for (label, offset_ms) in [
         ("30 minutes", 30 * MINUTE_MS),
@@ -43,10 +43,7 @@ pub(super) fn snooze_choices(now_ms: i64) -> Result<Vec<SnoozeChoice>, String> {
         .ok_or_else(|| "next Monday is outside the supported date range".to_string())?;
     choices.push(choice_at_local(
         "Next Monday 10:00",
-        time::PrimitiveDateTime::new(
-            next_monday,
-            ten_am,
-        ),
+        time::PrimitiveDateTime::new(next_monday, ten_am),
     )?);
     Ok(choices)
 }
@@ -108,12 +105,8 @@ mod tests {
     use super::*;
 
     fn local_ms(year: i32, month: u8, day: u8, hour: u8) -> i64 {
-        let date = time::Date::from_calendar_date(
-            year,
-            time::Month::try_from(month).unwrap(),
-            day,
-        )
-        .unwrap();
+        let date = time::Date::from_calendar_date(year, time::Month::try_from(month).unwrap(), day)
+            .unwrap();
         let value = time::PrimitiveDateTime::new(date, time::Time::from_hms(hour, 0, 0).unwrap());
         crate::platform::local_timestamp(value).unwrap() * 1_000
     }
@@ -123,7 +116,10 @@ mod tests {
         let now_ms = 1_767_000_000_000 + 123;
         let choices = snooze_choices(now_ms).unwrap();
         assert_eq!(
-            choices.iter().map(|choice| choice.label).collect::<Vec<_>>(),
+            choices
+                .iter()
+                .map(|choice| choice.label)
+                .collect::<Vec<_>>(),
             vec![
                 "30 minutes",
                 "1 hour",
@@ -136,7 +132,10 @@ mod tests {
         assert_eq!(choices[0].deadline_unix_ms, now_ms + 30 * 60 * 1_000);
         assert_eq!(choices[1].deadline_unix_ms, now_ms + 60 * 60 * 1_000);
         assert_eq!(choices[2].deadline_unix_ms, now_ms + 3 * 60 * 60 * 1_000);
-        assert_eq!(choices[4].deadline_unix_ms, now_ms + 3 * 24 * 60 * 60 * 1_000);
+        assert_eq!(
+            choices[4].deadline_unix_ms,
+            now_ms + 3 * 24 * 60 * 60 * 1_000
+        );
     }
 
     #[test]

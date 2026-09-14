@@ -1,7 +1,5 @@
 use super::*;
 
-use crate::protocol::ClientShellAgent;
-
 pub(super) const MIN_TAB_WIDTH: u16 = 8;
 pub(super) const NEW_TAB_WIDTH: u16 = 3;
 pub(super) const WORKSPACE_HEADER_ROWS: u16 = 2;
@@ -612,7 +610,6 @@ pub(super) enum ClientContextMenuAction {
     WakeProject,
     ShowSnoozedRecords,
     WakeSharedSnoozes,
-    ResetFocusSnooze,
 }
 
 #[derive(Debug)]
@@ -626,7 +623,6 @@ pub(super) enum ClientContextMenuTarget {
         expected_revision: u64,
         workspace_record_revision: Option<u64>,
         project_record_revision: Option<u64>,
-        has_snoozed_records: bool,
         is_git: bool,
         is_linked_worktree: bool,
         has_worktree_children: bool,
@@ -755,6 +751,9 @@ pub(super) struct ClientSnoozeOverlay {
 }
 
 #[derive(Debug)]
+// One overlay value per client, never stored in collections, so the
+// Snooze management variant's size is not worth boxing.
+#[allow(clippy::large_enum_variant)]
 pub(super) enum ClientShellOverlay {
     Onboarding,
     ProductAnnouncement(crate::app::state::ProductAnnouncementState),
@@ -1346,7 +1345,8 @@ impl ClientShellState {
         selected
     }
 
-    pub(crate) fn is_agent_visible(&self, agent: &ClientShellAgent) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_agent_visible(&self, agent: &crate::protocol::ClientShellAgent) -> bool {
         let Some(snapshot) = self.snapshot.as_deref() else {
             return false;
         };
@@ -1371,7 +1371,7 @@ impl ClientShellState {
         let stale_endpoint_state = self
             .endpoints
             .iter()
-            .find(|endpoint| &endpoint.endpoint_id == &active_endpoint_id)
+            .find(|endpoint| endpoint.endpoint_id == active_endpoint_id)
             .and_then(|endpoint| endpoint.snooze_state.as_ref())
             .is_some_and(|current| {
                 current.boot_id == snooze_state.boot_id && current.revision > snooze_state.revision
@@ -1383,7 +1383,7 @@ impl ClientShellState {
         if let Some(endpoint) = self
             .endpoints
             .iter_mut()
-            .find(|endpoint| &endpoint.endpoint_id == &active_endpoint_id)
+            .find(|endpoint| endpoint.endpoint_id == active_endpoint_id)
         {
             endpoint.snooze_state = Some(snooze_state);
         }

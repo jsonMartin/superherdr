@@ -832,7 +832,7 @@ impl ClientShellState {
                             });
                         let outside_focus = self.snooze_management_currently_outside_focus(
                             &endpoint_id,
-                            &boot_id,
+                            boot_id,
                             focus_target.as_ref(),
                         );
                         let message = retained.as_ref().map_or_else(

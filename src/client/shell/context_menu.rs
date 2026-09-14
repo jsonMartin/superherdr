@@ -332,6 +332,8 @@ impl ClientShellState {
         }
     }
 
+    // Inherited from Herdr; Superherdr routes callers elsewhere. Kept to simplify upstream merges.
+    #[allow(dead_code)]
     pub(super) fn open_workspace_context_menu(&mut self, workspace_id: String, x: u16, y: u16) {
         self.open_endpoint_workspace_context_menu(
             self.active_endpoint_id.clone(),
@@ -411,14 +413,6 @@ impl ClientShellState {
                 })
                 .flatten()
         });
-        let has_snoozed_records = snooze_state.is_some_and(|state| {
-            state.boot_id == snapshot.boot_id
-                && (!state.records.is_empty()
-                    || !state.project_records.is_empty()
-                    || state.persistence.as_ref().is_some_and(|persistence| {
-                        !persistence.records.is_empty() || persistence.notice.is_some()
-                    }))
-        });
         self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
             target: ClientContextMenuTarget::Workspace {
                 endpoint_id,
@@ -429,7 +423,6 @@ impl ClientShellState {
                 expected_revision: snooze_state.map_or(0, |state| state.revision),
                 workspace_record_revision,
                 project_record_revision,
-                has_snoozed_records,
                 is_git: worktree.is_some() || workspace.branch.is_some(),
                 is_linked_worktree: worktree.is_some_and(|worktree| worktree.is_linked_worktree),
                 has_worktree_children,

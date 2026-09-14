@@ -1290,9 +1290,7 @@ fn client_read_loop_with_endpoint_controls(
                     token: data,
                 }
             }
-            ClientMessage::EndpointControl { kind, .. }
-                if kind == "workspace_snooze.subscribe" =>
-            {
+            ClientMessage::EndpointControl { kind, .. } if kind == "workspace_snooze.subscribe" => {
                 ServerEvent::ClientShellSnoozeSubscribe { client_id }
             }
             ClientMessage::EndpointControl { kind, data } => {

@@ -1,0 +1,16 @@
+# Files Superherdr rewrote. `just sync-upstream` keeps Superherdr's version and
+# lists upstream's changes to them in the sync report so useful edits can be
+# ported by hand. One file path per line.
+.github/ISSUE_TEMPLATE/bug.yml
+.github/ISSUE_TEMPLATE/config.yml
+.github/workflows/ci.yml
+.github/workflows/distribution.yml
+.github/workflows/nix.yml
+.gitignore
+AGENTS.md
+CHANGELOG.md
+CONTRIBUTING.md
+README.md
+distribution/install.sh
+justfile
+scripts/test_unix_installer.py

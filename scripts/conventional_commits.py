@@ -15,6 +15,10 @@ ALLOWED_TYPES = {
     "test",
     "refactor",
     "chore",
+    "build",
+    "style",
+    "revert",
+    "spike",
     "release",
 }
 SUBJECT_RE = re.compile(r"^(?P<kind>[a-z]+)(?:\([^)]+\))?!?:\s+\S")
@@ -22,14 +26,18 @@ SUBJECT_RE = re.compile(r"^(?P<kind>[a-z]+)(?:\([^)]+\))?!?:\s+\S")
 
 def git_subjects(rev_range: str) -> list[str]:
     output = subprocess.check_output(
-        ["git", "log", "--pretty=format:%s", rev_range], text=True
+        ["git", "log", "--first-parent", "--no-merges", "--pretty=format:%s", rev_range], text=True
     ).strip()
     return [line.strip() for line in output.splitlines() if line.strip()]
 
 
-def valid_subject(subject: str) -> bool:
+# Proposal-only pull requests use `rfc:` titles; commits never do.
+PR_TITLE_TYPES = ALLOWED_TYPES | {"rfc"}
+
+
+def valid_subject(subject: str, allowed: set[str] = ALLOWED_TYPES) -> bool:
     match = SUBJECT_RE.match(subject)
-    return bool(match and match.group("kind") in ALLOWED_TYPES)
+    return bool(match and match.group("kind") in allowed)
 
 
 def commit_message_subject(path: Path) -> str | None:
@@ -47,7 +55,8 @@ def main() -> int:
     parser.add_argument("--message-file")
     args = parser.parse_args()
 
-    subjects = list(args.subjects)
+    invalid = [subject for subject in args.subjects if not valid_subject(subject, PR_TITLE_TYPES)]
+    subjects: list[str] = []
     if args.rev_range:
         subjects.extend(git_subjects(args.rev_range))
     if args.message_file:
@@ -55,14 +64,12 @@ def main() -> int:
         if subject:
             subjects.append(subject)
 
-    invalid = [subject for subject in subjects if not valid_subject(subject)]
+    invalid += [subject for subject in subjects if not valid_subject(subject)]
     if invalid:
         print("invalid commit subject(s):")
         for subject in invalid:
             print(f"  {subject}")
-        print(
-            "commit subjects must use conventional commits because preview notes are generated from them."
-        )
+        print("commit subjects must use conventional commits.")
         print("example: fix(update): install selected channel")
         print("expected: type(optional-scope): subject")
         print("allowed types: " + ", ".join(sorted(ALLOWED_TYPES)))

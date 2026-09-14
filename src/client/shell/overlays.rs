@@ -644,9 +644,7 @@ fn render_snooze_overlay(
         &format!(" {scope}"),
         Style::default().fg(p.overlay0).bg(p.panel_bg),
     );
-    let Some(selected) = s.choices.get(s.selected) else {
-        return None;
-    };
+    let selected = s.choices.get(s.selected)?;
     put_text(
         b,
         i.x,

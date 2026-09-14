@@ -18,7 +18,7 @@ pub(crate) mod pane_input;
 #[cfg(test)]
 mod render_scale_benchmark;
 pub(crate) mod render_stream;
+pub(crate) mod snooze_store;
 pub mod socket_paths;
 pub(crate) mod terminal_attach;
 pub(crate) mod workspace_snooze;
-pub(crate) mod snooze_store;

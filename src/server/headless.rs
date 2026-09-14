@@ -66,11 +66,11 @@ use crate::server::pane_input::{
     apply_client_pane_input_events, apply_client_popup_input_events, apply_terminal_attach_input,
     apply_terminal_attach_scroll, terminal_attach_mouse_position,
 };
+use crate::server::snooze_store;
 use crate::server::socket_paths::{
     client_socket_path, prepare_socket_path, restrict_socket_permissions,
 };
 use crate::server::terminal_attach::paste_payload_for_runtime;
-use crate::server::snooze_store;
 
 mod bootstrap;
 mod client_views;
@@ -364,10 +364,9 @@ impl HeadlessServer {
                 .unwrap_or_default()
                 .as_nanos()
         );
-        let mut workspace_snoozes =
-            crate::server::workspace_snooze::WorkspaceSnoozeManager::new(
-                client_shell_boot_id.clone(),
-            );
+        let mut workspace_snoozes = crate::server::workspace_snooze::WorkspaceSnoozeManager::new(
+            client_shell_boot_id.clone(),
+        );
         let (snooze_store, snooze_notice) = if app.policy.persist_session {
             let path = crate::session::data_dir().join("snooze.json");
             let (store, notice) = snooze_store::SnoozeStore::load(
@@ -1819,18 +1818,13 @@ impl HeadlessServer {
                 .any(|workspace| workspace.id == record.workspace_id)
         });
         if let Some(store) = &self.snooze_store {
-            state.persistence = Some(store.info(
-                &self.app.state.workspaces,
-                self.snooze_notice.clone(),
-            ));
+            state.persistence =
+                Some(store.info(&self.app.state.workspaces, self.snooze_notice.clone()));
         }
         state
     }
 
-    fn commit_snooze_change<F>(
-        &mut self,
-        change: F,
-    ) -> Result<Option<String>, SnoozeCommitError>
+    fn commit_snooze_change<F>(&mut self, change: F) -> Result<Option<String>, SnoozeCommitError>
     where
         F: FnOnce(
             &mut crate::server::workspace_snooze::WorkspaceSnoozeManager,
@@ -1869,11 +1863,7 @@ impl HeadlessServer {
         let now_ms = crate::server::workspace_snooze::now_unix_ms();
         let mut manager = manager;
         let mut staged = store
-            .staged(
-                &manager.state(),
-                &self.app.state.workspaces,
-                now_ms,
-            )
+            .staged(&manager.state(), &self.app.state.workspaces, now_ms)
             .map_err(SnoozeCommitError::Persistence)?;
         if staged.retain_valid_live_records(&mut manager, &self.app.state.workspaces) {
             staged = staged
@@ -1894,9 +1884,9 @@ impl HeadlessServer {
             self.snooze_store = Some(staged);
             return Ok(None);
         }
-        self.app
-            .checkpoint_session_for_snooze()
-            .map_err(|err| SnoozeCommitError::Persistence(format!("failed to checkpoint session: {err}")))?;
+        self.app.checkpoint_session_for_snooze().map_err(|err| {
+            SnoozeCommitError::Persistence(format!("failed to checkpoint session: {err}"))
+        })?;
         let warning = match staged.save() {
             Ok(crate::server::snooze_store::SaveOutcome::Durable) => None,
             Ok(crate::server::snooze_store::SaveOutcome::CommittedWithWarning(warning)) => {
@@ -1917,10 +1907,7 @@ impl HeadlessServer {
         Ok(warning)
     }
 
-    fn snooze_action_error(
-        &self,
-        error: SnoozeCommitError,
-    ) -> (String, String) {
+    fn snooze_action_error(&self, error: SnoozeCommitError) -> (String, String) {
         match error {
             SnoozeCommitError::Action(
                 crate::server::workspace_snooze::WorkspaceSnoozeError::InvalidDuration,
@@ -1938,10 +1925,7 @@ impl HeadlessServer {
         }
     }
 
-    fn commit_snooze_wake<F>(
-        &mut self,
-        change: F,
-    ) -> Result<Option<String>, SnoozeWakeCommitError>
+    fn commit_snooze_wake<F>(&mut self, change: F) -> Result<Option<String>, SnoozeWakeCommitError>
     where
         F: FnOnce(
             &mut crate::server::workspace_snooze::WorkspaceSnoozeManager,
@@ -2092,10 +2076,7 @@ impl HeadlessServer {
             })
     }
 
-    fn snooze_record_wake_error(
-        &self,
-        error: SnoozeWakeCommitError,
-    ) -> (String, String) {
+    fn snooze_record_wake_error(&self, error: SnoozeWakeCommitError) -> (String, String) {
         match error {
             SnoozeWakeCommitError::Action(
                 crate::server::workspace_snooze::WorkspaceWakeError::NotFound,
@@ -2107,9 +2088,7 @@ impl HeadlessServer {
                 },
             ) => (
                 "stale_revision".into(),
-                format!(
-                    "snooze state revision mismatch (expected {expected}, current {current})"
-                ),
+                format!("snooze state revision mismatch (expected {expected}, current {current})"),
             ),
             SnoozeWakeCommitError::Action(
                 crate::server::workspace_snooze::WorkspaceWakeError::StaleBoot {
@@ -2120,17 +2099,15 @@ impl HeadlessServer {
                 "stale_boot".into(),
                 format!("snooze boot mismatch (expected {expected}, current {current})"),
             ),
-            SnoozeWakeCommitError::Action(_) => {
-                ("wake_failed".into(), "snooze record wake was rejected".into())
-            }
+            SnoozeWakeCommitError::Action(_) => (
+                "wake_failed".into(),
+                "snooze record wake was rejected".into(),
+            ),
             SnoozeWakeCommitError::Persistence(message) => ("persistence_failed".into(), message),
         }
     }
 
-    fn snooze_reset_error(
-        &self,
-        error: SnoozeWakeCommitError,
-    ) -> (String, String) {
+    fn snooze_reset_error(&self, error: SnoozeWakeCommitError) -> (String, String) {
         match error {
             SnoozeWakeCommitError::Action(
                 crate::server::workspace_snooze::WorkspaceWakeError::StaleRevision {
@@ -2139,13 +2116,14 @@ impl HeadlessServer {
                 },
             ) => (
                 "stale_revision".into(),
-                format!(
-                    "snooze state revision mismatch (expected {expected}, current {current})"
-                ),
+                format!("snooze state revision mismatch (expected {expected}, current {current})"),
             ),
             SnoozeWakeCommitError::Action(
                 crate::server::workspace_snooze::WorkspaceWakeError::UnconfirmedWakeAll,
-            ) => ("unconfirmed".into(), "reset requires confirmed: true".into()),
+            ) => (
+                "unconfirmed".into(),
+                "reset requires confirmed: true".into(),
+            ),
             SnoozeWakeCommitError::Persistence(message) => ("persistence_failed".into(), message),
             SnoozeWakeCommitError::Action(_) => {
                 ("reset_failed".into(), "snooze reset was rejected".into())
@@ -2215,9 +2193,9 @@ impl HeadlessServer {
     }
 
     fn retry_snooze_store(&mut self, now: Instant) -> bool {
-        if !self
+        if self
             .snooze_retry_deadline
-            .is_some_and(|deadline| now >= deadline)
+            .is_none_or(|deadline| now < deadline)
         {
             return false;
         }
@@ -3684,7 +3662,8 @@ impl HeadlessServer {
                     let _ = msg.respond_to.send(response);
                     return false;
                 }
-                let Some(canonical_id) = self.app.canonical_workspace_id(&params.workspace_id) else {
+                let Some(canonical_id) = self.app.canonical_workspace_id(&params.workspace_id)
+                else {
                     let response = serde_json::to_string(&api::schema::ErrorResponse {
                         id: msg.request.id,
                         error: api::schema::ErrorBody {
@@ -3741,16 +3720,13 @@ impl HeadlessServer {
                         let (code, message) = self.snooze_action_error(error);
                         let response = serde_json::to_string(&api::schema::ErrorResponse {
                             id: msg.request.id,
-                            error: api::schema::ErrorBody {
-                                code: code.into(),
-                                message: message.into(),
-                            },
+                            error: api::schema::ErrorBody { code, message },
                         })
                         .unwrap_or_default();
                         let _ = msg.respond_to.send(response);
                         false
                     }
-                }
+                };
             }
             api::schema::Method::SnoozeRecordWake(params) => {
                 if params.boot_id != self.client_shell_boot_id {
@@ -3765,7 +3741,9 @@ impl HeadlessServer {
                     let _ = msg.respond_to.send(response);
                     return false;
                 }
-                return match self.commit_snooze_record_wake(&params.record_id, params.expected_revision) {
+                return match self
+                    .commit_snooze_record_wake(&params.record_id, params.expected_revision)
+                {
                     Ok(_) => {
                         let state = self.snooze_state();
                         self.broadcast_snooze_state();
@@ -3781,16 +3759,13 @@ impl HeadlessServer {
                         let (code, message) = self.snooze_record_wake_error(error);
                         let response = serde_json::to_string(&api::schema::ErrorResponse {
                             id: msg.request.id,
-                            error: api::schema::ErrorBody {
-                                code,
-                                message,
-                            },
+                            error: api::schema::ErrorBody { code, message },
                         })
                         .unwrap_or_default();
                         let _ = msg.respond_to.send(response);
                         false
                     }
-                }
+                };
             }
             api::schema::Method::ProjectWake(params) => {
                 if params.boot_id != self.client_shell_boot_id {
@@ -3835,8 +3810,8 @@ impl HeadlessServer {
                     }
                     Err(SnoozeWakeCommitError::Action(
                         crate::server::workspace_snooze::WorkspaceWakeError::StaleRevision {
-                        expected,
-                        current,
+                            expected,
+                            current,
                         },
                     )) => {
                         let response = serde_json::to_string(&api::schema::ErrorResponse {
@@ -3863,7 +3838,7 @@ impl HeadlessServer {
                         false
                     }
                     Err(SnoozeWakeCommitError::Action(_)) => false,
-                }
+                };
             }
             api::schema::Method::WorkspaceSnooze(params) => {
                 if params.boot_id != self.client_shell_boot_id {
@@ -3878,7 +3853,8 @@ impl HeadlessServer {
                     let _ = msg.respond_to.send(response);
                     return false;
                 }
-                let Some(canonical_id) = self.app.canonical_workspace_id(&params.workspace_id) else {
+                let Some(canonical_id) = self.app.canonical_workspace_id(&params.workspace_id)
+                else {
                     let response = serde_json::to_string(&api::schema::ErrorResponse {
                         id: msg.request.id,
                         error: api::schema::ErrorBody {
@@ -3918,7 +3894,9 @@ impl HeadlessServer {
                             id: msg.request.id,
                             error: api::schema::ErrorBody {
                                 code: "invalid_duration".into(),
-                                message: "invalid snooze duration (must be between 1 second and 30 days)".into(),
+                                message:
+                                    "invalid snooze duration (must be between 1 second and 30 days)"
+                                        .into(),
                             },
                         })
                         .unwrap_or_default();
@@ -3932,7 +3910,9 @@ impl HeadlessServer {
                             id: msg.request.id,
                             error: api::schema::ErrorBody {
                                 code: "invalid_deadline".into(),
-                                message: "invalid snooze deadline (must be in the future, up to 30 days)".into(),
+                                message:
+                                    "invalid snooze deadline (must be in the future, up to 30 days)"
+                                        .into(),
                             },
                         })
                         .unwrap_or_default();
@@ -3998,13 +3978,14 @@ impl HeadlessServer {
                     self.commit_snooze_wake_all(params.expected_revision, params.confirmed)
                 } else {
                     self.commit_snooze_wake(|manager| {
-                        manager.wake_workspace(
-                            canonical_target.as_deref(),
-                            params.expected_revision,
-                            params.confirmed,
-                            project_key.as_deref(),
-                        )
-                        .map(|_| ())
+                        manager
+                            .wake_workspace(
+                                canonical_target.as_deref(),
+                                params.expected_revision,
+                                params.confirmed,
+                                project_key.as_deref(),
+                            )
+                            .map(|_| ())
                     })
                 };
                 match wake_result {
@@ -4049,9 +4030,9 @@ impl HeadlessServer {
                     }
                     Err(SnoozeWakeCommitError::Action(
                         crate::server::workspace_snooze::WorkspaceWakeError::StaleRevision {
-                        expected,
-                        current,
-                    },
+                            expected,
+                            current,
+                        },
                     )) => {
                         let response = serde_json::to_string(&api::schema::ErrorResponse {
                             id: msg.request.id,
@@ -4082,9 +4063,9 @@ impl HeadlessServer {
                     }
                     Err(SnoozeWakeCommitError::Action(
                         crate::server::workspace_snooze::WorkspaceWakeError::StaleBoot {
-                        expected,
-                        current,
-                    },
+                            expected,
+                            current,
+                        },
                     )) => {
                         let response = serde_json::to_string(&api::schema::ErrorResponse {
                             id: msg.request.id,
