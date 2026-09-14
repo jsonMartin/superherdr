@@ -213,6 +213,7 @@ mod chrome_context;
 mod copy;
 mod endpoint_requests;
 mod endpoints;
+mod focus_snooze;
 #[path = "input.rs"]
 mod input_domain;
 mod keybindings_settings;
@@ -220,4 +221,5 @@ mod mobile;
 mod mouse_selection;
 mod popup_focus_projection;
 mod startup_overlays;
-mod focus_snooze;
+
+mod agent_scope;

@@ -53,15 +53,16 @@ pub(super) struct AggregateAgentTarget {
 pub(super) fn aggregate_agent_rows(
     endpoints: &[ClientShellEndpoint],
     sort: crate::config::AgentPanelSortConfig,
+    top_level_agents: bool,
 ) -> Vec<AggregateAgentRow<'_>> {
     let mut rows = Vec::new();
     for endpoint in cached_endpoint_snapshots(endpoints) {
-        let visible_workspaces = super::focus_snooze::visible_workspace_ids(
+        let visible_workspaces = super::agent_scope::visible_agent_workspace_ids(
+            endpoint.snapshot,
             endpoint.focus_scope,
             endpoint.snooze_state,
             endpoint.endpoint_id,
-            Some(endpoint.snapshot.boot_id.as_str()),
-            &endpoint.snapshot.workspaces,
+            top_level_agents,
         );
         for pane_id in super::agent_sidebar::ordered_agent_pane_ids_with_filter(
             endpoint.snapshot,
@@ -102,8 +103,9 @@ pub(super) fn aggregate_agent_rows(
 pub(super) fn online_agent_targets(
     endpoints: &[ClientShellEndpoint],
     sort: crate::config::AgentPanelSortConfig,
+    top_level_agents: bool,
 ) -> Vec<AggregateAgentTarget> {
-    aggregate_agent_rows(endpoints, sort)
+    aggregate_agent_rows(endpoints, sort, top_level_agents)
         .into_iter()
         .filter(|row| !row.endpoint.stale())
         .map(|row| AggregateAgentTarget {

@@ -4,6 +4,8 @@ Superherdr is an open-source terminal project built on [Herdr](https://github.co
 
 Focus shows the project or workspace you want to work on in one client. Snooze hides a project or workspace across clients until its wake time, without stopping its terminals. See the [accepted Focus/Snooze behavior](docs/next/focus-snooze-fork.md).
 
+The [All / Top-level Agents toggle](top-level-agents.md) hides linked-worktree agents while keeping their parent agents and standalone workspaces visible.
+
 ## Install from this checkout
 
 Superherdr does not yet have a published package or release feed. The upstream Herdr installers install Herdr, not Superherdr.

@@ -71,15 +71,7 @@ pub(super) fn render_agent_panel(
     agent_scroll: &mut usize,
     hits: &mut ShellHitMap,
 ) {
-    render_agent_panel_with_filter(
-        buffer,
-        area,
-        snapshot,
-        config,
-        agent_scroll,
-        hits,
-        |_| true,
-    );
+    render_agent_panel_with_filter(buffer, area, snapshot, config, agent_scroll, hits, |_| true);
 }
 
 pub(super) fn render_agent_panel_with_filter(
@@ -142,12 +134,28 @@ pub(super) fn render_agent_panel_header(
     if area.height < 2 {
         return false;
     }
+    let scope = if config.top_level_agents {
+        "Top-level"
+    } else {
+        "All"
+    };
+    let title = if area.width >= 19 {
+        format!(" agents · {scope}")
+    } else {
+        format!(" {scope}")
+    };
+    let title_width = (display_width(&title) as u16).min(area.width);
+    hits.agent_scope_toggle = if config.mouse_capture {
+        Rect::new(area.x, area.y + 1, title_width, 1)
+    } else {
+        Rect::default()
+    };
     put_text(
         buffer,
         area.x,
         area.y + 1,
-        area.width,
-        " agents",
+        title_width,
+        &title,
         Style::default()
             .fg(config.palette.overlay0)
             .add_modifier(Modifier::BOLD),
@@ -156,7 +164,11 @@ pub(super) fn render_agent_panel_header(
         crate::config::AgentPanelSortConfig::Spaces => "grouped",
         crate::config::AgentPanelSortConfig::Priority => "priority",
     });
-    let sort_width = display_width(sort_label).min(area.width as usize) as u16;
+    let sort_width = display_width(sort_label) as u16;
+    if title_width.saturating_add(sort_width).saturating_add(1) > area.width {
+        hits.agent_sort_toggle = Rect::default();
+        return true;
+    }
     let sort_rect = Rect::new(
         area.right().saturating_sub(sort_width),
         area.y + 1,

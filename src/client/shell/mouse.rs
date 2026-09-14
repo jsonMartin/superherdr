@@ -2019,6 +2019,10 @@ impl ClientShellState {
                     }
                     return;
                 }
+                if super::contains(self.hits.agent_scope_toggle, point) {
+                    self.toggle_agent_scope(outcome);
+                    return;
+                }
                 if super::contains(self.hits.agent_sort_toggle, point) {
                     let sort = match self.config.agent_panel_sort {
                         crate::config::AgentPanelSortConfig::Spaces => {

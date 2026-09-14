@@ -125,11 +125,18 @@ pub(crate) fn render_collapsed_sidebar(
         );
     }
 
+    let agent_workspaces = super::agent_scope::visible_agent_workspace_ids(
+        snapshot,
+        focus_scope,
+        snooze_state,
+        &ClientEndpointId::Local,
+        config.top_level_agents,
+    );
     // The » toggle row is already excluded by collapsed_sidebar_sections.
     let detail_content = detail_area;
     for (index, pane_id) in
         super::ordered_agent_pane_ids_with_filter(snapshot, config.agent_panel_sort, |agent| {
-            visible_workspaces.contains(&agent.workspace_id)
+            agent_workspaces.contains(&agent.workspace_id)
         })
         .into_iter()
         .take(detail_content.height as usize)
@@ -449,6 +456,13 @@ pub(crate) fn render_sidebar(
         }
     }
 
+    let agent_workspaces = super::agent_scope::visible_agent_workspace_ids(
+        snapshot,
+        state.focus_scope,
+        state.snooze_state,
+        state.active_endpoint_id,
+        config.top_level_agents,
+    );
     super::render_agent_panel_with_filter(
         buffer,
         detail_area,
@@ -456,7 +470,7 @@ pub(crate) fn render_sidebar(
         config,
         state.agent_scroll,
         hits,
-        |agent| visible_workspaces.contains(&agent.workspace_id),
+        |agent| agent_workspaces.contains(&agent.workspace_id),
     );
 
     let footer = super::recovery_bar::SidebarFooter::for_endpoints(

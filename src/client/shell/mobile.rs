@@ -610,14 +610,36 @@ fn mobile_items(
             });
         }
     }
-    let agents =
-        super::aggregate_navigation::aggregate_agent_rows(endpoints, config.agent_panel_sort);
+    let agents = super::aggregate_navigation::aggregate_agent_rows(
+        endpoints,
+        config.agent_panel_sort,
+        config.top_level_agents,
+    );
     let agent_view_label = snapshot.agent_view_label.as_deref();
-    if !agents.is_empty() || agent_view_label.is_some() {
+    if !agents.is_empty()
+        || agent_view_label.is_some()
+        || config.top_level_agents
+        || endpoints.iter().any(|endpoint| {
+            endpoint
+                .snapshot
+                .as_ref()
+                .is_some_and(|snapshot| !snapshot.agents.is_empty())
+        })
+    {
         let title = agent_view_label
             .map(|label| format!("agents · {label}"))
             .unwrap_or_else(|| "agents".to_owned());
         items.push(MobileItem::section(title, palette));
+        items.push(MobileItem::action(
+            if config.top_level_agents {
+                "  Agents: Top-level · Show all"
+            } else {
+                "  Agents: All · Top-level"
+            },
+            ClientMobileTarget::ToggleAgentScope,
+            palette,
+        ));
+
         if agents.is_empty() {
             items.push(MobileItem {
                 lines: vec![Line::from(Span::styled(
@@ -1002,6 +1024,7 @@ impl ClientShellState {
             .find(|(rect, _)| super::contains(*rect, point))
             .map(|(_, target)| target.clone());
         match target {
+            Some(ClientMobileTarget::ToggleAgentScope) => self.toggle_agent_scope(outcome),
             Some(ClientMobileTarget::Machine(endpoint_id)) => {
                 if endpoint_id == self.active_endpoint_id {
                     self.mode = ClientShellMode::Terminal;

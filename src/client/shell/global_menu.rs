@@ -4,6 +4,7 @@ use super::*;
 pub(super) enum ClientGlobalMenuAction {
     Binding(crate::input::KeybindAction),
     WhatsNew,
+    ToggleAgentScope,
 }
 
 pub(super) fn global_menu_attention(snapshot: &ClientShellSnapshot) -> bool {
@@ -76,6 +77,7 @@ pub(super) fn global_menu_items(
             ClientGlobalMenuAction::Binding(crate::input::KeybindAction::ResetFocusSnooze),
         ),
     ]);
+    items.push(("Toggle top-level", ClientGlobalMenuAction::ToggleAgentScope));
     items
 }
 
@@ -130,6 +132,7 @@ impl ClientShellState {
                 self.record_binding(crate::input::KeybindMatch::Action(binding), outcome)
             }
             ClientGlobalMenuAction::WhatsNew => self.open_release_notes(),
+            ClientGlobalMenuAction::ToggleAgentScope => self.toggle_agent_scope(outcome),
         }
         outcome.repaint = true;
     }

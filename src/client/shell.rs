@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 mod actions;
+mod agent_scope;
 mod agent_sidebar;
 mod aggregate_navigation;
 mod composition;
@@ -30,8 +31,8 @@ mod recovery_bar;
 mod render;
 mod scroll;
 mod settings;
-mod snooze_presets;
 mod snooze_management;
+mod snooze_presets;
 mod state;
 mod surface_patch;
 mod worktrees;

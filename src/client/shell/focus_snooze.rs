@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::api::schema::WorkspaceSnoozeState;
-use crate::protocol::{ClientShellAgent, ClientShellWorkspace};
+use crate::protocol::ClientShellWorkspace;
 
 use super::ClientEndpointId;
 
@@ -149,38 +149,15 @@ pub(crate) fn visible_workspace_ids(
         .iter()
         .filter(|workspace| {
             !snoozed.contains(workspace.workspace_id.as_str())
-                && !workspace.worktree.as_ref().is_some_and(|worktree| {
-                    project_snoozed.contains(worktree.key.as_str())
-                })
-                && focus_scope.is_none_or(|scope| {
-                    scope.matches_workspace(endpoint_id, boot_id, workspace)
-                })
+                && !workspace
+                    .worktree
+                    .as_ref()
+                    .is_some_and(|worktree| project_snoozed.contains(worktree.key.as_str()))
+                && focus_scope
+                    .is_none_or(|scope| scope.matches_workspace(endpoint_id, boot_id, workspace))
         })
         .map(|workspace| workspace.workspace_id.clone())
         .collect()
-}
-
-pub(crate) fn agent_is_visible(
-    focus_scope: Option<&ClientFocusScope>,
-    snooze_state: Option<&WorkspaceSnoozeState>,
-    endpoint_id: &ClientEndpointId,
-    boot_id: Option<&str>,
-    agent: &ClientShellAgent,
-    workspaces: &[ClientShellWorkspace],
-) -> bool {
-    let Some(workspace) = workspaces
-        .iter()
-        .find(|ws| ws.workspace_id == agent.workspace_id)
-    else {
-        return false;
-    };
-    workspace_is_visible(
-        focus_scope,
-        snooze_state,
-        endpoint_id,
-        boot_id,
-        workspace,
-    )
 }
 
 #[cfg(test)]

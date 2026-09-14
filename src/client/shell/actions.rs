@@ -1263,12 +1263,12 @@ impl ClientShellState {
         let focused_workspace = snapshot.focused_workspace_id.clone()?;
         let focused_tab = snapshot.focused_tab_id.clone();
         let focused_pane = snapshot.focused_pane_id.clone();
-        let visible_workspaces = super::focus_snooze::visible_workspace_ids(
+        let agent_workspaces = super::agent_scope::visible_agent_workspace_ids(
+            snapshot,
             self.focus_scope.as_ref(),
             self.snooze_state.as_ref(),
             &self.active_endpoint_id,
-            Some(snapshot.boot_id.as_str()),
-            &snapshot.workspaces,
+            self.config.top_level_agents,
         );
         let direction = |action| match action {
             KeybindAction::FocusPaneLeft
@@ -1291,7 +1291,7 @@ impl ClientShellState {
                 let agents = super::agent_sidebar::ordered_agent_pane_ids_with_filter(
                     snapshot,
                     self.config.agent_panel_sort,
-                    |agent| visible_workspaces.contains(&agent.workspace_id),
+                    |agent| agent_workspaces.contains(&agent.workspace_id),
                 );
                 Some(Method::PaneFocus(PaneTarget {
                     pane_id: agents.get(index)?.clone(),
@@ -1301,7 +1301,7 @@ impl ClientShellState {
                 let agents = super::agent_sidebar::ordered_agent_pane_ids_with_filter(
                     snapshot,
                     self.config.agent_panel_sort,
-                    |agent| visible_workspaces.contains(&agent.workspace_id),
+                    |agent| agent_workspaces.contains(&agent.workspace_id),
                 );
                 if agents.is_empty() {
                     return None;

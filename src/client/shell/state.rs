@@ -82,6 +82,7 @@ pub(crate) struct ClientShellConfig {
     pub(super) spaces: SpacesSidebarConfig,
     pub(super) agents: crate::config::AgentsSidebarConfig,
     pub(super) agent_panel_sort: crate::config::AgentPanelSortConfig,
+    pub(super) top_level_agents: bool,
     pub(super) status_indicators: crate::config::StatusIndicatorStyle,
     pub(super) sound_enabled: bool,
     pub(super) toast_delivery: crate::config::ToastDelivery,
@@ -122,6 +123,7 @@ pub(super) struct ClientShellLayout {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ClientMobileTarget {
+    ToggleAgentScope,
     Machine(ClientEndpointId),
     NewWorkspace,
     Workspace {
@@ -159,6 +161,7 @@ pub(super) struct ShellHitMap {
     pub(super) agent_scroll_metrics: Option<crate::pane::ScrollMetrics>,
     pub(super) agent_max_scroll: usize,
     pub(super) agent_sort_toggle: Rect,
+    pub(super) agent_scope_toggle: Rect,
     pub(super) sidebar_divider: Rect,
     pub(super) sidebar_section_divider: Rect,
     pub(super) sidebar_toggle: Rect,
@@ -1347,15 +1350,14 @@ impl ClientShellState {
         let Some(snapshot) = self.snapshot.as_deref() else {
             return false;
         };
-        let boot_id = Some(snapshot.boot_id.as_str());
-        agent_is_visible(
+        super::agent_scope::visible_agent_workspace_ids(
+            snapshot,
             self.focus_scope.as_ref(),
             self.snooze_state.as_ref(),
             &self.active_endpoint_id,
-            boot_id,
-            agent,
-            &snapshot.workspaces,
+            self.config.top_level_agents,
         )
+        .contains(&agent.workspace_id)
     }
 
     pub(crate) fn set_snooze_state(

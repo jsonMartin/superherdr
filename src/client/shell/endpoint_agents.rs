@@ -103,12 +103,12 @@ fn agent_rows(
         .iter()
         .filter_map(|endpoint| {
             endpoint.snapshot.as_deref().map(|snapshot| {
-                let visible_workspaces = super::focus_snooze::visible_workspace_ids(
+                let visible_workspaces = super::agent_scope::visible_agent_workspace_ids(
+                    snapshot,
                     endpoint.focus_scope.as_ref(),
                     endpoint.snooze_state.as_ref(),
                     &endpoint.endpoint_id,
-                    Some(snapshot.boot_id.as_str()),
-                    &snapshot.workspaces,
+                    config.top_level_agents,
                 );
                 super::agent_sidebar::agent_rows_with_filter(
                     snapshot,
@@ -116,26 +116,30 @@ fn agent_rows(
                     Some(&endpoint.label),
                     |agent| visible_workspaces.contains(&agent.workspace_id),
                 )
-                    .into_iter()
-                    .map(|agent| ((endpoint.endpoint_id.clone(), agent.pane_id.clone()), agent))
-                    .collect::<Vec<_>>()
+                .into_iter()
+                .map(|agent| ((endpoint.endpoint_id.clone(), agent.pane_id.clone()), agent))
+                .collect::<Vec<_>>()
             })
         })
         .flatten()
         .collect::<HashMap<_, _>>();
 
-    super::aggregate_navigation::aggregate_agent_rows(endpoints, config.agent_panel_sort)
-        .into_iter()
-        .filter_map(|row| {
-            let key = (row.endpoint.endpoint_id.clone(), row.agent.pane_id.clone());
-            let mut agent = rendered_rows.remove(&key)?;
-            agent.focused &= row.endpoint.endpoint_id == active_endpoint_id;
-            Some(EndpointAgentRow {
-                endpoint_id: row.endpoint.endpoint_id.clone(),
-                machine_label: row.endpoint.label.to_owned(),
-                stale: row.endpoint.stale(),
-                agent,
-            })
+    super::aggregate_navigation::aggregate_agent_rows(
+        endpoints,
+        config.agent_panel_sort,
+        config.top_level_agents,
+    )
+    .into_iter()
+    .filter_map(|row| {
+        let key = (row.endpoint.endpoint_id.clone(), row.agent.pane_id.clone());
+        let mut agent = rendered_rows.remove(&key)?;
+        agent.focused &= row.endpoint.endpoint_id == active_endpoint_id;
+        Some(EndpointAgentRow {
+            endpoint_id: row.endpoint.endpoint_id.clone(),
+            machine_label: row.endpoint.label.to_owned(),
+            stale: row.endpoint.stale(),
+            agent,
         })
-        .collect()
+    })
+    .collect()
 }
