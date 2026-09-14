@@ -19,6 +19,8 @@ pub(super) struct AgentRow {
     pub(super) rows: Vec<Vec<crate::ui::ResolvedToken>>,
 }
 
+// Inherited from Herdr; Superherdr calls the filtered variant. Kept to simplify upstream merges.
+#[allow(dead_code)]
 pub(super) fn ordered_agent_pane_ids(
     snapshot: &ClientShellSnapshot,
     sort: crate::config::AgentPanelSortConfig,
@@ -63,6 +65,8 @@ pub(super) fn ordered_agent_pane_ids_with_filter(
         .collect()
 }
 
+// Inherited from Herdr; Superherdr calls the filtered variant. Kept to simplify upstream merges.
+#[allow(dead_code)]
 pub(super) fn render_agent_panel(
     buffer: &mut Buffer,
     area: Rect,
@@ -280,6 +284,8 @@ pub(super) fn render_agent_list<T>(
     }
 }
 
+// Inherited from Herdr; Superherdr calls the filtered variant. Kept to simplify upstream merges.
+#[allow(dead_code)]
 pub(super) fn agent_rows(
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,

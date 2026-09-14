@@ -526,13 +526,11 @@ impl SnoozeStore {
             .collect();
         expired
             .iter()
-            .fold(false, |changed, id| self.remove_record(id) || changed)
+            // `|` keeps removing every expired record after the first success.
+            .fold(false, |changed, id| self.remove_record(id) | changed)
     }
 
-    pub(crate) fn has_records(&self) -> bool {
-        !self.records.is_empty()
-    }
-
+    #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.records.is_empty()
     }

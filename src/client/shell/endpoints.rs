@@ -308,6 +308,8 @@ impl ClientShellState {
         self.set_endpoint_methods_for(&endpoint_id, methods);
     }
 
+    // Inherited from Herdr; Superherdr routes callers elsewhere. Kept to simplify upstream merges.
+    #[allow(dead_code)]
     pub(super) fn supports_endpoint_method(&self, method: &crate::api::schema::Method) -> bool {
         self.supports_endpoint_method_for(&self.active_endpoint_id, method)
     }

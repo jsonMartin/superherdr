@@ -175,14 +175,6 @@ impl ClientShellState {
             })
     }
 
-    pub(super) fn open_snooze_management(&mut self) {
-        self.open_snooze_management_with_notice(None);
-    }
-
-    pub(super) fn open_snooze_management_with_notice(&mut self, notice: Option<String>) {
-        self.open_snooze_management_for_endpoint(self.active_endpoint_id.clone(), notice);
-    }
-
     pub(super) fn open_snooze_management_for_endpoint(
         &mut self,
         endpoint_id: ClientEndpointId,

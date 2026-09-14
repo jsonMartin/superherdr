@@ -10,25 +10,6 @@ pub(crate) fn now_unix_ms() -> i64 {
         .unwrap_or(0)
 }
 
-pub(crate) fn format_utc_iso(unix_ms: i64) -> String {
-    let secs = unix_ms / 1000;
-    let millis = (unix_ms % 1000).abs();
-    if let Ok(odt) = time::OffsetDateTime::from_unix_timestamp(secs) {
-        format!(
-            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
-            odt.year(),
-            odt.month() as u8,
-            odt.day(),
-            odt.hour(),
-            odt.minute(),
-            odt.second(),
-            millis
-        )
-    } else {
-        format!("{unix_ms}")
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum WorkspaceSnoozeError {
     InvalidDuration,
@@ -39,8 +20,16 @@ pub(crate) enum WorkspaceSnoozeError {
 pub(crate) enum WorkspaceWakeError {
     NotFound,
     CoveredByProject,
-    StaleRevision { expected: u64, current: u64 },
-    StaleBoot { expected: String, current: String },
+    StaleRevision {
+        expected: u64,
+        current: u64,
+    },
+    // Nothing constructs this yet, but the server maps it to the `stale_boot` API error.
+    #[allow(dead_code)]
+    StaleBoot {
+        expected: String,
+        current: String,
+    },
     UnconfirmedWakeAll,
 }
 
@@ -60,10 +49,6 @@ impl WorkspaceSnoozeManager {
             records: HashMap::new(),
             project_records: HashMap::new(),
         }
-    }
-
-    pub(crate) fn boot_id(&self) -> &str {
-        &self.boot_id
     }
 
     pub(crate) fn revision(&self) -> u64 {
@@ -164,6 +149,7 @@ impl WorkspaceSnoozeManager {
         Ok(record)
     }
 
+    #[cfg(test)]
     pub(crate) fn project_record_revision(&self, project_key: &str) -> Option<u64> {
         self.project_records
             .get(project_key)
@@ -193,6 +179,7 @@ impl WorkspaceSnoozeManager {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn wake(
         &mut self,
         workspace_id: Option<&str>,

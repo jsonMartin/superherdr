@@ -189,6 +189,8 @@ pub(crate) fn hostname() -> Option<String> {
     (!name.is_empty()).then_some(name)
 }
 
+// `libc::time_t` is not `i64` on every Unix target.
+#[allow(clippy::useless_conversion)]
 pub(crate) fn local_datetime() -> Option<time::PrimitiveDateTime> {
     let mut timestamp: libc::time_t = 0;
     if unsafe { libc::time(&mut timestamp) } == -1 {
@@ -216,6 +218,8 @@ pub(crate) fn local_timestamp(value: time::PrimitiveDateTime) -> Option<i64> {
         .filter_map(|is_dst| {
             let mut local = tm_from_datetime(value, is_dst)?;
             let timestamp = unsafe { libc::mktime(&mut local) };
+            // `libc::time_t` is not `i64` on every Unix target.
+            #[allow(clippy::useless_conversion)]
             let timestamp = i64::try_from(timestamp).ok()?;
             let timestamp_for_localtime = libc::time_t::try_from(timestamp).ok()?;
             let mut resolved: libc::tm = unsafe { std::mem::zeroed() };
@@ -330,8 +334,13 @@ mod tests {
         let mut daylight = tm_from_datetime(overlap, 1).unwrap();
         let daylight = unsafe { libc::mktime(&mut daylight) };
         assert_eq!(local_datetime_at(earliest), Some(overlap));
-        assert!(earliest <= i64::try_from(standard).unwrap());
-        assert!(earliest <= i64::try_from(daylight).unwrap());
+        #[allow(clippy::useless_conversion)] // `libc::time_t` is not `i64` on every Unix target.
+        let (standard, daylight) = (
+            i64::try_from(standard).unwrap(),
+            i64::try_from(daylight).unwrap(),
+        );
+        assert!(earliest <= standard);
+        assert!(earliest <= daylight);
     }
 
     #[test]

@@ -12,6 +12,8 @@ impl ClientShellState {
             .map(|hit| (hit.endpoint_id.clone(), hit.workspace_id.clone()))
     }
 
+    // Inherited from Herdr; Superherdr routes callers elsewhere. Kept to simplify upstream merges.
+    #[allow(dead_code)]
     pub(super) fn active_endpoint_workspace_at(&self, point: (u16, u16)) -> Option<String> {
         self.hits
             .workspaces

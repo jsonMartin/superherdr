@@ -2193,9 +2193,9 @@ impl HeadlessServer {
     }
 
     fn retry_snooze_store(&mut self, now: Instant) -> bool {
-        if !self
+        if self
             .snooze_retry_deadline
-            .is_some_and(|deadline| now >= deadline)
+            .is_none_or(|deadline| now < deadline)
         {
             return false;
         }
@@ -3720,10 +3720,7 @@ impl HeadlessServer {
                         let (code, message) = self.snooze_action_error(error);
                         let response = serde_json::to_string(&api::schema::ErrorResponse {
                             id: msg.request.id,
-                            error: api::schema::ErrorBody {
-                                code: code.into(),
-                                message: message.into(),
-                            },
+                            error: api::schema::ErrorBody { code, message },
                         })
                         .unwrap_or_default();
                         let _ = msg.respond_to.send(response);
