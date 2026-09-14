@@ -1,6 +1,6 @@
 # Focus and Snooze: first working local version
 
-This fork extends upstream v0.9.0 (`b99002ac99b09e00b4ca692436cb15a6b0d676f1`). Core Focus/shared Snooze landed in `84f228b85f1c717469cfdac8338adaec467f647a`; the fixed-height sidebar footer landed in `f695380227f2c7f6c46475f812eaf0417e04ec0f`. Commit `585fe3d2e2fe21ca0595f50edaac8c147e331971` finishes the accepted menus, Focus header, and Snooze management table. It is a local working checkpoint, not a public release.
+Superherdr builds on upstream v0.9.0 (`b99002ac99b09e00b4ca692436cb15a6b0d676f1`). Core Focus/shared Snooze landed in `84f228b85f1c717469cfdac8338adaec467f647a`; the fixed-height sidebar footer landed in `f695380227f2c7f6c46475f812eaf0417e04ec0f`. Commit `585fe3d2e2fe21ca0595f50edaac8c147e331971` finishes the accepted menus, Focus header, and Snooze management table. It is a local working checkpoint, not a public release.
 
 ## Behavior
 
@@ -33,11 +33,11 @@ Earlier GLM review covered the core trial. A fresh Gemini 3.8 Flash High source 
 
 ## Known limits
 
-An open management dialog is not rebuilt on every cross-client Snooze broadcast. Stale actions reject safely; close and reopen the dialog to refresh its records. Its countdown refresh does not solve that record-refresh limitation. Unavailable/uncertain saved identities remain visible for reassociation rather than hiding unrelated work. Stock clients without the optional shared Snooze feature do not adopt this fork's presentation filtering.
+An open management dialog is not rebuilt on every cross-client Snooze broadcast. Stale actions reject safely; close and reopen the dialog to refresh its records. Its countdown refresh does not solve that record-refresh limitation. Unavailable/uncertain saved identities remain visible for reassociation rather than hiding unrelated work. Stock clients without the optional shared Snooze feature do not adopt Superherdr’s presentation filtering.
 
 ## Local trial and rollback
 
-The current isolated checkout is `/Users/json/Projects/herdr-helper/focus-snooze-trial`. Its existing local launcher is `.local/prd/focus-snooze/open-trial.command`; it uses private session/config/socket paths, clears inherited socket overrides, and disables update checks for the trial. This ignored, machine-specific launcher is not a distributable installer. The existing visible client/server was not restarted during closeout.
+The current isolated checkout is `/Users/json/Projects/superherdr/focus-snooze-trial`. Its existing local launcher is `.local/prd/focus-snooze/open-trial.command`; it uses private session/config/socket paths, clears inherited socket overrides, and disables update checks for the trial. This ignored, machine-specific launcher is not a distributable installer. The existing visible client/server was not restarted during closeout.
 
 Return to the stock client by closing only the trial client window; that does not close running work. Do not stop or overwrite a production server or remove its configuration. Keep the private trial state until it is no longer needed. Product naming, standalone installation/state paths, updater isolation, and GitHub publication belong to the next Superherdr rename task.
 

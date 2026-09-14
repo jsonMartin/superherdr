@@ -50,7 +50,7 @@ fn write_delayed_shell_and_fake_pi(
         format!(
             "#!/bin/sh\nprintf '%s\\n' \"$@\" >> '{}'\nexport HERDR_AGENT=pi\n'{}' pane report-agent \"$HERDR_PANE_ID\" --source custom:delayed-shell-pi --agent pi --state idle >/dev/null\nwhile IFS= read -r _prompt; do :; done\n",
             invocations.display(),
-            env!("CARGO_BIN_EXE_herdr"),
+            env!("CARGO_BIN_EXE_superherdr"),
         ),
     )
     .unwrap();
@@ -70,7 +70,7 @@ fn agent_start_waits_for_a_new_pane_shell_to_finish_initializing() {
         "onboarding = false\n[terminal]\ndefault_shell = {:?}\nshell_mode = \"non_login\"\n",
         delayed_shell.to_str().unwrap()
     );
-    let herdr = spawn_herdr_with_config(
+    let superherdr = spawn_herdr_with_config(
         &config_home,
         &runtime_dir,
         &socket_path,
@@ -151,7 +151,7 @@ fn agent_start_stops_retrying_when_the_pane_shell_stays_busy() {
         "onboarding = false\n[terminal]\ndefault_shell = {:?}\nshell_mode = \"non_login\"\n",
         delayed_shell.to_str().unwrap()
     );
-    let herdr = spawn_herdr_with_config(
+    let superherdr = spawn_herdr_with_config(
         &config_home,
         &runtime_dir,
         &socket_path,
@@ -225,14 +225,14 @@ fn agent_start_command_works() {
         format!(
             "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{0}'\nexport HERDR_AGENT=pi\n'{1}' pane report-agent \"$HERDR_PANE_ID\" --source custom:fake-pi --agent pi --state idle >/dev/null\nwhile IFS= read -r prompt; do\n  case \"$prompt\" in\n    \"do not transition\") continue ;;\n    \"done churn\")\n      '{1}' pane report-agent \"$HERDR_PANE_ID\" --source custom:fake-pi --agent pi --state done >/dev/null\n      '{1}' pane report-agent \"$HERDR_PANE_ID\" --source custom:fake-pi --agent pi --state idle >/dev/null\n      continue\n      ;;\n    \"session churn\")\n      '{1}' pane report-agent-session \"$HERDR_PANE_ID\" --source custom:fake-pi --agent pi --agent-session-id replacement >/dev/null\n      continue\n      ;;\n    \"block after submit\")\n      '{1}' pane report-agent \"$HERDR_PANE_ID\" --source custom:fake-pi --agent pi --state blocked >/dev/null\n      continue\n      ;;\n  esac\n  '{1}' pane report-agent \"$HERDR_PANE_ID\" --source custom:fake-pi --agent pi --state working >/dev/null\n  '{1}' pane report-agent \"$HERDR_PANE_ID\" --source custom:fake-pi --agent pi --state idle >/dev/null\n  printf '%s\\n' \"$prompt\" >> '{2}'\ndone\n",
             captured_args.display(),
-            env!("CARGO_BIN_EXE_herdr"),
+            env!("CARGO_BIN_EXE_superherdr"),
             captured_prompts.display(),
         ),
     )
     .unwrap();
     fs::set_permissions(&fake_pi, fs::Permissions::from_mode(0o755)).unwrap();
 
-    let herdr = spawn_herdr_with_path(&config_home, &runtime_dir, &socket_path, Some(&bin));
+    let superherdr = spawn_herdr_with_path(&config_home, &runtime_dir, &socket_path, Some(&bin));
     wait_for_socket(&socket_path, Duration::from_secs(5));
     let created = run_cli_json(
         &socket_path,
@@ -495,7 +495,7 @@ fn agent_start_rejects_a_shell_replaced_by_a_foreground_program() {
     let config_home = base.join("config");
     let runtime_dir = base.join("runtime");
     let socket_path = runtime_dir.join("herdr.sock");
-    let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    let superherdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
     wait_for_socket(&socket_path, Duration::from_secs(5));
     let created = run_cli_json(
         &socket_path,
@@ -556,7 +556,7 @@ fn agent_start_timeout_releases_the_name_for_reuse() {
     .unwrap();
     fs::set_permissions(&fake_pi, fs::Permissions::from_mode(0o755)).unwrap();
 
-    let herdr = spawn_herdr_with_path(&config_home, &runtime_dir, &socket_path, Some(&bin));
+    let superherdr = spawn_herdr_with_path(&config_home, &runtime_dir, &socket_path, Some(&bin));
     wait_for_socket(&socket_path, Duration::from_secs(5));
     let created = run_cli_json(
         &socket_path,
@@ -638,7 +638,7 @@ fn agent_start_reports_detected_kind_mismatch_before_released_name() {
     .unwrap();
     fs::set_permissions(&fake_pi, fs::Permissions::from_mode(0o755)).unwrap();
 
-    let herdr = spawn_herdr_with_path(&config_home, &runtime_dir, &socket_path, Some(&bin));
+    let superherdr = spawn_herdr_with_path(&config_home, &runtime_dir, &socket_path, Some(&bin));
     wait_for_socket(&socket_path, Duration::from_secs(5));
     let created = run_cli_json(
         &socket_path,
@@ -711,7 +711,7 @@ fn agent_start_follows_its_named_terminal_when_the_pane_moves() {
     fs::write(&fake_pi, "#!/bin/sh\nHERDR_AGENT=pi exec /bin/sleep 10\n").unwrap();
     fs::set_permissions(&fake_pi, fs::Permissions::from_mode(0o755)).unwrap();
 
-    let herdr = spawn_herdr_with_path(&config_home, &runtime_dir, &socket_path, Some(&bin));
+    let superherdr = spawn_herdr_with_path(&config_home, &runtime_dir, &socket_path, Some(&bin));
     wait_for_socket(&socket_path, Duration::from_secs(5));
     let created = run_cli_json(
         &socket_path,
@@ -783,7 +783,7 @@ fn agent_start_and_rename_reject_invalid_names() {
     let config_home = base.join("config");
     let runtime_dir = base.join("runtime");
     let socket_path = runtime_dir.join("herdr.sock");
-    let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    let superherdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
     wait_for_socket(&socket_path, Duration::from_secs(5));
     let created = run_cli_json(
         &socket_path,
@@ -844,7 +844,7 @@ fn agent_commands_work() {
     let runtime_dir = base.join("runtime");
     let socket_path = runtime_dir.join("herdr.sock");
 
-    let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    let superherdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
     wait_for_socket(&socket_path, Duration::from_secs(5));
 
     let created = run_cli(
@@ -1088,7 +1088,7 @@ fn agent_wait_returns_immediately_for_unseen_done_agent() {
     let config_home = base.join("config");
     let runtime_dir = base.join("runtime");
     let socket_path = runtime_dir.join("herdr.sock");
-    let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    let superherdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
     wait_for_socket(&socket_path, Duration::from_secs(5));
 
     let created = run_cli_json(
@@ -1161,7 +1161,7 @@ fn agent_wait_tolerates_detection_uncertainty_and_pane_target_rename() {
     let config_home = base.join("config");
     let runtime_dir = base.join("runtime");
     let socket_path = runtime_dir.join("herdr.sock");
-    let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    let superherdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
     wait_for_socket(&socket_path, Duration::from_secs(5));
     let created = run_cli_json(
         &socket_path,
@@ -1300,7 +1300,7 @@ fn agent_wait_pins_the_original_terminal_when_name_is_reused() {
     let config_home = base.join("config");
     let runtime_dir = base.join("runtime");
     let socket_path = runtime_dir.join("herdr.sock");
-    let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    let superherdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
     wait_for_socket(&socket_path, Duration::from_secs(5));
 
     let created = run_cli_json(
@@ -1390,7 +1390,7 @@ fn agent_wait_ignores_other_panes_and_errors_when_its_pane_closes() {
     let config_home = base.join("config");
     let runtime_dir = base.join("runtime");
     let socket_path = runtime_dir.join("herdr.sock");
-    let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    let superherdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
     wait_for_socket(&socket_path, Duration::from_secs(5));
 
     let created = run_cli_json(

@@ -1,85 +1,54 @@
-# herdr
+# Superherdr
 
+Superherdr is an open-source terminal project built on [Herdr](https://github.com/herdrdev/herdr) with built-in Focus and Snooze. It tracks upstream Herdr and keeps its native terminal runtime, agent status detection, CLI, and socket API.
 
-<p align="center">
-  <img src="assets/logo.png" alt="herdr" width="100" />
-</p>
+Focus shows the project or workspace you want to work on in one client. Snooze hides a project or workspace across clients until its wake time, without stopping its terminals. See the [accepted Focus/Snooze behavior](docs/next/focus-snooze-fork.md).
 
-<p align="center">
-  <a href="https://herdr.dev">herdr.dev</a> · <a href="#install">install</a> · <a href="https://herdr.dev/docs/quick-start/">quick start</a> · <a href="https://herdr.dev/docs/">docs</a>
-</p>
+## Install from this checkout
 
-<p align="center">
-  English · <a href="README.zh-CN.md">简体中文</a>
-</p>
+Superherdr does not yet have a published package or release feed. The upstream Herdr installers install Herdr, not Superherdr.
 
-<p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-666666?labelColor=333333" alt="Apache 2.0 license" /></a>
-  <a href="https://github.com/herdrdev/herdr/releases"><img src="https://img.shields.io/github/downloads/herdrdev/herdr/total?labelColor=333333&color=666666" alt="total GitHub release downloads" /></a>
-  <a href="https://github.com/herdrdev/herdr/stargazers"><img src="https://img.shields.io/github/stars/herdrdev/herdr?labelColor=333333&color=666666&logo=github" alt="GitHub stars" /></a>
-  <a href="https://github.com/herdrdev/herdr/releases/latest"><img src="https://img.shields.io/github/v/release/herdrdev/herdr?label=release&labelColor=333333&color=666666" alt="latest stable release" /></a>
-  <a href="https://formulae.brew.sh/formula/herdr"><img src="https://img.shields.io/homebrew/v/herdr?label=homebrew&labelColor=333333&color=666666" alt="Homebrew version" /></a>
-  <a href="https://x.com/herdrdev"><img src="https://img.shields.io/badge/follow-%40herdrdev-000000?logo=x&logoColor=white" alt="follow @herdrdev on X" /></a>
-</p>
+With Rust and Zig 0.15.2 installed, run from the source checkout:
 
----
-
-https://github.com/user-attachments/assets/043ec09f-4bdd-41d5-aee0-8fda6b83e267
-
-**the runtime your coding agents live on.**
-
-- **detach without stopping work** — herdr keeps terminals running in a background server when you close the client or lose your SSH connection. after a server or machine restart, herdr restores the saved layout and can resume supported agent sessions; the original processes do not survive. [session state →](https://herdr.dev/docs/session-state/)
-- **several machines, one window** — keep local work and saved ssh machines together, with a combined agent list and independent reconnects. [remote machines →](https://herdr.dev/docs/connecting-machines/)
-- **never hunt for the stuck one** — every pane is marked working, blocked, or idle. when an agent stops and needs an answer, herdr says so.
-- **agent-native** — agents drive herdr through the cli and socket api: they can spawn panes, prompt each other, and wait until another agent is genuinely blocked. [agent skill →](https://herdr.dev/docs/agent-skill/)
-- **runs what you already run** — claude code, codex, cursor, opencode, grok and the rest. herdr doesn't wrap or replace them; it owns their terminals.
-- **keyboard and mouse, both first-class** — tmux-style prefix keys *and* click, drag, split. pick per moment, not per tool.
-- **plugins** — extend panes and workflows. [browse the marketplace →](https://herdr.dev/plugins/)
-- **one rust binary, no electron** — runs in whatever terminal you already use.
-
----
-
-## install
-
-```bash
-curl -fsSL https://herdr.dev/install.sh | sh
+```sh
+cargo install --path . --locked
+superherdr
 ```
 
-or `brew install herdr` · `mise use -g herdr` · windows: `powershell -ExecutionPolicy Bypass -c "irm https://herdr.dev/install.ps1 | iex"` · [endpoint-protected Windows](https://herdr.dev/docs/windows-beta/) · [binaries](https://github.com/herdrdev/herdr/releases)
+The executable is `superherdr` (`superherdr.exe` on Windows). Installing it does not overwrite `herdr`. To use Superherdr as your default `herdr` command, preserve the original executable as `herdr-og`, then point a `herdr` symlink at `superherdr` in a directory earlier on PATH. A command alias does not change the separate state directories below. A release build uses `~/.config/superherdr` and `~/.local/state/superherdr` on Unix; a debug build uses `superherdr-dev`. XDG overrides and Windows APPDATA/LOCALAPPDATA roots are supported.
 
-then start it where the work lives:
+Existing Herdr sessions and configuration are not moved or stopped. Superherdr starts with separate state. Do not point both products at the same writable session directory. Binary self-update is disabled so an upstream release cannot replace Superherdr. Rebuild from this checkout to update.
 
-```bash
-herdr
+For the local Homebrew setup and command aliases, see [Homebrew installation notes](homebrew.md).
+
+## Use
+
+```sh
+superherdr --help
+superherdr completion zsh
+superherdr --skill
+superherdr
 ```
 
-run your agents, split panes, walk away. `ctrl+b q` detaches, `herdr` reattaches. [quick start →](https://herdr.dev/docs/quick-start/)
+`ctrl+b q` detaches the client. Running the same command reattaches. Focus and Snooze are available in the sidebar and workspace/project context menus.
 
-## docs
+For SSH, install a matching Superherdr build remotely or provide `HERDR_REMOTE_BINARY` pointing to a Superherdr build for the remote platform. Default discovery and installation use `superherdr`, not stock `herdr`. There is no fallback download of upstream Herdr as a Superherdr binary.
 
-everything lives at [herdr.dev/docs](https://herdr.dev/docs/): [quick start](https://herdr.dev/docs/quick-start/) · [concepts](https://herdr.dev/docs/concepts/) · [supported agents](https://herdr.dev/docs/agents/) · [keyboard](https://herdr.dev/docs/keyboard/) · [configuration](https://herdr.dev/docs/configuration/) · [session state](https://herdr.dev/docs/session-state/) · [connecting machines](https://herdr.dev/docs/connecting-machines/) · [remote](https://herdr.dev/docs/persistence-remote/) · [integrations](https://herdr.dev/docs/integrations/) · [plugins](https://herdr.dev/docs/plugins/) · [socket api](https://herdr.dev/docs/socket-api/)
+## Compatibility and upstream
 
-## thanks
+The `HERDR_*` environment variables, socket filenames, integration asset names, API/schema identifiers, and frozen endpoint codecs retain their upstream names for compatibility. Socket files live inside the separate Superherdr directories. Existing upstream detection catalogs and plugin services remain intentional upstream integrations.
 
-every past sponsor and backer is listed in [SPONSORS.md](./SPONSORS.md) — thank you 🐑
+[Upstream documentation](https://herdr.dev/docs/) describes the inherited behavior; use `superherdr` for command examples and the project’s directories above. Historical release snapshots, changelogs, distribution payloads, and the upstream stable skill remain upstream reference material, not Superherdr releases. No Superherdr GitHub destination or hosted installer has been established.
 
-enterprise / partnership: hey@herdr.dev
+## Development
 
-## agent instructions
-
-if you are an ai agent helping with this repository, read [`AGENTS.md`](./AGENTS.md) before making changes and read [`CONTRIBUTING.md`](./CONTRIBUTING.md) before opening issues or PRs.
-
-## development
-
-```bash
-git clone https://github.com/herdrdev/herdr
-cd herdr
-cargo build --release
-
-just test        # unit tests
-just check       # formatting, tests, and maintenance checks
+```sh
+cargo build --locked
+cargo test --locked --test superherdr_rename
 ```
 
-## license
+Read [AGENTS.md](AGENTS.md) and [CONTRIBUTING.md](CONTRIBUTING.md) before working here. Upstream contribution and release rules do not authorize publishing Superherdr to upstream.
 
-Herdr is licensed under the [Apache License 2.0](LICENSE).
+## License
+
+Superherdr retains Herdr's [Apache License 2.0](LICENSE), upstream copyright notices, and [sponsor acknowledgments](SPONSORS.md).

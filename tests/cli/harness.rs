@@ -24,7 +24,10 @@ pub(super) fn unique_test_dir() -> PathBuf {
 }
 
 pub(super) fn managed_github_plugin_dir(config_home: &Path) -> PathBuf {
-    config_home.join("herdr-dev").join("plugins").join("github")
+    config_home
+        .join("superherdr-dev")
+        .join("plugins")
+        .join("github")
 }
 
 pub(super) fn path_missing_or_empty(path: &Path) -> bool {
@@ -146,9 +149,9 @@ pub(super) fn spawn_herdr_with_pane_history(
 
 pub(super) fn app_dir_name() -> &'static str {
     if cfg!(debug_assertions) {
-        "herdr-dev"
+        "superherdr-dev"
     } else {
-        "herdr"
+        "superherdr"
     }
 }
 
@@ -174,7 +177,7 @@ pub(super) fn spawn_named_server(
     )
     .unwrap();
 
-    let mut command = Command::new(env!("CARGO_BIN_EXE_herdr"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_superherdr"));
     command
         .args(["--session", session, "server"])
         .env("XDG_CONFIG_HOME", config_home)
@@ -224,7 +227,7 @@ pub(super) fn run_named_cli_with_env_and_socket_override(
     envs: &[(&str, &Path)],
     socket_override: Option<&Path>,
 ) -> std::process::Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_herdr"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_superherdr"));
     command
         .args(args)
         .env("XDG_CONFIG_HOME", config_home)
@@ -250,7 +253,7 @@ pub(super) fn run_named_cli_json(
     let output = run_named_cli(config_home, runtime_dir, args);
     assert!(
         output.status.success(),
-        "command failed: herdr {}\nstatus: {:?}\nstderr: {}\nstdout: {}",
+        "command failed: superherdr {}\nstatus: {:?}\nstderr: {}\nstdout: {}",
         args.join(" "),
         output.status.code(),
         String::from_utf8_lossy(&output.stderr),
@@ -299,7 +302,7 @@ pub(super) fn spawn_herdr_with_config(
         })
         .unwrap();
 
-    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_herdr"));
+    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_superherdr"));
     cmd.arg("server");
     cmd.env("XDG_CONFIG_HOME", config_home);
     cmd.env("XDG_RUNTIME_DIR", runtime_dir);
@@ -320,7 +323,7 @@ pub(super) fn spawn_herdr_with_config(
 }
 
 pub(super) fn run_cli(socket_path: &Path, args: &[&str]) -> std::process::Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_herdr"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_superherdr"));
     command.args(args);
     command.env("HERDR_SOCKET_PATH", socket_path);
     command.output().unwrap()
@@ -331,7 +334,7 @@ pub(super) fn run_cli_in_dir(
     args: &[&str],
     current_dir: &Path,
 ) -> std::process::Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_herdr"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_superherdr"));
     command.args(args);
     command.current_dir(current_dir);
     command.env("HERDR_SOCKET_PATH", socket_path);
@@ -375,7 +378,7 @@ pub(super) fn parse_cli_json_output(
 ) -> serde_json::Value {
     assert!(
         output.status.success(),
-        "command failed: herdr {}\nstatus: {:?}\nstderr: {}\nstdout: {}",
+        "command failed: superherdr {}\nstatus: {:?}\nstderr: {}\nstdout: {}",
         args.join(" "),
         output.status.code(),
         String::from_utf8_lossy(&output.stderr),
@@ -384,7 +387,7 @@ pub(super) fn parse_cli_json_output(
 
     serde_json::from_slice(&output.stdout).unwrap_or_else(|err| {
         panic!(
-            "failed to parse JSON response for `herdr {}`: {}\nstdout: {}\nstderr: {}",
+            "failed to parse JSON response for `superherdr {}`: {}\nstdout: {}\nstderr: {}",
             args.join(" "),
             err,
             String::from_utf8_lossy(&output.stdout),

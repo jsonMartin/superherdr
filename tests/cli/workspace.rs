@@ -7,7 +7,7 @@ fn workspace_and_pane_management_commands_work() {
     let runtime_dir = base.join("runtime");
     let socket_path = runtime_dir.join("herdr.sock");
 
-    let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    let superherdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
     wait_for_socket(&socket_path, Duration::from_secs(5));
 
     let reloaded = run_cli(&socket_path, &["server", "reload-config"]);
@@ -100,7 +100,7 @@ fn worktree_management_commands_work() {
     let checkout = base.join("checkout");
     create_committed_repo(&repo);
 
-    let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    let superherdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
     wait_for_socket(&socket_path, Duration::from_secs(5));
 
     let branch = "worktree/cli-wrapper";
@@ -226,7 +226,7 @@ fn workspace_close_requires_explicit_worktree_group_intent() {
     let checkout = base.join("checkout");
     create_committed_repo(&repo);
 
-    let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    let superherdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
     wait_for_socket(&socket_path, Duration::from_secs(5));
 
     let created = run_cli_json(
@@ -303,7 +303,7 @@ fn forced_worktree_remove_terminates_processes_inside_checkout() {
     let checkout = base.join("checkout-with-process");
     create_committed_repo(&repo);
 
-    let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    let superherdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
     wait_for_socket(&socket_path, Duration::from_secs(5));
 
     let created = run_cli_json(
@@ -385,7 +385,7 @@ fn worktree_open_existing_checkout_by_path_and_branch() {
         ],
     );
 
-    let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    let superherdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
     wait_for_socket(&socket_path, Duration::from_secs(5));
 
     let opened = run_cli_json_in_dir(
@@ -646,7 +646,7 @@ fn config_check_rejects_json_output() {
     assert!(checked.stdout.is_empty());
     assert_eq!(
         String::from_utf8_lossy(&checked.stderr),
-        "usage: herdr config check\n"
+        "usage: superherdr config check\n"
     );
 
     cleanup_test_base(&base);
@@ -688,7 +688,7 @@ fn worktree_cli_rejects_local_argument_errors_before_socket_use() {
         assert_eq!(
             output.status.code(),
             Some(2),
-            "herdr {} should fail as local parse error; stdout={} stderr={}",
+            "superherdr {} should fail as local parse error; stdout={} stderr={}",
             args.join(" "),
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
@@ -705,7 +705,7 @@ fn tab_management_commands_work() {
     let runtime_dir = base.join("runtime");
     let socket_path = runtime_dir.join("herdr.sock");
 
-    let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    let superherdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
     wait_for_socket(&socket_path, Duration::from_secs(5));
 
     let created = run_cli(

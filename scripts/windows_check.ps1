@@ -33,7 +33,7 @@ Invoke-Checked cargo @("fmt", "--check")
 Invoke-CargoWithZigCacheRecovery @(
     "clippy",
     "--bin",
-    "herdr",
+    "superherdr",
     "--locked",
     "--",
     "-D",

@@ -1,4 +1,6 @@
-# herdr
+# Superherdr
+
+This is the Superherdr project, built on Herdr. Build and run `superherdr`; keep `HERDR_*` integration names and frozen protocol identifiers compatible. The inherited guidance below describes upstream Herdr. Upstream distribution assets and release workflows are not Superherdr publication targets.
 
 Terminal based agent runtime for coding agents.
 

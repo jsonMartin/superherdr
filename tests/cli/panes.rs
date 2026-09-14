@@ -7,7 +7,7 @@ fn pane_close_only_removes_the_target_tab_when_other_tabs_exist() {
     let runtime_dir = base.join("runtime");
     let socket_path = runtime_dir.join("herdr.sock");
 
-    let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    let superherdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
     wait_for_socket(&socket_path, Duration::from_secs(5));
 
     let created = run_cli(
@@ -67,7 +67,7 @@ fn pane_close_removes_the_workspace_when_it_closes_the_last_pane() {
     let runtime_dir = base.join("runtime");
     let socket_path = runtime_dir.join("herdr.sock");
 
-    let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    let superherdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
     wait_for_socket(&socket_path, Duration::from_secs(5));
 
     let created = run_cli(
@@ -104,7 +104,7 @@ fn pane_run_read_and_wait_commands_work() {
     let runtime_dir = base.join("runtime");
     let socket_path = runtime_dir.join("herdr.sock");
 
-    let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    let superherdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
     wait_for_socket(&socket_path, Duration::from_secs(5));
 
     send_request(
@@ -174,7 +174,7 @@ fn wait_output_matches_recent_unwrapped_text() {
     let runtime_dir = base.join("runtime");
     let socket_path = runtime_dir.join("herdr.sock");
 
-    let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    let superherdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
     wait_for_socket(&socket_path, Duration::from_secs(5));
 
     let created = run_cli(
@@ -249,7 +249,7 @@ fn closing_pane_terminates_processes_inside_it() {
     let runtime_dir = base.join("runtime");
     let socket_path = runtime_dir.join("herdr.sock");
 
-    let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    let superherdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
     wait_for_socket(&socket_path, Duration::from_secs(5));
 
     let created = run_cli(
@@ -310,7 +310,7 @@ fn closing_workspace_terminates_processes_inside_it() {
     let runtime_dir = base.join("runtime");
     let socket_path = runtime_dir.join("herdr.sock");
 
-    let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    let superherdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
     wait_for_socket(&socket_path, Duration::from_secs(5));
 
     let created = run_cli(
@@ -363,7 +363,7 @@ fn workspace_ids_and_public_pane_ids_are_stable() {
     let runtime_dir = base.join("runtime");
     let socket_path = runtime_dir.join("herdr.sock");
 
-    let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    let superherdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
     wait_for_socket(&socket_path, Duration::from_secs(5));
 
     let ws1_json = run_cli_json(
@@ -516,7 +516,7 @@ fn pane_shell_gets_herdr_socket_and_pane_env() {
     let runtime_dir = base.join("runtime");
     let socket_path = runtime_dir.join("herdr.sock");
 
-    let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    let superherdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
     wait_for_socket(&socket_path, Duration::from_secs(5));
 
     let created = send_request(
@@ -574,7 +574,7 @@ fn pane_agent_reports_accept_options_before_pane() {
     let runtime_dir = base.join("runtime");
     let socket_path = runtime_dir.join("herdr.sock");
 
-    let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    let superherdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
     wait_for_socket(&socket_path, Duration::from_secs(5));
 
     let created = send_request(

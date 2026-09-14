@@ -25,7 +25,7 @@ fn notification_show(args: &[String]) -> std::io::Result<i32> {
         Ok(params) => params,
         Err(NotificationShowArgError::Usage) => {
             eprintln!(
-                "usage: herdr notification show <title> [--body TEXT] [--position top-left|top-right|bottom-left|bottom-right] [--sound none|done|request]"
+                "usage: superherdr notification show <title> [--body TEXT] [--position top-left|top-right|bottom-left|bottom-right] [--sound none|done|request]"
             );
             return Ok(2);
         }
@@ -132,9 +132,9 @@ fn parse_notification_sound(
 }
 
 fn print_notification_help() {
-    eprintln!("herdr notification commands:");
+    eprintln!("superherdr notification commands:");
     eprintln!(
-        "  herdr notification show <title> [--body TEXT] [--position top-left|top-right|bottom-left|bottom-right] [--sound none|done|request]"
+        "  superherdr notification show <title> [--body TEXT] [--position top-left|top-right|bottom-left|bottom-right] [--sound none|done|request]"
     );
 }
 

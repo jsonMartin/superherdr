@@ -35,7 +35,7 @@ pub(crate) fn run_remote(remote: RemoteLaunch) -> io::Result<()> {
     let local_socket = local_forward_socket_path(&remote.target, &session_name);
     let program = std::env::args()
         .next()
-        .unwrap_or_else(|| "herdr".to_string());
+        .unwrap_or_else(|| "superherdr".to_string());
     let reattach_command = reattach_command(
         &program,
         &remote.target,
@@ -188,7 +188,7 @@ pub(super) struct RemoteHerdr {
 
 impl RemoteHerdr {
     fn for_platform(platform: RemotePlatform) -> Self {
-        let install_suffix = ".local/bin/herdr".to_string();
+        let install_suffix = ".local/bin/superherdr".to_string();
         let shell_path = format!("\"$HOME/{install_suffix}\"");
         Self {
             install_suffix,
@@ -687,7 +687,7 @@ pub(super) fn prepare_remote_herdr(
 
     if !remote_binary_supports_endpoint_requirement(ssh, &remote_herdr, require_surface_interest)? {
         return Err(io::Error::other(format!(
-            "installed remote herdr at {}, but it does not support saved SSH endpoint federation",
+            "installed remote superherdr at {}, but it does not support saved SSH endpoint federation",
             remote_herdr.shell_path
         )));
     }
@@ -711,7 +711,7 @@ pub(super) fn find_installed_remote_herdr(ssh: &RemoteSsh) -> io::Result<RemoteH
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
         format!(
-            "matching Herdr is not ready on {}; run `herdr --remote {}` interactively to install or update it",
+            "matching Herdr is not ready on {}; run `superherdr --remote {}` interactively to install or update it",
             ssh.target(),
             ssh.target()
         ),
@@ -786,34 +786,33 @@ emit() {
     fi
 }
 if [ -n "$home" ]; then
-    emit "$home/.local/bin/herdr"
+    emit "$home/.local/bin/superherdr"
 fi
 "#,
     );
     if platform.os == "macos" {
         script.push_str(
-            r#"    emit "/opt/homebrew/bin/herdr"
-    emit "/usr/local/bin/herdr"
+            r#"    emit "/opt/homebrew/bin/superherdr"
+    emit "/usr/local/bin/superherdr"
 "#,
         );
     } else if platform.os == "linux" {
         script.push_str(
-            r#"    emit "/home/linuxbrew/.linuxbrew/bin/herdr"
+            r#"    emit "/home/linuxbrew/.linuxbrew/bin/superherdr"
 "#,
         );
     }
     script.push_str(
         r#"if [ -n "$home" ]; then
-    emit "$home/.local/share/mise/installs/herdr/$version/bin/herdr"
-    emit "$home/.local/share/mise/installs/herdr/$version/herdr"
-    emit "$home/.local/share/mise/installs/github-ogulcancelik-herdr/$version/herdr"
-    emit "$home/.nix-profile/bin/herdr"
+    emit "$home/.local/share/mise/installs/superherdr/$version/bin/superherdr"
+    emit "$home/.local/share/mise/installs/superherdr/$version/superherdr"
+    emit "$home/.nix-profile/bin/superherdr"
 fi
 if [ -n "$user" ]; then
-    emit "/etc/profiles/per-user/$user/bin/herdr"
+    emit "/etc/profiles/per-user/$user/bin/superherdr"
 fi
-emit "/nix/var/nix/profiles/default/bin/herdr"
-emit "/run/current-system/sw/bin/herdr"
+emit "/nix/var/nix/profiles/default/bin/superherdr"
+emit "/run/current-system/sw/bin/superherdr"
 "#,
     );
 
@@ -824,7 +823,7 @@ fn remote_binary_on_path_any(
     ssh: &RemoteSsh,
     remote_herdr: &RemoteHerdr,
 ) -> io::Result<Option<RemoteHerdr>> {
-    let output = ssh.user_shell_output("command -v herdr")?;
+    let output = ssh.user_shell_output("command -v superherdr")?;
     if output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         if let Some(candidate) = remote_herdr_from_path_discovery(remote_herdr, &stdout) {
@@ -834,7 +833,7 @@ fn remote_binary_on_path_any(
 
     // Non-POSIX login shells such as xonsh reject `command -v`; retry through
     // /bin/sh while retaining the login-shell probe for shell-initialized PATHs.
-    let output = ssh.sh_output("command -v herdr\n")?;
+    let output = ssh.sh_output("command -v superherdr\n")?;
     if !output.status.success() {
         return Ok(None);
     }
@@ -871,7 +870,7 @@ fn remote_herdr_from_path(remote_herdr: &RemoteHerdr, path: &str) -> Option<Remo
 }
 
 fn is_mise_shim_path(path: &str) -> bool {
-    path.ends_with("/mise/shims/herdr")
+    path.ends_with("/mise/shims/superherdr")
 }
 
 fn remote_client_status(
@@ -960,7 +959,7 @@ fn install_source_description_for(
     }
 
     if local_binary_can_seed_remote {
-        "the current local herdr binary".to_string()
+        "the current local superherdr binary".to_string()
     } else {
         format!(
             "the {} {} asset for {}",
@@ -1093,13 +1092,13 @@ fn confirm_remote_install_with_running_server(
         Err(err) => {
             if !io::stdin().is_terminal() {
                 return Err(io::Error::other(format!(
-                    "could not inspect the running remote herdr server on {target} before installing: {err}; run from an interactive terminal to approve updating the remote binary"
+                    "could not inspect the running remote superherdr server on {target} before installing: {err}; run from an interactive terminal to approve updating the remote binary"
                 )));
             }
             eprintln!(
-                "could not inspect the running remote herdr server on {target} before installing: {err}"
+                "could not inspect the running remote superherdr server on {target} before installing: {err}"
             );
-            eprint!("continue installing the remote herdr binary? [y/N] ");
+            eprint!("continue installing the remote superherdr binary? [y/N] ");
             io::stderr().flush()?;
 
             let mut answer = String::new();
@@ -1108,7 +1107,7 @@ fn confirm_remote_install_with_running_server(
             if answer != "y" && answer != "yes" {
                 return Err(io::Error::new(
                     io::ErrorKind::Interrupted,
-                    "remote herdr install cancelled",
+                    "remote superherdr install cancelled",
                 ));
             }
             return Ok(false);
@@ -1137,7 +1136,7 @@ fn confirm_remote_install_with_running_server(
 
     if plan == RemoteInstallRunningServerPlan::KeepRunning {
         if io::stdin().is_terminal() {
-            eprintln!("remote herdr server on {target} is already compatible:");
+            eprintln!("remote superherdr server on {target} is already compatible:");
             eprintln!("  server: v{}", version_label(version.as_deref()));
             eprintln!(
                 "Herdr will install {} without stopping the running remote server.",
@@ -1152,7 +1151,7 @@ fn confirm_remote_install_with_running_server(
             RemoteInstallRunningServerPlan::LiveHandoff => return Ok(false),
             RemoteInstallRunningServerPlan::StopRequired(_) => {
                 return Err(io::Error::other(format!(
-                    "remote herdr server on {target} is running v{}; run from an interactive terminal to approve stopping it for the update",
+                    "remote superherdr server on {target} is running v{}; run from an interactive terminal to approve stopping it for the update",
                     version_label(version.as_deref())
                 )));
             }
@@ -1161,7 +1160,7 @@ fn confirm_remote_install_with_running_server(
     }
 
     if plan == RemoteInstallRunningServerPlan::LiveHandoff {
-        eprintln!("remote herdr server on {target} is currently running:");
+        eprintln!("remote superherdr server on {target} is currently running:");
         eprintln!("  server: v{}", version_label(version.as_deref()));
         eprintln!(
             "Herdr will install {} and hand off live pane processes to the prepared server.",
@@ -1170,7 +1169,7 @@ fn confirm_remote_install_with_running_server(
         return Ok(false);
     }
 
-    eprintln!("remote herdr server on {target} is currently running:");
+    eprintln!("remote superherdr server on {target} is currently running:");
     eprintln!("  server: v{}", version_label(version.as_deref()));
     eprintln!(
         "To complete the remote update, Herdr must stop the running remote server after installing."
@@ -1189,7 +1188,7 @@ fn confirm_remote_install_with_running_server(
     if answer != "y" && answer != "yes" {
         return Err(io::Error::new(
             io::ErrorKind::Interrupted,
-            "remote herdr install cancelled",
+            "remote superherdr install cancelled",
         ));
     }
 
@@ -1360,19 +1359,19 @@ fn confirm_remote_server_stop(
     if !io::stdin().is_terminal() {
         if required_upgrade {
             return Err(io::Error::other(format!(
-                "remote herdr server on {target} needs one final update before this client can attach; run from an interactive terminal to approve updating it"
+                "remote superherdr server on {target} needs one final update before this client can attach; run from an interactive terminal to approve updating it"
             )));
         }
 
         eprintln!(
-            "remote herdr server on {target} is still running v{}; it will use {} after it restarts.",
+            "remote superherdr server on {target} is still running v{}; it will use {} after it restarts.",
             version_label(version),
             current_version()
         );
         return Ok(false);
     }
 
-    eprintln!("remote herdr server on {target} is currently running:");
+    eprintln!("remote superherdr server on {target} is currently running:");
     eprintln!("  server: v{}", version_label(version));
     eprintln!("  prepared binary: {}", current_version());
     eprintln!();
@@ -1393,7 +1392,7 @@ fn confirm_remote_server_stop(
         }
         RemoteServerRestartReason::DaemonDetach => {
             eprintln!(
-                "the remote server was started by a herdr build that may not survive SSH connection loss. restart it so network drops disconnect only this client."
+                "the remote server was started by a superherdr build that may not survive SSH connection loss. restart it so network drops disconnect only this client."
             );
         }
     }
@@ -1413,7 +1412,7 @@ fn confirm_remote_server_stop(
     if required_upgrade {
         return Err(io::Error::new(
             io::ErrorKind::Interrupted,
-            "remote herdr server stop cancelled",
+            "remote superherdr server stop cancelled",
         ));
     }
 
@@ -1438,15 +1437,17 @@ fn remote_live_handoff_command(
 
 fn live_handoff_remote_server(ssh: &RemoteSsh, remote_herdr: &RemoteHerdr) -> io::Result<()> {
     let status = remote_client_status(ssh, remote_herdr)?.ok_or_else(|| {
-        io::Error::other("could not inspect the prepared remote herdr binary before live handoff")
+        io::Error::other(
+            "could not inspect the prepared remote superherdr binary before live handoff",
+        )
     })?;
     let protocol = status.protocol.ok_or_else(|| {
-        io::Error::other("prepared remote herdr did not report its private protocol")
+        io::Error::other("prepared remote superherdr did not report its private protocol")
     })?;
     let version = status
         .version
         .filter(|version| !version.is_empty())
-        .ok_or_else(|| io::Error::other("prepared remote herdr did not report its version"))?;
+        .ok_or_else(|| io::Error::other("prepared remote superherdr did not report its version"))?;
     let command = remote_live_handoff_command(remote_herdr, &ssh.session_name, protocol, &version);
     let output = ssh.sh_output(&command)?;
     if !output.status.success() {
@@ -1454,7 +1455,7 @@ fn live_handoff_remote_server(ssh: &RemoteSsh, remote_herdr: &RemoteHerdr) -> io
     }
 
     eprintln!(
-        "handed off the remote herdr server on {}; reconnecting to the prepared server.",
+        "handed off the remote superherdr server on {}; reconnecting to the prepared server.",
         ssh.target()
     );
     Ok(())
@@ -1469,7 +1470,7 @@ fn stop_remote_server(ssh: &RemoteSsh, remote_herdr: &RemoteHerdr) -> io::Result
 
     wait_for_remote_server_shutdown(ssh, remote_herdr)?;
     eprintln!(
-        "stopped the remote herdr server on {}; it will restart when the remote client bridge attaches.",
+        "stopped the remote superherdr server on {}; it will restart when the remote client bridge attaches.",
         ssh.target()
     );
     Ok(())
@@ -1485,7 +1486,7 @@ fn wait_for_remote_server_shutdown(ssh: &RemoteSsh, remote_herdr: &RemoteHerdr) 
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
                 format!(
-                    "shutdown was requested, but the old remote herdr server on {target} is still responding after {} seconds",
+                    "shutdown was requested, but the old remote superherdr server on {target} is still responding after {} seconds",
                     REMOTE_SERVER_SHUTDOWN_CONFIRM_TIMEOUT.as_secs(),
                     target = ssh.target()
                 ),
@@ -1500,7 +1501,7 @@ fn version_label(version: Option<&str>) -> &str {
 }
 
 fn warn_if_remote_bin_not_on_path(ssh: &RemoteSsh) -> io::Result<()> {
-    let output = ssh.user_shell_output("command -v herdr")?;
+    let output = ssh.user_shell_output("command -v superherdr")?;
     if output.status.success()
         && remote_shell_resolves_managed_install(&String::from_utf8_lossy(&output.stdout))
     {
@@ -1508,7 +1509,7 @@ fn warn_if_remote_bin_not_on_path(ssh: &RemoteSsh) -> io::Result<()> {
     }
 
     eprintln!(
-        "herdr: installed remote binary to ~/.local/bin/herdr, but the remote shell does not resolve `herdr` to that path"
+        "superherdr: installed remote binary to ~/.local/bin/superherdr, but the remote shell does not resolve `superherdr` to that path"
     );
     Ok(())
 }
@@ -1518,15 +1519,18 @@ fn remote_shell_resolves_managed_install(stdout: &str) -> bool {
         .lines()
         .next()
         .map(str::trim)
-        .is_some_and(|path| path.ends_with("/.local/bin/herdr"))
+        .is_some_and(|path| path.ends_with("/.local/bin/superherdr"))
 }
 
 fn download_release_asset(platform: &RemotePlatform) -> io::Result<InstallSource> {
+    if env!("CARGO_PKG_NAME") == "superherdr" {
+        return Err(io::Error::other("Superherdr has no published remote binaries; set HERDR_REMOTE_BINARY to a Superherdr build for the remote platform"));
+    }
     let asset_key = platform.asset_key();
     let asset = remote_release_asset(&asset_key)?;
 
     let dir = private_download_dir(&asset_key)?;
-    let path = dir.join("herdr.tmp");
+    let path = dir.join("superherdr.tmp");
     let status = crate::noninteractive_process::curl_command()
         .args(["-sfL", "--max-time", "120", "-o"])
         .arg(&path)
@@ -1586,7 +1590,7 @@ fn preview_assets_for_build<'a>(
     }
     let build = manifest.builds.get(build_id).ok_or_else(|| {
         io::Error::other(format!(
-            "preview manifest no longer includes build {build_id}; run `herdr update` locally or set {REMOTE_BINARY_ENV_VAR}=target/release/herdr"
+            "preview manifest no longer includes build {build_id}; run `superherdr update` locally or set {REMOTE_BINARY_ENV_VAR}=target/release/superherdr"
         ))
     })?;
     Ok((build.protocol, &build.assets))
@@ -1605,7 +1609,7 @@ fn remote_release_asset(asset_key: &str) -> io::Result<RemoteReleaseAsset> {
         let (protocol, assets) = preview_assets_for_build(&manifest, build_id)?;
         if protocol != CURRENT_PROTOCOL {
             return Err(io::Error::other(format!(
-                "preview manifest has build {build_id} protocol {protocol}, but this client needs protocol {CURRENT_PROTOCOL}; set {REMOTE_BINARY_ENV_VAR}=target/release/herdr or install a matching Herdr on the remote host manually"
+                "preview manifest has build {build_id} protocol {protocol}, but this client needs protocol {CURRENT_PROTOCOL}; set {REMOTE_BINARY_ENV_VAR}=target/release/superherdr or install a matching Herdr on the remote host manually"
             )));
         }
         return assets.get(asset_key).map(remote_asset_info).ok_or_else(|| {
@@ -1621,20 +1625,20 @@ fn remote_release_asset(asset_key: &str) -> io::Result<RemoteReleaseAsset> {
         .map_err(|err| io::Error::other(format!("failed to parse update manifest JSON: {err}")))?;
     let release = manifest.release_for_version(&current_version).ok_or_else(|| {
         io::Error::other(format!(
-            "release manifest does not include herdr {current_version}; build herdr for {} or install it there manually",
+            "release manifest does not include superherdr {current_version}; build superherdr for {} or install it there manually",
             asset_key
         ))
     })?;
     if let Some(protocol) = release.protocol {
         if protocol != CURRENT_PROTOCOL {
             return Err(io::Error::other(format!(
-                "release manifest has herdr {current_version} protocol {protocol}, but this client needs protocol {CURRENT_PROTOCOL}; set {REMOTE_BINARY_ENV_VAR}=target/release/herdr or install a matching herdr on the remote host manually"
+                "release manifest has superherdr {current_version} protocol {protocol}, but this client needs protocol {CURRENT_PROTOCOL}; set {REMOTE_BINARY_ENV_VAR}=target/release/superherdr or install a matching superherdr on the remote host manually"
             )));
         }
     }
     let asset = release.assets.get(asset_key).ok_or_else(|| {
         io::Error::other(format!(
-            "no {asset_key} binary in the release manifest for herdr {current_version}"
+            "no {asset_key} binary in the release manifest for superherdr {current_version}"
         ))
     })?;
     let mut asset = remote_asset_info(asset);
@@ -1654,7 +1658,7 @@ fn private_download_dir(asset_key: &str) -> io::Result<PathBuf> {
     fs::create_dir_all(&base)?;
     for attempt in 0..100 {
         let dir = base.join(format!(
-            "herdr-remote-{}-{}-{attempt}",
+            "superherdr-remote-{}-{}-{attempt}",
             std::process::id(),
             asset_key
         ));
@@ -1667,7 +1671,7 @@ fn private_download_dir(asset_key: &str) -> io::Result<PathBuf> {
 
     Err(io::Error::new(
         io::ErrorKind::AlreadyExists,
-        "failed to create private herdr remote download directory",
+        "failed to create private superherdr remote download directory",
     ))
 }
 
@@ -1697,14 +1701,14 @@ fn confirm_remote_install(
 ) -> io::Result<()> {
     if !io::stdin().is_terminal() {
         return Err(io::Error::other(format!(
-            "matching remote herdr {} is not installed at {}; run from an interactive terminal to approve installation",
+            "matching remote superherdr {} is not installed at {}; run from an interactive terminal to approve installation",
             current_version(),
             remote_herdr.shell_path
         )));
     }
 
     eprintln!(
-        "matching herdr {} is not installed on {target} for {}.",
+        "matching superherdr {} is not installed on {target} for {}.",
         current_version(),
         remote_herdr.platform.asset_key()
     );
@@ -1717,7 +1721,7 @@ fn confirm_remote_install(
     if !read_remote_confirmation(&mut io::stdin().lock(), true)? {
         return Err(io::Error::new(
             io::ErrorKind::Interrupted,
-            "remote herdr installation cancelled",
+            "remote superherdr installation cancelled",
         ));
     }
 
@@ -1837,7 +1841,7 @@ impl SshStdioBridge {
                             if noninteractive {
                                 tracing::warn!(error = %err, "saved SSH endpoint bridge failed");
                             } else {
-                                eprintln!("herdr: remote bridge failed: {err}");
+                                eprintln!("superherdr: remote bridge failed: {err}");
                             }
                         }
                     }
@@ -1848,7 +1852,7 @@ impl SshStdioBridge {
                         if noninteractive {
                             tracing::warn!(error = %err, "saved SSH endpoint listener failed");
                         } else {
-                            eprintln!("herdr: remote bridge listener failed: {err}");
+                            eprintln!("superherdr: remote bridge listener failed: {err}");
                         }
                         break;
                     }
@@ -2252,7 +2256,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let socket = std::env::temp_dir().join(format!(
-            "herdr-bridge-permissions-test-{}.sock",
+            "superherdr-bridge-permissions-test-{}.sock",
             std::process::id()
         ));
         let remote_herdr = RemoteHerdr::for_platform(RemotePlatform {
@@ -2292,7 +2296,7 @@ mod tests {
         }
 
         let socket = std::env::temp_dir().join(format!(
-            "herdr-bridge-blocking-test-{}.sock",
+            "superherdr-bridge-blocking-test-{}.sock",
             std::process::id()
         ));
         let _ = std::fs::remove_file(&socket);
@@ -2350,7 +2354,7 @@ mod tests {
             .expect("Unix managed config has a control path");
         let contents = std::fs::read_to_string(&path).expect("read keepalive config");
 
-        // herdr's fallback transport settings are present...
+        // superherdr's fallback transport settings are present...
         assert!(
             contents.contains("Host *"),
             "config should add a Host * fallback block: {contents}"
@@ -2379,7 +2383,7 @@ mod tests {
                 let fallback_at = contents.find("Host *").expect("fallback present");
                 assert!(
                     include_at < fallback_at,
-                    "user config must be Included before herdr's fallback: {contents}"
+                    "user config must be Included before superherdr's fallback: {contents}"
                 );
             }
         }
@@ -2560,7 +2564,7 @@ mod tests {
 
     #[test]
     fn saved_machine_server_commands_are_scoped_to_the_explicit_session() {
-        let herdr =
+        let superherdr =
             RemoteHerdr::for_platform(RemotePlatform::from_uname("Linux", "x86_64").unwrap());
         for command in [
             "status server --json",
@@ -2568,18 +2572,18 @@ mod tests {
             "remote-client-bridge",
         ] {
             assert_eq!(
-                remote_session_command(&herdr, "agents", command),
-                format!("{} --session agents {command}", herdr.shell_path)
+                remote_session_command(&superherdr, "agents", command),
+                format!("{} --session agents {command}", superherdr.shell_path)
             );
             assert_eq!(
-                remote_session_command(&herdr, crate::session::DEFAULT_SESSION_NAME, command),
-                format!("{} {command}", herdr.shell_path)
+                remote_session_command(&superherdr, crate::session::DEFAULT_SESSION_NAME, command),
+                format!("{} {command}", superherdr.shell_path)
             );
         }
         assert!(
-            remote_live_handoff_command(&herdr, "agents", 19, "0.7.9").starts_with(&format!(
+            remote_live_handoff_command(&superherdr, "agents", 19, "0.7.9").starts_with(&format!(
                 "{} --session agents server live-handoff",
-                herdr.shell_path
+                superherdr.shell_path
             ))
         );
     }
@@ -2604,9 +2608,9 @@ mod tests {
 
     #[test]
     fn remote_install_stream_command_avoids_shell_c_wrapper() {
-        let command = remote_install_stream_command("/home/a b/.local/bin/herdr.tmp.123");
+        let command = remote_install_stream_command("/home/a b/.local/bin/superherdr.tmp.123");
 
-        assert_eq!(command, "tee '/home/a b/.local/bin/herdr.tmp.123'");
+        assert_eq!(command, "tee '/home/a b/.local/bin/superherdr.tmp.123'");
     }
 
     #[test]
@@ -2620,35 +2624,37 @@ mod tests {
         assert!(prepare.contains("mkdir -p \"$dir\""));
         assert!(prepare.contains("printf '%s\\0%s\\0' \"$tmp\" \"$dest\""));
         assert_eq!(
-            parse_remote_install_paths(b"/home/a b/herdr.tmp.42\0/home/a b/herdr\0").unwrap(),
+            parse_remote_install_paths(b"/home/a b/superherdr.tmp.42\0/home/a b/superherdr\0")
+                .unwrap(),
             (
-                "/home/a b/herdr.tmp.42".to_string(),
-                "/home/a b/herdr".to_string()
+                "/home/a b/superherdr.tmp.42".to_string(),
+                "/home/a b/superherdr".to_string()
             )
         );
         assert_eq!(
-            parse_remote_install_paths(b"/home/a b\n/herdr.tmp.42\0/home/a b\n/herdr\0").unwrap(),
+            parse_remote_install_paths(b"/home/a b\n/superherdr.tmp.42\0/home/a b\n/superherdr\0")
+                .unwrap(),
             (
-                "/home/a b\n/herdr.tmp.42".to_string(),
-                "/home/a b\n/herdr".to_string()
+                "/home/a b\n/superherdr.tmp.42".to_string(),
+                "/home/a b\n/superherdr".to_string()
             )
         );
         assert_eq!(
-            remote_install_commit_script("/home/a b/herdr.tmp.42", "/home/a b/herdr"),
-            "set -eu\nchmod 755 '/home/a b/herdr.tmp.42'\nmv '/home/a b/herdr.tmp.42' '/home/a b/herdr'\n"
+            remote_install_commit_script("/home/a b/superherdr.tmp.42", "/home/a b/superherdr"),
+            "set -eu\nchmod 755 '/home/a b/superherdr.tmp.42'\nmv '/home/a b/superherdr.tmp.42' '/home/a b/superherdr'\n"
         );
     }
 
     #[test]
     fn extract_remote_args_removes_space_form() {
         let args = vec![
-            "herdr".into(),
+            "superherdr".into(),
             "--remote".into(),
             "dev".into(),
             "--help".into(),
         ];
         let (cleaned, remote) = extract_remote_args(&args).unwrap();
-        assert_eq!(cleaned, vec!["herdr", "--help"]);
+        assert_eq!(cleaned, vec!["superherdr", "--help"]);
         let remote = remote.unwrap();
         assert_eq!(remote.target, "dev");
         assert_eq!(remote.keybindings, RemoteKeybindings::Local);
@@ -2656,9 +2662,9 @@ mod tests {
 
     #[test]
     fn extract_remote_args_removes_equals_form() {
-        let args = vec!["herdr".into(), "--remote=user@host".into()];
+        let args = vec!["superherdr".into(), "--remote=user@host".into()];
         let (cleaned, remote) = extract_remote_args(&args).unwrap();
-        assert_eq!(cleaned, vec!["herdr"]);
+        assert_eq!(cleaned, vec!["superherdr"]);
         let remote = remote.unwrap();
         assert_eq!(remote.target, "user@host");
         assert_eq!(remote.keybindings, RemoteKeybindings::Local);
@@ -2667,13 +2673,13 @@ mod tests {
     #[test]
     fn extract_remote_args_accepts_remote_keybindings_server() {
         let args = vec![
-            "herdr".into(),
+            "superherdr".into(),
             "--remote".into(),
             "dev".into(),
             "--remote-keybindings=server".into(),
         ];
         let (cleaned, remote) = extract_remote_args(&args).unwrap();
-        assert_eq!(cleaned, vec!["herdr"]);
+        assert_eq!(cleaned, vec!["superherdr"]);
         let remote = remote.unwrap();
         assert_eq!(remote.target, "dev");
         assert_eq!(remote.keybindings, RemoteKeybindings::Server);
@@ -2682,23 +2688,27 @@ mod tests {
     #[test]
     fn extract_remote_args_accepts_remote_keybindings_space_form() {
         let args = vec![
-            "herdr".into(),
+            "superherdr".into(),
             "--remote=dev".into(),
             "--remote-keybindings".into(),
             "server".into(),
         ];
         let (cleaned, remote) = extract_remote_args(&args).unwrap();
-        assert_eq!(cleaned, vec!["herdr"]);
+        assert_eq!(cleaned, vec!["superherdr"]);
         assert_eq!(remote.unwrap().keybindings, RemoteKeybindings::Server);
     }
 
     #[test]
     fn extract_remote_args_accepts_explicit_handoff() {
-        let args = vec!["herdr".into(), "--remote=dev".into(), "--handoff".into()];
+        let args = vec![
+            "superherdr".into(),
+            "--remote=dev".into(),
+            "--handoff".into(),
+        ];
 
         let (cleaned, remote) = extract_remote_args(&args).unwrap();
 
-        assert_eq!(cleaned, vec!["herdr"]);
+        assert_eq!(cleaned, vec!["superherdr"]);
         let remote = remote.unwrap();
         assert_eq!(remote.target, "dev");
         assert!(remote.live_handoff);
@@ -2707,7 +2717,7 @@ mod tests {
     #[test]
     fn extract_remote_args_preserves_child_remote_options_after_separator() {
         let args = vec![
-            "herdr".into(),
+            "superherdr".into(),
             "agent".into(),
             "start".into(),
             "repro".into(),
@@ -2727,7 +2737,7 @@ mod tests {
 
     #[test]
     fn extract_remote_args_preserves_handoff_without_remote() {
-        let args = vec!["herdr".into(), "update".into(), "--handoff".into()];
+        let args = vec!["superherdr".into(), "update".into(), "--handoff".into()];
 
         let (cleaned, remote) = extract_remote_args(&args).unwrap();
 
@@ -2737,7 +2747,7 @@ mod tests {
 
     #[test]
     fn extract_remote_args_rejects_remote_keybindings_without_remote() {
-        let args = vec!["herdr".into(), "--remote-keybindings=server".into()];
+        let args = vec!["superherdr".into(), "--remote-keybindings=server".into()];
         let err = extract_remote_args(&args).unwrap_err();
         assert_eq!(err, "--remote-keybindings requires --remote");
     }
@@ -2745,7 +2755,7 @@ mod tests {
     #[test]
     fn extract_remote_args_rejects_duplicate_remote_keybindings() {
         let args = vec![
-            "herdr".into(),
+            "superherdr".into(),
             "--remote=dev".into(),
             "--remote-keybindings=local".into(),
             "--remote-keybindings=server".into(),
@@ -2756,14 +2766,14 @@ mod tests {
 
     #[test]
     fn extract_remote_args_requires_value() {
-        let args = vec!["herdr".into(), "--remote".into()];
+        let args = vec!["superherdr".into(), "--remote".into()];
         let err = extract_remote_args(&args).unwrap_err();
         assert_eq!(err, "missing value for --remote");
     }
 
     #[test]
     fn extract_remote_args_rejects_empty_value() {
-        let args = vec!["herdr".into(), "--remote=".into()];
+        let args = vec!["superherdr".into(), "--remote=".into()];
         let err = extract_remote_args(&args).unwrap_err();
         assert_eq!(err, "missing value for --remote");
     }
@@ -2771,7 +2781,7 @@ mod tests {
     #[test]
     fn extract_remote_args_rejects_duplicate_values() {
         let args = vec![
-            "herdr".into(),
+            "superherdr".into(),
             "--remote=dev".into(),
             "--remote=prod".into(),
         ];
@@ -2781,7 +2791,11 @@ mod tests {
 
     #[test]
     fn extract_remote_args_rejects_option_like_target() {
-        let args = vec!["herdr".into(), "--remote".into(), "-oProxyCommand=x".into()];
+        let args = vec![
+            "superherdr".into(),
+            "--remote".into(),
+            "-oProxyCommand=x".into(),
+        ];
         let err = extract_remote_args(&args).unwrap_err();
         assert_eq!(err, "--remote target must not start with '-'");
     }
@@ -2813,43 +2827,43 @@ mod tests {
     fn reattach_command_includes_remote_and_session() {
         assert_eq!(
             reattach_command(
-                "target/release/herdr",
+                "target/release/superherdr",
                 "user@host",
                 "work",
                 RemoteKeybindings::Local,
                 false,
             ),
-            "target/release/herdr --remote user@host --session work"
+            "target/release/superherdr --remote user@host --session work"
         );
         assert_eq!(
             reattach_command(
-                "herdr",
+                "superherdr",
                 "host name",
                 crate::session::DEFAULT_SESSION_NAME,
                 RemoteKeybindings::Local,
                 false,
             ),
-            "herdr --remote 'host name'"
+            "superherdr --remote 'host name'"
         );
         assert_eq!(
             reattach_command(
-                "herdr",
+                "superherdr",
                 "host",
                 crate::session::DEFAULT_SESSION_NAME,
                 RemoteKeybindings::Server,
                 false,
             ),
-            "herdr --remote host --remote-keybindings server"
+            "superherdr --remote host --remote-keybindings server"
         );
         assert_eq!(
             reattach_command(
-                "herdr",
+                "superherdr",
                 "host",
                 crate::session::DEFAULT_SESSION_NAME,
                 RemoteKeybindings::Local,
                 true,
             ),
-            "herdr --remote host --handoff"
+            "superherdr --remote host --handoff"
         );
     }
 
@@ -2859,7 +2873,7 @@ mod tests {
         let executable = std::env::current_exe().expect("current test executable");
         assert_eq!(
             reattach_command(
-                r"C:\Program Files\Herdr\herdr.exe",
+                r"C:\Program Files\Herdr\superherdr.exe",
                 "host'name",
                 "work'name",
                 RemoteKeybindings::Local,
@@ -2880,7 +2894,7 @@ mod tests {
         });
         assert_eq!(
             remote_bridge_command(&remote_herdr, crate::session::DEFAULT_SESSION_NAME),
-            "exec \"$HOME/.local/bin/herdr\" remote-client-bridge"
+            "exec \"$HOME/.local/bin/superherdr\" remote-client-bridge"
         );
     }
 
@@ -2890,12 +2904,12 @@ mod tests {
             os: "linux",
             arch: "x86_64",
         });
-        let remote_herdr = remote_herdr_from_path_discovery(&remote_herdr, "/usr/bin/herdr\n")
+        let remote_herdr = remote_herdr_from_path_discovery(&remote_herdr, "/usr/bin/superherdr\n")
             .expect("path binary");
 
         assert_eq!(
             remote_bridge_command(&remote_herdr, crate::session::DEFAULT_SESSION_NAME),
-            "exec /usr/bin/herdr remote-client-bridge"
+            "exec /usr/bin/superherdr remote-client-bridge"
         );
     }
 
@@ -2906,12 +2920,12 @@ mod tests {
             arch: "x86_64",
         });
         let remote_herdr =
-            remote_herdr_from_path_discovery(&remote_herdr, "/opt/herdr bin/herdr\n")
+            remote_herdr_from_path_discovery(&remote_herdr, "/opt/superherdr bin/superherdr\n")
                 .expect("path binary");
 
         assert_eq!(
             remote_bridge_command(&remote_herdr, crate::session::DEFAULT_SESSION_NAME),
-            "exec '/opt/herdr bin/herdr' remote-client-bridge"
+            "exec '/opt/superherdr bin/superherdr' remote-client-bridge"
         );
     }
 
@@ -2922,12 +2936,12 @@ mod tests {
             arch: "aarch64",
         });
         let remote_herdr =
-            remote_herdr_from_path_discovery(&remote_herdr, "/opt/homebrew/bin/herdr\n")
+            remote_herdr_from_path_discovery(&remote_herdr, "/opt/homebrew/bin/superherdr\n")
                 .expect("path binary");
 
         assert_eq!(
             remote_bridge_command(&remote_herdr, crate::session::DEFAULT_SESSION_NAME),
-            "exec /opt/homebrew/bin/herdr remote-client-bridge"
+            "exec /opt/homebrew/bin/superherdr remote-client-bridge"
         );
         assert_eq!(remote_herdr.platform.asset_key(), "macos-aarch64");
     }
@@ -2940,12 +2954,12 @@ mod tests {
         });
         let candidates = remote_herdrs_from_path_discovery(
             &remote_herdr,
-            "/usr/bin/herdr\nbin/herdr\n /opt/herdr bin/herdr\n",
+            "/usr/bin/superherdr\nbin/superherdr\n /opt/superherdr bin/superherdr\n",
         );
 
         assert_eq!(candidates.len(), 2);
-        assert_eq!(candidates[0].shell_path, "/usr/bin/herdr");
-        assert_eq!(candidates[1].shell_path, "'/opt/herdr bin/herdr'");
+        assert_eq!(candidates[0].shell_path, "/usr/bin/superherdr");
+        assert_eq!(candidates[1].shell_path, "'/opt/superherdr bin/superherdr'");
     }
 
     #[test]
@@ -2956,13 +2970,13 @@ mod tests {
         });
         let candidates = remote_herdrs_from_path_discovery(
             &remote_herdr,
-            "/home/can/.local/share/mise/shims/herdr\n/home/can/.local/share/mise/installs/herdr/0.7.1/bin/herdr\n",
+            "/home/can/.local/share/mise/shims/superherdr\n/home/can/.local/share/mise/installs/superherdr/0.7.1/bin/superherdr\n",
         );
 
         assert_eq!(candidates.len(), 1);
         assert_eq!(
             candidates[0].shell_path,
-            "/home/can/.local/share/mise/installs/herdr/0.7.1/bin/herdr"
+            "/home/can/.local/share/mise/installs/superherdr/0.7.1/bin/superherdr"
         );
     }
 
@@ -2973,21 +2987,20 @@ mod tests {
             arch: "x86_64",
         });
 
-        assert!(script.contains("emit \"$home/.local/bin/herdr\""));
-        assert!(!script.contains("mise/shims/herdr"));
+        assert!(script.contains("emit \"$home/.local/bin/superherdr\""));
+        assert!(!script.contains("mise/shims/superherdr"));
         assert!(script.contains(&format!("version={}", shell_quote(&current_version()))));
-        assert!(
-            script.contains("emit \"$home/.local/share/mise/installs/herdr/$version/bin/herdr\"")
-        );
-        assert!(script.contains("emit \"$home/.local/share/mise/installs/herdr/$version/herdr\""));
         assert!(script.contains(
-            "emit \"$home/.local/share/mise/installs/github-ogulcancelik-herdr/$version/herdr\""
+            "emit \"$home/.local/share/mise/installs/superherdr/$version/bin/superherdr\""
         ));
-        assert!(script.contains("emit \"$home/.nix-profile/bin/herdr\""));
-        assert!(script.contains("emit \"/etc/profiles/per-user/$user/bin/herdr\""));
-        assert!(script.contains("emit \"/run/current-system/sw/bin/herdr\""));
-        assert!(script.contains("emit \"/home/linuxbrew/.linuxbrew/bin/herdr\""));
-        assert!(!script.contains("emit \"/opt/homebrew/bin/herdr\""));
+        assert!(script
+            .contains("emit \"$home/.local/share/mise/installs/superherdr/$version/superherdr\""));
+        assert!(!script.contains("github-ogulcancelik-herdr"));
+        assert!(script.contains("emit \"$home/.nix-profile/bin/superherdr\""));
+        assert!(script.contains("emit \"/etc/profiles/per-user/$user/bin/superherdr\""));
+        assert!(script.contains("emit \"/run/current-system/sw/bin/superherdr\""));
+        assert!(script.contains("emit \"/home/linuxbrew/.linuxbrew/bin/superherdr\""));
+        assert!(!script.contains("emit \"/opt/homebrew/bin/superherdr\""));
     }
 
     #[test]
@@ -2997,9 +3010,9 @@ mod tests {
             arch: "aarch64",
         });
 
-        assert!(script.contains("emit \"/opt/homebrew/bin/herdr\""));
-        assert!(script.contains("emit \"/usr/local/bin/herdr\""));
-        assert!(!script.contains("emit \"/home/linuxbrew/.linuxbrew/bin/herdr\""));
+        assert!(script.contains("emit \"/opt/homebrew/bin/superherdr\""));
+        assert!(script.contains("emit \"/usr/local/bin/superherdr\""));
+        assert!(!script.contains("emit \"/home/linuxbrew/.linuxbrew/bin/superherdr\""));
     }
 
     #[test]
@@ -3009,12 +3022,12 @@ mod tests {
             arch: "x86_64",
         });
         let remote_herdr =
-            remote_herdr_from_path_discovery(&remote_herdr, "/opt/herdr's/bin/herdr\n")
+            remote_herdr_from_path_discovery(&remote_herdr, "/opt/superherdr's/bin/superherdr\n")
                 .expect("path binary");
 
         assert_eq!(
             remote_bridge_command(&remote_herdr, crate::session::DEFAULT_SESSION_NAME),
-            "exec '/opt/herdr'\\''s/bin/herdr' remote-client-bridge"
+            "exec '/opt/superherdr'\\''s/bin/superherdr' remote-client-bridge"
         );
     }
 
@@ -3024,7 +3037,7 @@ mod tests {
             os: "linux",
             arch: "x86_64",
         });
-        let remote_herdr = remote_herdr_from_path_discovery(&remote_herdr, "bin/herdr\n");
+        let remote_herdr = remote_herdr_from_path_discovery(&remote_herdr, "bin/superherdr\n");
 
         assert!(remote_herdr.is_none());
     }
@@ -3043,13 +3056,13 @@ mod tests {
     #[test]
     fn remote_shell_path_warning_accepts_managed_install() {
         assert!(remote_shell_resolves_managed_install(
-            "/home/can/.local/bin/herdr\n"
+            "/home/can/.local/bin/superherdr\n"
         ));
         assert!(remote_shell_resolves_managed_install(
-            "/Users/can/.local/bin/herdr\n"
+            "/Users/can/.local/bin/superherdr\n"
         ));
         assert!(!remote_shell_resolves_managed_install(
-            "/usr/local/bin/herdr\n"
+            "/usr/local/bin/superherdr\n"
         ));
         assert!(!remote_shell_resolves_managed_install(""));
     }
@@ -3360,8 +3373,12 @@ mod tests {
             arch: "aarch64",
         };
         assert_eq!(
-            install_source_description_for(&platform, Some(Path::new("/tmp/herdr-aarch64")), false),
-            "HERDR_REMOTE_BINARY (/tmp/herdr-aarch64)"
+            install_source_description_for(
+                &platform,
+                Some(Path::new("/tmp/superherdr-aarch64")),
+                false
+            ),
+            "HERDR_REMOTE_BINARY (/tmp/superherdr-aarch64)"
         );
     }
 
@@ -3371,7 +3388,7 @@ mod tests {
 
         assert_eq!(
             install_source_description_for(&platform, None, true),
-            "the current local herdr binary"
+            "the current local superherdr binary"
         );
     }
 
@@ -3396,9 +3413,10 @@ mod tests {
             os: "linux",
             arch: "aarch64",
         };
-        let source = resolve_install_source(&platform, Some(PathBuf::from("/tmp/herdr-aarch64")))
-            .expect("override source");
-        assert_eq!(source.path, PathBuf::from("/tmp/herdr-aarch64"));
+        let source =
+            resolve_install_source(&platform, Some(PathBuf::from("/tmp/superherdr-aarch64")))
+                .expect("override source");
+        assert_eq!(source.path, PathBuf::from("/tmp/superherdr-aarch64"));
         assert!(source.temporary_dir.is_none());
     }
 
@@ -3504,12 +3522,12 @@ mod tests {
     #[test]
     fn install_source_cleanup_removes_temporary_directory() {
         let dir = std::env::temp_dir().join(format!(
-            "herdr-install-source-cleanup-test-{}",
+            "superherdr-install-source-cleanup-test-{}",
             std::process::id()
         ));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir(&dir).expect("create temp dir");
-        let path = dir.join("herdr.tmp");
+        let path = dir.join("superherdr.tmp");
         fs::write(&path, b"test").expect("write temp file");
 
         InstallSource::temporary(path, dir.clone()).cleanup();

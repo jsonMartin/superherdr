@@ -47,7 +47,7 @@ ci filter='all()': lint
 [unix]
 windows-lint:
     rustup target add x86_64-pc-windows-msvc
-    LIBGHOSTTY_VT_SIMD=false cargo clippy --bin herdr --locked --target x86_64-pc-windows-msvc -- -D warnings
+    LIBGHOSTTY_VT_SIMD=false cargo clippy --bin superherdr --locked --target x86_64-pc-windows-msvc -- -D warnings
 
 # Check formatting + run unit tests + Windows target lint + documentation contract tests
 [unix]
@@ -73,12 +73,12 @@ build:
 
 # Non-gating full-render scaling profile for background workspaces and active panes
 bench-render-scale:
-    cargo test --release --locked --bin herdr render_scale_profile -- --ignored --nocapture --test-threads=1
+    cargo test --release --locked --bin superherdr render_scale_profile -- --ignored --nocapture --test-threads=1
 
 # ~3-5 minute CPU comparison; downloads stable unless HERDR_PERF_BASELINE_BIN is set
 bench-release-smoke:
     cargo build --release --locked
-    scripts/release_perf_smoke.sh "${CARGO_TARGET_DIR:-target}/release/herdr"
+    scripts/release_perf_smoke.sh "${CARGO_TARGET_DIR:-target}/release/superherdr"
 
 # Test public documentation snapshot and release lifecycle tooling
 docs-contract-test:
@@ -142,8 +142,8 @@ pre-release-check:
     just bench-render-scale
     just bench-release-smoke
     @echo "release review required: investigate material render-scaling regressions before publishing."
-    @echo "release review required: update skills/herdr/SKILL.md for this stable release so it matches the current CLI, IDs, agent lifecycle semantics, and safety guidance."
-    @echo "release policy: do not update skills/herdr/SKILL.md between stable releases; preview builds keep the latest stable skill."
+    @echo "release review required: update skills/superherdr/SKILL.md for this stable release so it matches the current CLI, IDs, agent lifecycle semantics, and safety guidance."
+    @echo "release policy: do not update skills/superherdr/SKILL.md between stable releases; preview builds keep the latest stable skill."
 
 # Prepare the release commit without tagging or pushing (usage: just release-prepare 0.1.1)
 release-prepare version:
@@ -151,10 +151,10 @@ release-prepare version:
         echo "error: version must look like 0.6.6 without a v prefix"; \
         exit 1; \
     }
-    @if ! git diff --quiet -- . ':(exclude)skills/herdr/SKILL.md' || \
-        ! git diff --cached --quiet -- . ':(exclude)skills/herdr/SKILL.md' || \
+    @if ! git diff --quiet -- . ':(exclude)skills/superherdr/SKILL.md' || \
+        ! git diff --cached --quiet -- . ':(exclude)skills/superherdr/SKILL.md' || \
         [ -n "$(git ls-files --others --exclude-standard)" ]; then \
-        echo "error: commit all changes except skills/herdr/SKILL.md first"; \
+        echo "error: commit all changes except skills/superherdr/SKILL.md first"; \
         exit 1; \
     fi
     @git fetch origin master --tags
@@ -166,9 +166,9 @@ release-prepare version:
     python3 scripts/changelog.py prepare --version {{version}}
     cp CHANGELOG.md docs/next/CHANGELOG.md
     sed -i.bak 's/^version = ".*"/version = "{{version}}"/' Cargo.toml && rm -f Cargo.toml.bak
-    cargo update -p herdr --offline
+    cargo update -p superherdr --offline
     just check
-    git add CHANGELOG.md docs/next/CHANGELOG.md Cargo.toml Cargo.lock skills/herdr/SKILL.md
+    git add CHANGELOG.md docs/next/CHANGELOG.md Cargo.toml Cargo.lock skills/superherdr/SKILL.md
     git diff --cached --quiet || git commit -m "release: v{{version}}"
     @echo "v{{version}} release commit prepared. Review it, then run: just release-publish {{version}}"
 
