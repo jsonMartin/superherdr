@@ -15,3 +15,5 @@ Superherdr 0.1.0 is the first Superherdr release candidate. It is not yet publis
 - A matching Superherdr remote installation for SSH needs a separately prepared build for the remote platform; upstream installers install Herdr, not Superherdr.
 - Existing plugins retain the Herdr 0.9.0 compatibility level; Superherdr release numbers are separate.
 - `HERDR_*` environment variables, socket names, and protocol identifiers retain their inherited names for compatibility.
+
+The owned release repository is [jsonmartin/superherdr](https://github.com/jsonmartin/superherdr), and the shared Homebrew formula is staged in [jsonmartin/homebrew-tap](https://github.com/jsonmartin/homebrew-tap). The release uses `superherdr-v0.1.0` so inherited Herdr tags remain unchanged. Draft assets are not anonymously downloadable; the tap installation command must be verified after publication.

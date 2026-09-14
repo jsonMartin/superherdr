@@ -38,7 +38,7 @@ For SSH, install a matching Superherdr build remotely or provide `HERDR_REMOTE_B
 
 The `HERDR_*` environment variables, socket filenames, integration asset names, API/schema identifiers, and frozen endpoint codecs retain their upstream names for compatibility. Socket files live inside the separate Superherdr directories. Existing upstream detection catalogs and plugin services remain intentional upstream integrations.
 
-[Upstream documentation](https://herdr.dev/docs/) describes the inherited behavior; use `superherdr` for command examples and the project’s directories above. Historical release snapshots, changelogs, distribution payloads, and the upstream stable skill remain upstream reference material, not Superherdr releases. No Superherdr GitHub destination or hosted installer has been established.
+[Upstream documentation](https://herdr.dev/docs/) describes the inherited behavior; use `superherdr` for command examples and the project’s directories above. Historical release snapshots, changelogs, distribution payloads, and the upstream stable skill remain upstream reference material, not Superherdr releases. The project lives at [jsonmartin/superherdr](https://github.com/jsonmartin/superherdr). The [Homebrew tap](https://github.com/jsonmartin/homebrew-tap) is being prepared; no public Superherdr release or hosted installer is available yet.
 
 ## Development
 
