@@ -6,7 +6,7 @@ Focus shows the project or workspace you want to work on in one client. Snooze h
 
 ## Install from this checkout
 
-Superherdr does not yet have a published package or release feed. The upstream Herdr installers install Herdr, not Superherdr.
+Superherdr does not yet have a published package or release feed. The upstream Herdr installers install Herdr, not Superherdr. Release-candidate preparation for 0.1.0 is described in [docs/next/superherdr-0.1.0.md](docs/next/superherdr-0.1.0.md).
 
 With Rust and Zig 0.15.2 installed, run from the source checkout:
 

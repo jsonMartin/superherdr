@@ -241,15 +241,19 @@ fn validate_min_herdr_version(value: Option<&str>) -> Result<String, (&'static s
             "invalid_plugin_min_herdr_version",
             format!(
                 "plugin min_herdr_version must be a semantic version like {}",
-                crate::build_info::BASE_VERSION
+                crate::build_info::HERDR_PLUGIN_COMPATIBILITY_VERSION
             ),
         )
     })?;
-    let current = crate::update::Version::current();
-    if required > current {
+    let compatible =
+        crate::update::Version::parse(crate::build_info::HERDR_PLUGIN_COMPATIBILITY_VERSION)
+            .expect("invalid HERDR_PLUGIN_COMPATIBILITY_VERSION");
+    if required > compatible {
         return Err((
             "plugin_requires_newer_herdr",
-            format!("plugin requires Herdr {required} or newer; current Herdr is {current}"),
+            format!(
+                "plugin requires Herdr {required} or newer; Superherdr supports Herdr plugin requirements up to {compatible}"
+            ),
         ));
     }
     Ok(required.to_string())

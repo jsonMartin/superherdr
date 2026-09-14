@@ -2,13 +2,13 @@
 
 Superherdr is an open-source terminal project built on [Herdr](https://github.com/herdrdev/herdr) with built-in Focus and Snooze. It tracks upstream Herdr and keeps its native terminal runtime, agent status detection, CLI, and socket API.
 
-Focus shows the project or workspace you want to work on in one client. Snooze hides a project or workspace across clients until its wake time, without stopping its terminals. See the [accepted Focus/Snooze behavior](docs/next/focus-snooze-fork.md).
+Focus shows the project or workspace you want to work on in one client. Snooze hides a project or workspace across clients until its wake time, without stopping its terminals. See the [accepted Focus/Snooze behavior](focus-snooze-fork.md).
 
 The [All / Top-level Agents toggle](top-level-agents.md) hides linked-worktree agents while keeping their parent agents and standalone workspaces visible.
 
 ## Install from this checkout
 
-Superherdr does not yet have a published package or release feed. The upstream Herdr installers install Herdr, not Superherdr.
+Superherdr does not yet have a published package or release feed. The upstream Herdr installers install Herdr, not Superherdr. Release-candidate preparation for 0.1.0 is described in [superherdr-0.1.0.md](superherdr-0.1.0.md).
 
 With Rust and Zig 0.15.2 installed, run from the source checkout:
 

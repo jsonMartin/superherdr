@@ -13,7 +13,11 @@ fn renamed_cli_is_isolated_and_cannot_install_upstream_updates() {
     };
     let version = run(&["--version"]);
     assert!(version.status.success());
-    assert!(String::from_utf8_lossy(&version.stdout).starts_with("superherdr "));
+    let expected = format!("superherdr {}", env!("CARGO_PKG_VERSION"));
+    let output = String::from_utf8_lossy(&version.stdout);
+    let suffix = output.trim_end().strip_prefix(&expected).unwrap();
+    // Preview builds append a channel suffix to the same package version.
+    assert!(suffix.is_empty() || suffix.starts_with('-'));
 
     let help = run(&["--help"]);
     assert!(help.status.success());

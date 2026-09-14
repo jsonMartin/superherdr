@@ -2,6 +2,9 @@
 
 pub const BASE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+// Plugin requirements track inherited Herdr capabilities, not Superherdr release numbers.
+pub const HERDR_PLUGIN_COMPATIBILITY_VERSION: &str = "0.9.0";
+
 pub fn channel() -> &'static str {
     non_empty(option_env!("HERDR_BUILD_CHANNEL")).unwrap_or("stable")
 }
