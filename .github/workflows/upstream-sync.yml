@@ -1,0 +1,97 @@
+name: Upstream sync
+
+# Checks daily for a new Herdr release and opens a pull request that merges it
+# with scripts/sync_upstream.sh. Pull requests opened with the default token do
+# not start other workflows; set the UPSTREAM_SYNC_TOKEN secret (a fine-grained
+# token with contents and pull-request write access) so CI runs on sync PRs.
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Herdr release tag to merge (default: latest)"
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN || github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.UPSTREAM_SYNC_TOKEN || github.token }}
+
+      - name: Find release
+        id: release
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          tag="${INPUT_TAG:-$(scripts/sync_upstream.sh --latest)}"
+          branch="upstream-sync/$tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "A sync branch for $tag already exists."
+          fi
+
+      - name: Merge release
+        if: steps.release.outputs.skip != 'true'
+        id: merge
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          BRANCH: ${{ steps.release.outputs.branch }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          status=0
+          scripts/sync_upstream.sh "$TAG" --report "$RUNNER_TEMP/report.md" || status=$?
+          if [ "$status" -eq 0 ] && [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ]; then
+            echo "Nothing to merge."
+            exit 0
+          fi
+          if [ "$status" -eq 2 ]; then
+            git add -A
+            git commit --quiet -m "chore(upstream): merge herdr $TAG with conflicts"
+            echo "draft=true" >> "$GITHUB_OUTPUT"
+          elif [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
+          git push origin "$BRANCH"
+          echo "opened=true" >> "$GITHUB_OUTPUT"
+
+      - name: Open pull request
+        if: steps.merge.outputs.opened == 'true'
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          BRANCH: ${{ steps.release.outputs.branch }}
+          DRAFT: ${{ steps.merge.outputs.draft }}
+        run: |
+          {
+            cat "$RUNNER_TEMP/report.md"
+            echo
+            echo "Merge this pull request with **Create a merge commit**. Squash or rebase merges drop the upstream ancestry and make the next sync re-conflict."
+            echo
+            if [ "$DRAFT" = "true" ]; then
+              echo "This branch contains conflict markers. Resolve them on the branch before review."
+            fi
+          } > "$RUNNER_TEMP/body.md"
+          draft_flag=()
+          if [ "$DRAFT" = "true" ]; then draft_flag=(--draft); fi
+          gh pr create --base main --head "$BRANCH" \
+            --title "chore(upstream): merge herdr $TAG" \
+            --body-file "$RUNNER_TEMP/body.md" "${draft_flag[@]}"

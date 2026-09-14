@@ -1,0 +1,39 @@
+# Paths removed from Superherdr on purpose. `just sync-upstream` drops them when
+# an upstream Herdr release modifies or re-adds them, and CI fails if they return.
+# One git pathspec per line; a trailing slash covers a directory.
+.agents/
+.github/APPROVED_CONTRIBUTORS
+.github/DISCUSSION_TEMPLATE/
+.github/ISSUE_TEMPLATE/translation.yml
+.github/MAINTAINERS
+.github/workflows/build-artifacts-manual.yml
+.github/workflows/label-next-release-issues.yml
+.github/workflows/pr-gate.yml
+.github/workflows/preview.yml
+.github/workflows/release.yml
+.github/workflows/website-deploy.yml
+.github/workflows/windows-arm64.yml
+.pi/
+assets/sponsors/
+distribution/agent-guide.md
+docs/next/CHANGELOG.md
+docs/next/product-announcement.json
+docs/next/README.md
+docs/next/README.zh-CN.md
+docs/next/website/
+docs/preview/
+docs/versions/
+README.zh-CN.md
+scripts/changelog.py
+scripts/config_reference_check.py
+scripts/docs/
+scripts/docs_translation_parity.py
+scripts/preview.py
+scripts/test_changelog.py
+scripts/test_config_reference_check.py
+scripts/test_docs_translation_parity.py
+scripts/test_preview.py
+scripts/windows_arm64_installer_test.ps1
+skills/herdr/
+SPONSORS.md
+workers/plugin-marketplace/
