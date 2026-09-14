@@ -25,7 +25,7 @@ fn agent_wait_accepts_repeated_until_and_exits_when_one_status_matches() {
 
     let inherited_path = std::env::var("PATH").unwrap_or_default();
     let path_override = format!("{}:{}", bin_dir.display(), inherited_path);
-    let superherdr = spawn_herdr_with_path(
+    let herdr = spawn_herdr_with_path(
         &config_home,
         &runtime_dir,
         &socket_path,

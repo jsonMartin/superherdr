@@ -373,7 +373,7 @@ fn status_commands_report_client_and_server_versions() {
     let runtime_dir = base.join("runtime");
     let socket_path = runtime_dir.join("herdr.sock");
 
-    let superherdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
     wait_for_socket(&socket_path, Duration::from_secs(5));
 
     let full = run_cli(&socket_path, &["status"]);
@@ -534,7 +534,7 @@ fn server_stop_command_shuts_down_running_server() {
     let socket_path = runtime_dir.join("herdr.sock");
     let client_socket = runtime_dir.join("herdr-client.sock");
 
-    let mut superherdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    let mut herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
     wait_for_socket(&socket_path, Duration::from_secs(5));
     wait_for_socket(&client_socket, Duration::from_secs(5));
 
@@ -575,7 +575,7 @@ fn server_stop_then_restart_restores_pane_history() {
     let client_socket = runtime_dir.join("herdr-client.sock");
     let marker = "PERSISTED_HISTORY_AFTER_STOP";
 
-    let mut superherdr = spawn_herdr_with_pane_history(&config_home, &runtime_dir, &socket_path);
+    let mut herdr = spawn_herdr_with_pane_history(&config_home, &runtime_dir, &socket_path);
     wait_for_socket(&socket_path, Duration::from_secs(5));
     wait_for_socket(&client_socket, Duration::from_secs(5));
 
@@ -679,7 +679,7 @@ fn server_start_restores_legacy_session_through_api_identity() {
         .replace("/tmp/herdr", herdr_cwd);
     fs::write(data_dir.join("session.json"), legacy_session).unwrap();
 
-    let superherdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
+    let herdr = spawn_herdr(&config_home, &runtime_dir, &socket_path);
     wait_for_socket(&socket_path, Duration::from_secs(5));
     wait_for_socket(&client_socket, Duration::from_secs(5));
 
