@@ -141,11 +141,7 @@ pub(crate) fn remote_bridge_endpoint_path(readable_name: &str, short_name: &str)
 }
 
 pub(crate) fn remote_reattach_program(program: &str) -> String {
-    shell_quote(if program.is_empty() {
-        "superherdr"
-    } else {
-        program
-    })
+    shell_quote(if program.is_empty() { "herdr" } else { program })
 }
 
 pub(crate) fn remote_reattach_argument(value: &str) -> String {

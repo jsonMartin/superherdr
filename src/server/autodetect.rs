@@ -270,7 +270,7 @@ pub fn wait_for_server_socket(socket_path: &Path, timeout: Duration) -> io::Resu
     Err(io::Error::new(
         io::ErrorKind::TimedOut,
         format!(
-            "server did not become ready within {}s (socket: {}). The background server may still be starting; try `superherdr` again, or check {}",
+            "server did not become ready within {}s (socket: {}). The background server may still be starting; try `herdr` again, or check {}",
             timeout.as_secs(),
             socket_path.display(),
             crate::session::data_dir().join("herdr-server.log").display()
@@ -583,11 +583,11 @@ test "$sid" = "$$"
             "unexpected error: {message}"
         );
         assert!(
-            message.contains("Run `superherdr session stop work`"),
+            message.contains("Run `herdr session stop work`"),
             "unexpected error: {message}"
         );
         assert!(
-            message.contains("then run `superherdr session attach work` again"),
+            message.contains("then run `herdr session attach work` again"),
             "unexpected error: {message}"
         );
         std::env::remove_var("XDG_CONFIG_HOME");

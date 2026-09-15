@@ -728,6 +728,7 @@ fn success_response_round_trips() {
                 surface_interest: true,
                 health_check: true,
             }),
+            superherdr_version: Some("0.1.2.1".into()),
         },
     };
 

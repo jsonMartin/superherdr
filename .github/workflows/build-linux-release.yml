@@ -50,8 +50,11 @@ jobs:
 
       - name: Verify static binary
         run: |
-          bin="target/$TARGET/release/superherdr"
-          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          bin="target/$TARGET/release/herdr"
+          base="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          revision="$(sed -n 's/^pub const SUPERHERDR_REVISION: u32 = \([0-9][0-9]*\);/\1/p' src/build_info.rs)"
+          test -n "$base" && test -n "$revision"
+          version="$base.$revision"
           file "$bin"
           # Capture output first so an early-exiting grep cannot hide a match behind SIGPIPE.
           readelf -l "$bin" > program-headers.txt
@@ -60,24 +63,24 @@ jobs:
           if grep -q INTERP program-headers.txt; then echo "unexpected program interpreter" >&2; exit 1; fi
           if grep -q NEEDED dynamic-section.txt; then echo "unexpected shared library dependency" >&2; exit 1; fi
           if grep -q 'GLIBC_[0-9]' strings.txt; then echo "unexpected glibc symbol version" >&2; exit 1; fi
-          test "$("$bin" --version)" = "superherdr $version"
+          test "$("$bin" --version)" = "herdr $base (superherdr $version)"
           "$bin" status client --json | tee status.json
           grep -q '"channel":"stable"' status.json
           echo "VERSION=$version" >> "$GITHUB_ENV"
 
       - name: Smoke test server and PTY roundtrip
         run: |
-          bin="$PWD/target/$TARGET/release/superherdr"
+          bin="$PWD/target/$TARGET/release/herdr"
           tmp="$(mktemp -d)"
           export XDG_CONFIG_HOME="$tmp/config" XDG_RUNTIME_DIR="$tmp/run"
-          mkdir -p "$XDG_CONFIG_HOME/superherdr" "$XDG_RUNTIME_DIR"
+          mkdir -p "$XDG_CONFIG_HOME/herdr" "$XDG_RUNTIME_DIR"
           chmod 700 "$XDG_RUNTIME_DIR"
-          echo 'onboarding = false' > "$XDG_CONFIG_HOME/superherdr/config.toml"
+          echo 'onboarding = false' > "$XDG_CONFIG_HOME/herdr/config.toml"
           unset HERDR_SOCKET_PATH HERDR_CLIENT_SOCKET_PATH HERDR_ENV
           "$bin" --session smoke server > "$tmp/server.log" 2>&1 &
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true' EXIT
-          export HERDR_SOCKET_PATH="$XDG_CONFIG_HOME/superherdr/sessions/smoke/herdr.sock"
+          export HERDR_SOCKET_PATH="$XDG_CONFIG_HOME/herdr/sessions/smoke/herdr.sock"
           for _ in $(seq 100); do [ -S "$HERDR_SOCKET_PATH" ] && break; sleep 0.2; done
           test -S "$HERDR_SOCKET_PATH" || { cat "$tmp/server.log"; exit 1; }
           "$bin" workspace create --cwd "$tmp" > "$tmp/created.json"
@@ -96,11 +99,11 @@ jobs:
           name="superherdr-$VERSION-linux-x86_64"
           stage="$RUNNER_TEMP/$name"
           mkdir -p "$stage/licenses"
-          cp "target/$TARGET/release/superherdr" "$stage/superherdr"
+          cp "target/$TARGET/release/herdr" "$stage/herdr"
           cp LICENSE "$stage/LICENSE"
           cp vendor/libghostty-vt/LICENSE "$stage/licenses/libghostty-vt-LICENSE"
           cp vendor/portable-pty/LICENSE.md "$stage/licenses/portable-pty-LICENSE.md"
-          tar -C "$stage" -czf "$name.tar.gz" superherdr LICENSE licenses
+          tar -C "$stage" -czf "$name.tar.gz" herdr LICENSE licenses
           sha256sum "$name.tar.gz" | tee "$name.tar.gz.sha256"
           echo "COMMIT=$(git rev-parse HEAD)" | tee -a "$GITHUB_STEP_SUMMARY"
 

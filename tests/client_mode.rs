@@ -122,7 +122,7 @@ fn spawn_client_process_with_args_and_env(
         })
         .unwrap();
 
-    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_superherdr"));
+    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_herdr"));
     cmd.args(args);
     cmd.env("HERDR_DISABLE_SOUND", "1");
     cmd.env("XDG_STATE_HOME", runtime_dir.join("state"));
@@ -182,7 +182,7 @@ fn spawn_server_with_config(
         })
         .unwrap();
 
-    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_superherdr"));
+    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_herdr"));
     cmd.arg("server");
     cmd.env("XDG_CONFIG_HOME", config_home);
     cmd.env("XDG_RUNTIME_DIR", runtime_dir);
@@ -244,9 +244,9 @@ fn first_pane_id_in_workspace(socket_path: &PathBuf, workspace_id: &str) -> Stri
 
 fn app_dir_name() -> &'static str {
     if cfg!(debug_assertions) {
-        "superherdr-dev"
+        "herdr-dev"
     } else {
-        "superherdr"
+        "herdr"
     }
 }
 
@@ -405,9 +405,9 @@ fn client_sees_headless_startup_config_diagnostic() {
     let client_socket = runtime_dir.join("herdr-client.sock");
 
     let app_dir = if cfg!(debug_assertions) {
-        "superherdr-dev"
+        "herdr-dev"
     } else {
-        "superherdr"
+        "herdr"
     };
     fs::create_dir_all(config_home.join(app_dir)).unwrap();
     fs::write(
@@ -427,7 +427,7 @@ fn client_sees_headless_startup_config_diagnostic() {
         })
         .unwrap();
 
-    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_superherdr"));
+    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_herdr"));
     cmd.arg("server");
     cmd.env("XDG_CONFIG_HOME", &config_home);
     cmd.env("XDG_RUNTIME_DIR", &runtime_dir);
@@ -459,7 +459,7 @@ fn client_sees_headless_startup_config_diagnostic() {
     assert!(
         wait_until(Duration::from_secs(8), Duration::from_millis(20), || {
             let output = read_output(&output);
-            output.contains("config.toml") && output.contains("superherdr config check")
+            output.contains("config.toml") && output.contains("herdr config check")
         }),
         "client shell should render startup config diagnostic; output: {:?}",
         read_output(&output)
@@ -488,7 +488,7 @@ fn server_unreachable_shows_clear_error() {
     )
     .unwrap();
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_superherdr"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_herdr"))
         .arg("client")
         .env("HERDR_DISABLE_SOUND", "1")
         .env("XDG_CONFIG_HOME", &config_home)
@@ -510,7 +510,7 @@ fn server_unreachable_shows_clear_error() {
         "stderr should mention connection failure: {stderr}"
     );
     assert!(
-        stderr.contains("Is superherdr server running?"),
+        stderr.contains("Is herdr server running?"),
         "stderr should include actionable guidance: {stderr}"
     );
     assert!(
@@ -879,7 +879,7 @@ fn federated_client_starts_without_local_and_survives_its_restart() {
     let bin = base.join("bin");
     fs::create_dir_all(&bin).unwrap();
     fs::create_dir_all(base.join("home")).unwrap();
-    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_superherdr"), bin.join("superherdr")).unwrap();
+    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_herdr"), bin.join("herdr")).unwrap();
     let quote =
         |path: &std::path::Path| format!("'{}'", path.display().to_string().replace('\'', "'\\''"));
     fs::write(bin.join("ssh"), format!(
@@ -1781,7 +1781,7 @@ fn client_receives_notify_on_agent_state_change() {
         })
         .unwrap();
 
-    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_superherdr"));
+    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_herdr"));
     cmd.arg("server");
     cmd.env("XDG_CONFIG_HOME", &config_home);
     cmd.env("XDG_RUNTIME_DIR", &runtime_dir);

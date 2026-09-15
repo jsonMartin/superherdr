@@ -67,7 +67,7 @@
       apps = forAllSystems (system: {
         default = {
           type = "app";
-          program = "${self.packages.${system}.default}/bin/superherdr";
+          program = "${self.packages.${system}.default}/bin/herdr";
           meta.description = "Run Superherdr";
         };
       });

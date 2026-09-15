@@ -48,7 +48,7 @@ rustPlatform.buildRustPackage {
         ../build.rs
         ../Cargo.lock
         ../Cargo.toml
-        ../skills/superherdr/SKILL.md
+        ../skills/herdr/SKILL.md
       ]
     );
   };
@@ -83,7 +83,7 @@ rustPlatform.buildRustPackage {
     description = "Terminal workspace manager for AI coding agents";
     homepage = "https://herdr.dev";
     license = lib.licenses.asl20;
-    mainProgram = "superherdr";
+    mainProgram = "herdr";
     platforms = lib.platforms.linux ++ lib.platforms.darwin;
   };
 }

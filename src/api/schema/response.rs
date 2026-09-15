@@ -47,6 +47,9 @@ pub enum ResponseResult {
         protocol: u32,
         #[serde(default)]
         capabilities: Option<ServerCapabilities>,
+        /// Four-part Superherdr version; absent from Herdr servers.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        superherdr_version: Option<String>,
     },
     SessionSnapshot {
         snapshot: Box<SessionSnapshot>,

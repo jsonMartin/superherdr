@@ -6,7 +6,7 @@ mod completion;
 mod machine;
 
 pub(super) fn command() -> Command {
-    let command = Command::new("superherdr")
+    let command = Command::new("herdr")
         .about("terminal workspace manager for AI coding agents")
         .disable_help_flag(true)
         .disable_version_flag(true)
@@ -91,7 +91,7 @@ fn write_requested_help(
     let mut root = command();
     root.build();
     let mut selected = &mut root;
-    let mut path = vec!["superherdr".to_string()];
+    let mut path = vec!["herdr".to_string()];
     for segment in &args[1..help_index] {
         if selected.find_subcommand(segment).is_none() {
             break;
@@ -321,7 +321,7 @@ fn agent_command() -> Command {
         .subcommand(
             Command::new("read")
                 .about("Read agent terminal output")
-                .override_usage("superherdr agent read <TARGET> [OPTIONS]")
+                .override_usage("herdr agent read <TARGET> [OPTIONS]")
                 .arg(required("target", "TARGET"))
                 .arg(read_source_option(true))
                 .arg(option("lines", "N"))
@@ -338,7 +338,7 @@ fn agent_command() -> Command {
         .subcommand(
             Command::new("prompt")
                 .about("Submit a prompt to an agent")
-                .override_usage("superherdr agent prompt <TARGET> <TEXT> [OPTIONS]")
+                .override_usage("herdr agent prompt <TARGET> <TEXT> [OPTIONS]")
                 .arg(required("target", "TARGET"))
                 .arg(required("text", "TEXT"))
                 .arg(
@@ -364,7 +364,7 @@ fn agent_command() -> Command {
         .subcommand(
             Command::new("rename")
                 .about("Rename an agent")
-                .override_usage("superherdr agent rename <TARGET> <NAME>|--clear")
+                .override_usage("herdr agent rename <TARGET> <NAME>|--clear")
                 .arg(required("target", "TARGET"))
                 .arg(Arg::new("name").value_name("NAME"))
                 .arg(flag("clear"))
@@ -378,7 +378,7 @@ fn agent_command() -> Command {
         .subcommand(
             Command::new("wait")
                 .about("Wait until an agent reaches one of the requested states")
-                .override_usage("superherdr agent wait <TARGET> [OPTIONS]")
+                .override_usage("herdr agent wait <TARGET> [OPTIONS]")
                 .arg(required("target", "TARGET"))
                 .arg(
                     option("until", "STATUS")
@@ -394,7 +394,7 @@ fn agent_command() -> Command {
         .subcommand(
             Command::new("attach")
                 .about("Attach directly to an agent terminal")
-                .override_usage("superherdr agent attach <TARGET> [OPTIONS]")
+                .override_usage("herdr agent attach <TARGET> [OPTIONS]")
                 .arg(required("target", "TARGET"))
                 .arg(flag("takeover")),
         )
@@ -402,7 +402,7 @@ fn agent_command() -> Command {
             Command::new("start")
                 .about("Start a supported interactive agent in an existing pane")
                 .override_usage(
-                    "superherdr agent start <NAME> --kind <KIND> --pane <ID> [OPTIONS] [-- [AGENT_ARG]...]",
+                    "herdr agent start <NAME> --kind <KIND> --pane <ID> [OPTIONS] [-- [AGENT_ARG]...]",
                 )
                 .arg(required("name", "NAME"))
                 .arg(
@@ -427,7 +427,7 @@ fn agent_command() -> Command {
                         .last(true),
                 )
                 .after_help(
-                    "The pane must be at its interactive shell prompt. Success means the expected agent was detected in the same terminal and is ready for input.\n\nnext: superherdr agent prompt <TARGET> <TEXT> --wait",
+                    "The pane must be at its interactive shell prompt. Success means the expected agent was detected in the same terminal and is ready for input.\n\nnext: herdr agent prompt <TARGET> <TEXT> --wait",
                 ),
         )
         .subcommand(
@@ -583,7 +583,7 @@ fn pane_command() -> Command {
                 .arg(required("pane_id", "PANE_ID"))
                 .arg(required("text", "TEXT"))
                 .after_help(
-                    "next: superherdr pane run <PANE_ID> <COMMAND> sends text and Enter in one call",
+                    "next: herdr pane run <PANE_ID> <COMMAND> sends text and Enter in one call",
                 ),
         )
         .subcommand(
@@ -1077,19 +1077,19 @@ mod tests {
 
         for path in paths {
             for flag in ["-h", "--help"] {
-                let mut args = vec!["superherdr".to_string()];
+                let mut args = vec!["herdr".to_string()];
                 args.extend(path.iter().cloned());
                 args.push(flag.to_string());
                 let mut output = Vec::new();
                 assert!(
                     super::write_requested_help(&args, &mut output, || {}).unwrap(),
-                    "help was not handled for superherdr {} {flag}",
+                    "help was not handled for herdr {} {flag}",
                     path.join(" ")
                 );
                 let output = String::from_utf8(output).unwrap();
                 assert!(
-                    output.contains(&format!("Usage: superherdr {}", path.join(" "))),
-                    "unexpected help for superherdr {}: {output}",
+                    output.contains(&format!("Usage: herdr {}", path.join(" "))),
+                    "unexpected help for herdr {}: {output}",
                     path.join(" ")
                 );
             }
@@ -1152,7 +1152,7 @@ mod tests {
             for option in options {
                 assert!(
                     option_arg(&cmd, option).is_required_set(),
-                    "superherdr {} --{option} should be required",
+                    "herdr {} --{option} should be required",
                     path.join(" ")
                 );
             }
@@ -1201,7 +1201,7 @@ mod tests {
         .unwrap();
         assert!(String::from_utf8(help)
             .unwrap()
-            .contains("Usage: superherdr agent rename <TARGET> <NAME>|--clear"));
+            .contains("Usage: herdr agent rename <TARGET> <NAME>|--clear"));
     }
 
     #[test]
@@ -1211,7 +1211,7 @@ mod tests {
             let worktree_command = command_path(&cmd, &["worktree", subcommand]);
             assert!(
                 !has_option(worktree_command, "json"),
-                "superherdr worktree {subcommand} should not advertise --json"
+                "herdr worktree {subcommand} should not advertise --json"
             );
         }
     }
@@ -1299,13 +1299,13 @@ mod tests {
     }
 
     fn long_help(path: &[&str]) -> String {
-        let mut args = vec!["superherdr".to_string()];
+        let mut args = vec!["herdr".to_string()];
         args.extend(path.iter().map(|segment| segment.to_string()));
         args.push("--help".to_string());
         let mut output = Vec::new();
         assert!(
             super::write_requested_help(&args, &mut output, || {}).unwrap(),
-            "help was not handled for superherdr {}",
+            "help was not handled for herdr {}",
             path.join(" ")
         );
         String::from_utf8(output).unwrap()
@@ -1317,7 +1317,7 @@ mod tests {
             let help = long_help(&[group]);
             assert!(
                 help.contains(super::super::AGENT_HELP_FOOTER),
-                "superherdr {group} is missing agent resources: {help}"
+                "herdr {group} is missing agent resources: {help}"
             );
         }
 
@@ -1336,14 +1336,14 @@ mod tests {
             "agent start dropped its existing after_help: {agent_start}"
         );
         assert!(
-            agent_start.contains("next: superherdr agent prompt <TARGET> <TEXT> --wait"),
+            agent_start.contains("next: herdr agent prompt <TARGET> <TEXT> --wait"),
             "agent start is missing its next-step hint: {agent_start}"
         );
 
         let pane_send_text = long_help(&["pane", "send-text"]);
         assert!(
             pane_send_text.contains(
-                "next: superherdr pane run <PANE_ID> <COMMAND> sends text and Enter in one call"
+                "next: herdr pane run <PANE_ID> <COMMAND> sends text and Enter in one call"
             ),
             "pane send-text is missing its next-step hint: {pane_send_text}"
         );
@@ -1360,7 +1360,7 @@ mod tests {
         ] {
             let mut cmd = super::command();
             let mut output = Vec::new();
-            clap_complete::generate(shell, &mut cmd, "superherdr", &mut output);
+            clap_complete::generate(shell, &mut cmd, "herdr", &mut output);
             assert!(!output.is_empty(), "empty {shell:?} completion output");
         }
     }

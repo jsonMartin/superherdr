@@ -34,16 +34,12 @@ fn parse_status_args(args: &[String]) -> Option<(StatusScope, bool)> {
     match args.first().map(|arg| arg.as_str()) {
         None => Some((StatusScope::Full, false)),
         Some("--json") if args.len() == 1 => Some((StatusScope::Full, true)),
-        Some("server") => parse_status_scope_args(
-            args,
-            StatusScope::Server,
-            "superherdr status server [--json]",
-        ),
-        Some("client") => parse_status_scope_args(
-            args,
-            StatusScope::Client,
-            "superherdr status client [--json]",
-        ),
+        Some("server") => {
+            parse_status_scope_args(args, StatusScope::Server, "herdr status server [--json]")
+        }
+        Some("client") => {
+            parse_status_scope_args(args, StatusScope::Client, "herdr status client [--json]")
+        }
         Some("help" | "--help" | "-h") => {
             if args.len() > 1 {
                 print_status_help();
@@ -79,6 +75,7 @@ enum ServerRuntimeStatus {
         version: Option<String>,
         protocol: Option<u32>,
         capabilities: Option<crate::api::schema::ServerCapabilities>,
+        superherdr_version: Option<String>,
     },
     NotRunning,
 }
@@ -97,6 +94,10 @@ fn print_full_status(json: bool) -> std::io::Result<i32> {
 
     println!("client:");
     println!("  version: {}", crate::build_info::version());
+    println!(
+        "  superherdr_version: {}",
+        crate::build_info::superherdr_version()
+    );
     println!(
         "  channel: {}",
         crate::config::Config::load().config.update.channel.as_str()
@@ -138,6 +139,10 @@ fn print_client_status(json: bool) -> std::io::Result<()> {
 
     println!("version: {}", crate::build_info::version());
     println!(
+        "superherdr_version: {}",
+        crate::build_info::superherdr_version()
+    );
+    println!(
         "channel: {}",
         crate::config::Config::load().config.update.channel.as_str()
     );
@@ -156,9 +161,14 @@ fn print_server_status_body(server: &ServerRuntimeStatus, indent: &str) {
             version,
             protocol,
             capabilities,
+            superherdr_version,
         } => {
             println!("{indent}status: running");
             println!("{indent}version: {}", option_label(version.as_deref()));
+            println!(
+                "{indent}superherdr_version: {}",
+                option_label(superherdr_version.as_deref())
+            );
             println!(
                 "{indent}endpoint_compatible: {}",
                 endpoint_compatibility_label(capabilities.as_ref())
@@ -183,6 +193,7 @@ fn read_server_runtime_status() -> std::io::Result<ServerRuntimeStatus> {
             version: status.version,
             protocol: status.protocol,
             capabilities: status.capabilities,
+            superherdr_version: status.superherdr_version,
         }),
         Err(ApiClientError::Io(err)) if super::server_not_running_error(&err) => {
             Ok(ServerRuntimeStatus::NotRunning)
@@ -262,6 +273,7 @@ struct ClientStatusJson {
     endpoint_capabilities: Vec<&'static str>,
     binary: String,
     session: Option<String>,
+    superherdr_version: String,
 }
 
 #[derive(Serialize)]
@@ -277,6 +289,8 @@ struct ServerStatusJson {
     session: Option<String>,
     restart_needed: Option<bool>,
     server_binary_stale: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    superherdr_version: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -307,6 +321,7 @@ fn client_status_json() -> ClientStatusJson {
         ],
         binary: current_exe_label(),
         session: crate::session::active_name(),
+        superherdr_version: crate::build_info::superherdr_version(),
     }
 }
 
@@ -316,6 +331,7 @@ fn server_status_json(server: &ServerRuntimeStatus) -> ServerStatusJson {
             version,
             protocol,
             capabilities,
+            superherdr_version,
         } => ServerStatusJson {
             status: "running",
             running: true,
@@ -340,6 +356,7 @@ fn server_status_json(server: &ServerRuntimeStatus) -> ServerStatusJson {
             session: crate::session::active_name(),
             restart_needed: restart_needed_bool(server),
             server_binary_stale: server_binary_stale_bool(server),
+            superherdr_version: superherdr_version.clone(),
         },
         ServerRuntimeStatus::NotRunning => ServerStatusJson {
             status: "not_running",
@@ -353,6 +370,7 @@ fn server_status_json(server: &ServerRuntimeStatus) -> ServerStatusJson {
             session: crate::session::active_name(),
             restart_needed: Some(false),
             server_binary_stale: Some(false),
+            superherdr_version: None,
         },
     }
 }
@@ -378,6 +396,12 @@ fn restart_needed_bool(server: &ServerRuntimeStatus) -> Option<bool> {
 
 fn server_binary_stale_bool(server: &ServerRuntimeStatus) -> Option<bool> {
     match server {
+        // Herdr and every Superherdr revision on one base share `version`, so the
+        // revision-bearing field decides when the server reports it.
+        ServerRuntimeStatus::Running {
+            superherdr_version: Some(superherdr_version),
+            ..
+        } => Some(superherdr_version != &crate::build_info::superherdr_version()),
         ServerRuntimeStatus::Running { version, .. } => version
             .as_deref()
             .map(|version| version != crate::build_info::version()),
@@ -397,10 +421,10 @@ fn current_exe_label() -> String {
 }
 
 fn print_status_help() {
-    eprintln!("superherdr status commands:");
-    eprintln!("  superherdr status [--json]         show local client and running server status");
-    eprintln!("  superherdr status server [--json]  show running server status");
-    eprintln!("  superherdr status client [--json]  show local client binary status");
+    eprintln!("herdr status commands:");
+    eprintln!("  herdr status [--json]         show local client and running server status");
+    eprintln!("  herdr status server [--json]  show running server status");
+    eprintln!("  herdr status client [--json]  show local client binary status");
 }
 
 #[cfg(test)]
@@ -413,6 +437,7 @@ mod tests {
     ) -> ServerRuntimeStatus {
         ServerRuntimeStatus::Running {
             version: version.map(str::to_owned),
+            superherdr_version: None,
             protocol: Some(crate::protocol::PROTOCOL_VERSION),
             capabilities: Some(crate::api::schema::ServerCapabilities {
                 live_handoff: true,
@@ -433,6 +458,29 @@ mod tests {
 
         assert_eq!(restart_needed_bool(&server), Some(false));
         assert_eq!(server_binary_stale_bool(&server), Some(true));
+    }
+
+    #[test]
+    fn same_base_different_superherdr_revision_is_stale() {
+        let mut server = running_server(
+            Some(crate::build_info::version().as_str()),
+            Some(crate::protocol::endpoint::ENDPOINT_PROTOCOL_GENERATION),
+        );
+        if let ServerRuntimeStatus::Running {
+            superherdr_version, ..
+        } = &mut server
+        {
+            *superherdr_version = Some(format!("{}.999", crate::build_info::BASE_VERSION));
+        }
+        assert_eq!(server_binary_stale_bool(&server), Some(true));
+
+        if let ServerRuntimeStatus::Running {
+            superherdr_version, ..
+        } = &mut server
+        {
+            *superherdr_version = Some(crate::build_info::superherdr_version());
+        }
+        assert_eq!(server_binary_stale_bool(&server), Some(false));
     }
 
     #[test]

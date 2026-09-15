@@ -32,7 +32,7 @@ const NIX_UPDATE_COMMAND: &str = "update through Nix";
 const MISE_INSTALLS_DIR_ENV: &str = "MISE_INSTALLS_DIR";
 const FAKE_UPDATE_VERSION_ENV: &str = "HERDR_FAKE_UPDATE_VERSION";
 const FAKE_UPDATE_NOTES_VERSION_ENV: &str = "HERDR_FAKE_UPDATE_NOTES_VERSION";
-const DEFAULT_FAKE_UPDATE_NOTES_VERSION: &str = "0.1.0";
+const DEFAULT_FAKE_UPDATE_NOTES_VERSION: &str = "0.9.0.1";
 #[cfg(not(windows))]
 const SERVER_STOP_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(not(windows))]
@@ -1115,7 +1115,7 @@ pub(crate) fn parse_self_update_args(args: &[String]) -> Result<SelfUpdateOption
         match arg.as_str() {
             "--handoff" => options.live_handoff = true,
             "--help" | "-h" => {
-                return Err("usage: superherdr update [--handoff]".to_string());
+                return Err("usage: herdr update [--handoff]".to_string());
             }
             _ => return Err(format!("unknown update option: {arg}")),
         }
@@ -2853,6 +2853,7 @@ mod tests {
         let release = fake_release("0.5.6", Some(4));
         let compatible = crate::api::RuntimeStatus {
             version: Some("0.5.5".to_string()),
+            superherdr_version: None,
             protocol: Some(2),
             capabilities: Some(crate::api::schema::ServerCapabilities {
                 live_handoff: true,
@@ -2927,6 +2928,7 @@ mod tests {
             requires_server_restart: true,
             server: crate::api::RuntimeStatus {
                 version: Some("0.6.2".to_string()),
+                superherdr_version: None,
                 protocol: Some(76),
                 capabilities: Some(crate::api::schema::ServerCapabilities {
                     live_handoff: true,
@@ -3119,6 +3121,7 @@ mod tests {
         crate::session::clear_explicit_session_for_test();
         let server = crate::api::RuntimeStatus {
             version: Some("0.5.5".to_string()),
+            superherdr_version: None,
             protocol: Some(2),
             capabilities: None,
         };
@@ -3185,6 +3188,7 @@ mod tests {
             requires_server_restart: false,
             server: crate::api::RuntimeStatus {
                 version: Some("9.8.6".to_string()),
+                superherdr_version: None,
                 protocol: Some(76),
                 capabilities: Some(crate::api::schema::ServerCapabilities {
                     live_handoff: true,

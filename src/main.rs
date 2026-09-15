@@ -61,8 +61,8 @@ mod update;
 mod workspace;
 mod worktree;
 
-const DEFAULT_CONFIG: &str = r##"# superherdr configuration
-# Place this file at ~/.config/superherdr/config.toml
+const DEFAULT_CONFIG: &str = r##"# herdr configuration
+# Place this file at ~/.config/herdr/config.toml
 
 # Show first-run notification setup on startup.
 # Missing also shows onboarding; set false after you've chosen.
@@ -118,7 +118,7 @@ const DEFAULT_CONFIG: &str = r##"# superherdr configuration
 # kitty_graphics = true
 
 [update]
-# Update channel used by background version checks and `superherdr update`.
+# Update channel used by background version checks and `herdr update`.
 # Stable builds default to "stable". Windows preview builds default to "preview"
 # so existing preview installs stay there until explicitly switched.
 # channel = "stable"
@@ -159,7 +159,7 @@ const DEFAULT_CONFIG: &str = r##"# superherdr configuration
 # previous_agent = ""     # optional, unset by default
 # next_agent = ""         # optional, unset by default
 # focus_agent = ""        # optional indexed binding, e.g. "prefix+alt+1..9"
-# remote_image_paste = "ctrl+v" # only active in superherdr --remote; empty disables raw-key image paste
+# remote_image_paste = "ctrl+v" # only active in herdr --remote; empty disables raw-key image paste
 # new_tab = "prefix+c"
 # rename_tab = "prefix+shift+t"
 # previous_tab = "prefix+p"
@@ -225,7 +225,7 @@ const DEFAULT_CONFIG: &str = r##"# superherdr configuration
 # headless_rows = 40
 
 # [worktrees]
-# directory = "~/.superherdr/worktrees"
+# directory = "~/.herdr/worktrees"
 
 [ui]
 # Sidebar width (auto-scaled based on workspace names, this sets the default)
@@ -393,18 +393,18 @@ const DEFAULT_CONFIG: &str = r##"# superherdr configuration
 # resume_agents_on_restore = true
 
 [remote]
-# Whether superherdr manages the ssh config used for `superherdr --remote`.
-# When true (default), superherdr runs remote ssh through a generated config that
+# Whether herdr manages the ssh config used for `herdr --remote`.
+# When true (default), herdr runs remote ssh through a generated config that
 # includes your ~/.ssh/config first and adds ServerAliveInterval/
 # ServerAliveCountMax as fallbacks (so any keepalive values you set yourself
 # still win) to survive idle network/NAT timeouts. Superherdr also uses a private
 # per-attach OpenSSH control socket to reuse the first authenticated connection.
 # Set false to run plain ssh against your ssh config unchanged — this does not
-# force keepalive or multiplexing off, it only stops superherdr from adding its own.
+# force keepalive or multiplexing off, it only stops herdr from adding its own.
 # manage_ssh_config = true
 
 [experimental]
-# Allow launching superherdr from inside a herdr-managed pane.
+# Allow launching herdr from inside a herdr-managed pane.
 # allow_nested = false
 # Save recent pane screen history across full server restarts.
 pane_history = false
@@ -438,7 +438,7 @@ pane_history = false
 "##;
 
 // Bundled at build time so the printed skill always matches this binary's release.
-const SKILL: &str = include_str!("../skills/superherdr/SKILL.md");
+const SKILL: &str = include_str!("../skills/herdr/SKILL.md");
 
 fn should_block_nested(config: &config::Config) -> bool {
     should_block_nested_for_env(config, std::env::var(HERDR_ENV_VAR).ok().as_deref())
@@ -461,7 +461,7 @@ fn random_nested_message() -> &'static str {
 
 fn exit_if_nested_disabled(config: &config::Config) {
     if should_block_nested(config) {
-        eprintln!("\x1b[1merror:\x1b[0m nested superherdr is disabled by default.");
+        eprintln!("\x1b[1merror:\x1b[0m nested herdr is disabled by default.");
         eprintln!("see configuration if you want to enable it.");
         eprintln!();
         eprintln!("\x1b[2m\"{}\"\x1b[0m", random_nested_message());
@@ -487,7 +487,7 @@ fn main() -> io::Result<()> {
         Ok(args) => args,
         Err(err) => {
             eprintln!("error: {err}");
-            eprintln!("run 'superherdr --help' for usage");
+            eprintln!("run 'herdr --help' for usage");
             std::process::exit(2);
         }
     };
@@ -495,7 +495,7 @@ fn main() -> io::Result<()> {
         Ok(args) => args,
         Err(err) => {
             eprintln!("error: {err}");
-            eprintln!("run 'superherdr --help' for usage");
+            eprintln!("run 'herdr --help' for usage");
             std::process::exit(2);
         }
     };
@@ -503,7 +503,7 @@ fn main() -> io::Result<()> {
         Ok(parsed) => parsed,
         Err(err) => {
             eprintln!("error: {err}");
-            eprintln!("run 'superherdr --help' for usage");
+            eprintln!("run 'herdr --help' for usage");
             std::process::exit(2);
         }
     };
@@ -518,7 +518,7 @@ fn main() -> io::Result<()> {
         })
     {
         eprintln!("error: --remote can only be used with the default launch command");
-        eprintln!("run 'superherdr --help' for usage");
+        eprintln!("run 'herdr --help' for usage");
         std::process::exit(2);
     }
 
@@ -562,7 +562,7 @@ fn main() -> io::Result<()> {
             }
             Err(err) => {
                 eprintln!("{err}");
-                eprintln!("usage: superherdr update [--handoff]");
+                eprintln!("usage: herdr update [--handoff]");
                 std::process::exit(2);
             }
         };
@@ -581,104 +581,92 @@ fn main() -> io::Result<()> {
 
     if args.iter().any(|a| a == "--help" || a == "-h") {
         platform::begin_cli_output();
-        println!("superherdr — terminal workspace manager for AI coding agents");
+        println!("herdr — terminal workspace manager for AI coding agents");
         println!();
-        println!("Usage: superherdr [options]");
-        println!("       superherdr --session <name> [options]");
-        println!("       superherdr --remote <ssh-target> [--session <name>]");
-        println!("       superherdr session attach <name>");
-        println!("       superherdr completion zsh");
-        println!("       superherdr update [--handoff]");
-        println!("       superherdr channel set <stable|preview>");
-        println!("       superherdr machine <subcommand> ...");
-        println!("       superherdr server stop");
-        println!("       superherdr server reload-config");
-        println!("       superherdr api <subcommand> ...");
-        println!("       superherdr completion <shell>");
-        println!("       superherdr config <subcommand> ...");
-        println!("       superherdr channel <subcommand> ...");
-        println!("       superherdr workspace <subcommand> ...");
-        println!("       superherdr worktree <subcommand> ...");
-        println!("       superherdr tab <subcommand> ...");
-        println!("       superherdr notification <subcommand> ...");
-        println!("       superherdr agent <subcommand> ...");
-        println!("       superherdr pane <subcommand> ...");
-        println!("       superherdr session <subcommand> ...");
-        println!("       superherdr integration <subcommand> ...");
+        println!("Usage: herdr [options]");
+        println!("       herdr --session <name> [options]");
+        println!("       herdr --remote <ssh-target> [--session <name>]");
+        println!("       herdr session attach <name>");
+        println!("       herdr completion zsh");
+        println!("       herdr update [--handoff]");
+        println!("       herdr channel set <stable|preview>");
+        println!("       herdr machine <subcommand> ...");
+        println!("       herdr server stop");
+        println!("       herdr server reload-config");
+        println!("       herdr api <subcommand> ...");
+        println!("       herdr completion <shell>");
+        println!("       herdr config <subcommand> ...");
+        println!("       herdr channel <subcommand> ...");
+        println!("       herdr workspace <subcommand> ...");
+        println!("       herdr worktree <subcommand> ...");
+        println!("       herdr tab <subcommand> ...");
+        println!("       herdr notification <subcommand> ...");
+        println!("       herdr agent <subcommand> ...");
+        println!("       herdr pane <subcommand> ...");
+        println!("       herdr session <subcommand> ...");
+        println!("       herdr integration <subcommand> ...");
         println!();
         println!("Common commands:");
         for (command, description) in [
-            ("superherdr", "Launch or attach to the persistent session"),
+            ("herdr", "Launch or attach to the persistent session"),
             (
-                "superherdr status [server|client]",
+                "herdr status [server|client]",
                 "Show local client and running server status",
             ),
+            ("herdr update", "Download and install the latest version"),
+            ("herdr completion zsh", "Generate shell completions for zsh"),
             (
-                "superherdr update",
-                "Download and install the latest version",
-            ),
-            (
-                "superherdr completion zsh",
-                "Generate shell completions for zsh",
-            ),
-            (
-                "superherdr server stop",
+                "herdr server stop",
                 "Stop the running server via the API socket",
             ),
             (
-                "superherdr channel set <stable|preview>",
+                "herdr channel set <stable|preview>",
                 "Choose the stable or preview update channel",
             ),
             (
-                "superherdr server reload-config",
+                "herdr server reload-config",
                 "Reload config.toml in the running server",
             ),
             (
-                "superherdr config reset-keys",
+                "herdr config reset-keys",
                 "Back up config.toml and remove custom keybindings",
             ),
             (
-                "superherdr channel <subcommand>",
+                "herdr channel <subcommand>",
                 "Manage the stable or preview update channel",
             ),
+            ("herdr machine <subcommand>", "Manage saved SSH machines"),
             (
-                "superherdr machine <subcommand>",
-                "Manage saved SSH machines",
-            ),
-            (
-                "superherdr api <subcommand>",
+                "herdr api <subcommand>",
                 "Inspect socket API metadata and live runtime state",
             ),
             (
-                "superherdr workspace <subcommand>",
+                "herdr workspace <subcommand>",
                 "Workspace helpers over the socket API",
             ),
             (
-                "superherdr worktree <subcommand>",
+                "herdr worktree <subcommand>",
                 "Git worktree helpers over the socket API",
             ),
+            ("herdr tab <subcommand>", "Tab helpers over the socket API"),
             (
-                "superherdr tab <subcommand>",
-                "Tab helpers over the socket API",
-            ),
-            (
-                "superherdr notification <subcommand>",
+                "herdr notification <subcommand>",
                 "Notification helpers over the socket API",
             ),
             (
-                "superherdr agent <subcommand>",
+                "herdr agent <subcommand>",
                 "Agent/terminal helpers over the socket API",
             ),
             (
-                "superherdr pane <subcommand>",
+                "herdr pane <subcommand>",
                 "Pane control helpers over the socket API",
             ),
             (
-                "superherdr session <subcommand>",
+                "herdr session <subcommand>",
                 "Manage named persistent sessions",
             ),
             (
-                "superherdr integration <subcommand>",
+                "herdr integration <subcommand>",
                 "Manage built-in agent integrations",
             ),
         ] {
@@ -686,7 +674,7 @@ fn main() -> io::Result<()> {
         }
         println!();
         println!("Advanced commands:");
-        println!("  {:<32} Run as headless server", "superherdr server");
+        println!("  {:<32} Run as headless server", "herdr server");
         println!();
         println!("Options:");
         println!("  --session <name>    Use or create a named persistent session");
@@ -710,7 +698,11 @@ fn main() -> io::Result<()> {
 
     if args.iter().any(|a| a == "--version" || a == "-V") {
         platform::begin_cli_output();
-        println!("superherdr {}", crate::build_info::version());
+        println!(
+            "herdr {} (superherdr {})",
+            crate::build_info::version(),
+            crate::build_info::superherdr_version()
+        );
         return Ok(());
     }
 
@@ -742,7 +734,7 @@ fn main() -> io::Result<()> {
         let arg_name = arg.split_once('=').map(|(name, _)| name).unwrap_or(arg);
         if arg.starts_with('-') && !known_flags.contains(&arg_name) {
             eprintln!("unknown option: {arg}");
-            eprintln!("run 'superherdr --help' for usage");
+            eprintln!("run 'herdr --help' for usage");
             std::process::exit(2);
         }
         if !arg.starts_with('-')
@@ -764,7 +756,7 @@ fn main() -> io::Result<()> {
             .contains(&arg.as_str())
         {
             eprintln!("unknown command: {arg}");
-            eprintln!("run 'superherdr --help' for usage");
+            eprintln!("run 'herdr --help' for usage");
             std::process::exit(2);
         }
     }
@@ -785,7 +777,7 @@ fn main() -> io::Result<()> {
     let saved_federation =
         client::endpoint::EndpointCatalog::load().is_ok_and(|catalog| catalog.has_enabled_ssh());
     if let Err(err) = server::autodetect::auto_detect_launch(saved_federation) {
-        eprintln!("superherdr: {err}");
+        eprintln!("herdr: {err}");
         std::process::exit(1);
     }
     Ok(())
