@@ -1,0 +1,88 @@
+name: Build Linux release
+
+# Manually builds the static Linux x86_64 (musl) release archive for a commit.
+# The maintainer verifies the uploaded artifact and attaches it to the GitHub
+# release; this workflow publishes nothing.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit, branch, or tag to build
+        required: true
+        default: main
+
+permissions:
+  contents: read
+
+env:
+  RUST_TOOLCHAIN_VERSION: 1.96.1
+  TARGET: x86_64-unknown-linux-musl
+
+jobs:
+  linux-musl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
+          targets: ${{ env.TARGET }}
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.15.2
+          use-cache: false
+
+      - name: Build
+        env:
+          HERDR_BUILD_CHANNEL: stable
+          # rustc crashes at the final crate for this target with smaller thread stacks.
+          RUST_MIN_STACK: "268435456"
+        run: cargo build --release --locked --target "$TARGET" -j4
+
+      - name: Verify static binary
+        run: |
+          bin="target/$TARGET/release/superherdr"
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          file "$bin"
+          # Capture output first so an early-exiting grep cannot hide a match behind SIGPIPE.
+          readelf -l "$bin" > program-headers.txt
+          readelf -d "$bin" > dynamic-section.txt
+          strings "$bin" > strings.txt
+          if grep -q INTERP program-headers.txt; then echo "unexpected program interpreter" >&2; exit 1; fi
+          if grep -q NEEDED dynamic-section.txt; then echo "unexpected shared library dependency" >&2; exit 1; fi
+          if grep -q 'GLIBC_[0-9]' strings.txt; then echo "unexpected glibc symbol version" >&2; exit 1; fi
+          test "$("$bin" --version)" = "superherdr $version"
+          "$bin" status client --json | tee status.json
+          grep -q '"channel":"stable"' status.json
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Package
+        run: |
+          name="superherdr-$VERSION-linux-x86_64"
+          stage="$RUNNER_TEMP/$name"
+          mkdir -p "$stage/licenses"
+          cp "target/$TARGET/release/superherdr" "$stage/superherdr"
+          cp LICENSE "$stage/LICENSE"
+          cp vendor/libghostty-vt/LICENSE "$stage/licenses/libghostty-vt-LICENSE"
+          cp vendor/portable-pty/LICENSE.md "$stage/licenses/portable-pty-LICENSE.md"
+          tar -C "$stage" -czf "$name.tar.gz" superherdr LICENSE licenses
+          sha256sum "$name.tar.gz" | tee "$name.tar.gz.sha256"
+          echo "COMMIT=$(git rev-parse HEAD)" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: superherdr-linux-x86_64
+          path: |
+            superherdr-*-linux-x86_64.tar.gz
+            superherdr-*-linux-x86_64.tar.gz.sha256
+          if-no-files-found: error
