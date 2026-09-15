@@ -27,7 +27,7 @@ sh install-superherdr.sh
 herdr
 ```
 
-The installer verifies the release archive checksum and installs `superherdr` plus a `herdr` alias into `~/.local/bin`. It exits without changes if any other `herdr` or `superherdr` is on PATH, including the original Herdr; remove or move that first, or extract the release archive by hand. It also supports macOS Apple Silicon; Linux ARM64, Intel Mac, Windows, and Android/Termux are not supported by these release artifacts. The Linux binary is static and was tested on Arch Linux x86_64. The macOS binary targets macOS 13 and was tested on macOS 27.
+The installer verifies the release archive checksum and installs `superherdr` plus a `herdr` alias into `~/.local/bin`. It exits without changes if any other `herdr` or `superherdr` is on PATH, including the original Herdr; remove or move that first, or extract the release archive by hand. It also supports macOS Apple Silicon; Linux ARM64, Intel Mac, Windows, and Android/Termux are not supported by these release artifacts. The Linux binary is statically linked and was tested on Ubuntu x86_64; an earlier build also ran on Arch Linux. The macOS binary targets macOS 13 and was tested on macOS 27.
 
 ### Build from source
 

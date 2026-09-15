@@ -11,7 +11,7 @@ Superherdr 0.1.0 is the first Superherdr release. Superherdr is a project built 
 ## Artifacts and platforms
 
 - `superherdr-0.1.0-macos-aarch64.tar.gz`: macOS Apple Silicon. It declares a macOS 13.0 minimum matching its dependency, but has been exercised only on macOS 27.
-- `superherdr-0.1.0-linux-x86_64.tar.gz`: Linux x86_64, statically linked with musl. It is a static-pie executable with no interpreter, no `DT_NEEDED` entries, and no glibc symbol dependencies. It has been exercised only on Arch Linux x86_64 (headless server, named session, real PTY roundtrip, TUI render); the SSH remote attach flow has not been exercised.
+- `superherdr-0.1.0-linux-x86_64.tar.gz`: Linux x86_64, statically linked with musl. It is a static-pie executable with no interpreter, no `DT_NEEDED` entries, and no glibc symbol dependencies. The release binary was exercised on GitHub's Ubuntu x86_64 runner (headless server, named session, PTY command roundtrip), and an earlier 0.1.0 build was also run on Arch Linux x86_64, including the TUI. Other distributions and the SSH remote attach flow have not been exercised.
 - `superherdr-0.1.0.arm64_golden_gate.bottle.tar.gz`: the Homebrew bottle, assembled from the macOS archive's binary.
 - Linux aarch64, Intel macOS, Windows, and Android/Termux have no 0.1.0 build.
 - Each archive contains `superherdr`, `LICENSE`, and `licenses/`. `SHA256SUMS` lists every asset.
@@ -30,8 +30,11 @@ Superherdr 0.1.0 is the first Superherdr release. Superherdr is a project built 
 - It stages the new binary inside the install directory and renames it into place, so an interrupted install leaves the previous binary intact.
 - It does not touch configuration, state, or running sessions, and does not migrate original Herdr state.
 
-## Building the Linux artifact
+## Building release artifacts
 
-The Linux archive was built from commit `4f70b4fd22c007a9bdbee313701edb41141d36b2` with the repository-pinned Rust 1.96.1 toolchain plus the `x86_64-unknown-linux-musl` rust-std component, Zig 0.15.2 for the vendored libghostty-vt, `--locked` dependencies, `HERDR_BUILD_CHANNEL=stable`, and `-j4`. The build succeeded with `RUST_MIN_STACK=268435456` (256 MiB); an attempt at 128 MiB failed with a rustc SIGSEGV at the final crate. The cause was not diagnosed. The macOS binary was built from `9129dfad7d93c0ffc564920a5c8229da119c0b75`; the commits after it change only documentation and the installer.
+Both binaries use the repository-pinned Rust 1.96.1 toolchain, Zig 0.15.2 for the vendored libghostty-vt, `--locked` dependencies, and `HERDR_BUILD_CHANNEL=stable`. The release notes name the exact commits.
+
+- **Linux:** the manually triggered `Build Linux release` workflow (`.github/workflows/build-linux-release.yml`) builds `x86_64-unknown-linux-musl` with `-j4` and `RUST_MIN_STACK=268435456` (rustc crashed at the final crate with 128 MiB; the cause was not diagnosed), verifies the binary is static, runs a server and PTY smoke test, and uploads the archive.
+- **macOS:** built on Apple Silicon with `MACOSX_DEPLOYMENT_TARGET=13.0`. The stock Zig 0.15.2 download cannot link against the macOS 26.5 or 27 SDKs, and Homebrew's patched `zig@0.15` cannot compile against the macOS 27 SDK, so the build used `zig@0.15` with `xcrun --sdk macosx --show-sdk-path` pointed at the macOS 26.5 SDK. The Homebrew bottle is assembled from the archive's binary, not produced by `brew bottle`.
 
 The release repository is [jsonmartin/superherdr](https://github.com/jsonmartin/superherdr), and the Homebrew formula is in [jsonmartin/homebrew-tap](https://github.com/jsonmartin/homebrew-tap). The release tag is `superherdr-v0.1.0`, so inherited Herdr tags remain unchanged.
