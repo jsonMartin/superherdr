@@ -153,6 +153,8 @@ fi
         return subprocess.run(
             ["/bin/sh", str(INSTALLER)],
             env=env,
+            # empty PATH entries scan the working directory
+            cwd=self.root,
             capture_output=True,
             text=True,
             check=False,
@@ -311,6 +313,17 @@ exec "{real_mv}" "$@"
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self._assert_only_new_herdr_installed()
+
+    def test_herdr_in_current_directory_via_trailing_path_colon_is_refused(self) -> None:
+        self._write_executable(self.root / "herdr", UPSTREAM_HERDR)
+
+        result = self._run_installer(
+            self.expected_sha256, extra_env={"PATH": f"{self.bin_dir}:"}
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("never takes over another installation", result.stderr)
+        self._assert_fetch_never_happened()
 
     def test_foreign_superherdr_beside_owned_herdr_is_refused(self) -> None:
         self._install_previous_superherdr()

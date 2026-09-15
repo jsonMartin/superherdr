@@ -245,7 +245,10 @@ check_destinations() {
     old_ifs="$IFS"
     IFS=:
     set -f
-    for dir in $PATH; do
+    # field splitting drops a trailing empty entry, so spell it out
+    scan_path="$PATH"
+    case "$scan_path" in *:) scan_path="${scan_path}." ;; esac
+    for dir in $scan_path; do
         IFS="$old_ifs"
         # an empty entry means the current directory
         dir="${dir:-.}"
