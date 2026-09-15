@@ -242,7 +242,7 @@ fn dead_server_cli_reports_one_session_aware_json_line() {
         .env_remove("HERDR_ENV")
         .output()
         .unwrap();
-    assert_server_not_running(stale, &stale_socket, "herdr");
+    assert_server_not_running(stale, &stale_socket, "superherdr");
 
     cleanup_test_base(&base);
 }
