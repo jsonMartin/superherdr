@@ -53,9 +53,13 @@ jobs:
           bin="target/$TARGET/release/superherdr"
           version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
           file "$bin"
-          if readelf -l "$bin" | grep -q INTERP; then echo "unexpected program interpreter" >&2; exit 1; fi
-          if readelf -d "$bin" | grep -q NEEDED; then echo "unexpected shared library dependency" >&2; exit 1; fi
-          if strings "$bin" | grep -q 'GLIBC_[0-9]'; then echo "unexpected glibc symbol version" >&2; exit 1; fi
+          # Capture output first so an early-exiting grep cannot hide a match behind SIGPIPE.
+          readelf -l "$bin" > program-headers.txt
+          readelf -d "$bin" > dynamic-section.txt
+          strings "$bin" > strings.txt
+          if grep -q INTERP program-headers.txt; then echo "unexpected program interpreter" >&2; exit 1; fi
+          if grep -q NEEDED dynamic-section.txt; then echo "unexpected shared library dependency" >&2; exit 1; fi
+          if grep -q 'GLIBC_[0-9]' strings.txt; then echo "unexpected glibc symbol version" >&2; exit 1; fi
           test "$("$bin" --version)" = "superherdr $version"
           "$bin" status client --json | tee status.json
           grep -q '"channel":"stable"' status.json
