@@ -32,7 +32,7 @@ The installer SHALL support Linux x86_64 and macOS Apple Silicon and SHALL refus
 - **THEN** it SHALL exit with an error before downloading anything
 
 ### Requirement: Installation ownership
-The installer SHALL update only an installation it created, and SHALL decide before downloading. It SHALL treat `<install dir>/herdr` as its own when it is a regular file whose `--version` output contains `(superherdr `, or when the Superherdr 0.1.0 layout is present: a `herdr` symlink whose target is exactly the regular `<install dir>/superherdr`. Upgrading the 0.1.0 layout SHALL replace the `herdr` symlink with the new binary and then delete the owned `superherdr` file, so no second command remains. It SHALL refuse, naming the path: a `herdr` symlink with any other target; a regular `herdr` that cannot be executed or does not identify itself as Superherdr, such as upstream Herdr's installed binary; a `superherdr` file without its 0.1.0 alias; and any `herdr` or `superherdr` found on `PATH` outside the install directory. It SHALL stage the new binary inside the install directory and rename it into place. It SHALL NOT modify configuration, state or running sessions.
+The installer SHALL update only an installation it created, and SHALL decide before downloading. It SHALL treat `<install dir>/herdr` as its own when it is a regular file whose `--version` output contains `(superherdr `, or when the Superherdr 0.1.0 layout is present: a `herdr` symlink whose target is exactly the regular `<install dir>/superherdr`. Upgrading the 0.1.0 layout SHALL replace the `herdr` symlink with the new binary and then delete the owned `superherdr` file, so no second command remains. It SHALL also treat a regular `superherdr` beside an owned regular `herdr` as a leftover from an interrupted 0.1.0 upgrade and remove it. It SHALL refuse, naming the path: a `herdr` symlink with any other target; a regular `herdr` that is not executable or does not identify itself as Superherdr, such as upstream Herdr's installed binary; a `superherdr` file without its 0.1.0 alias or an owned `herdr` beside it; and an executable `herdr` or `superherdr` in any `PATH` directory other than the install directory, including directories later on `PATH` than the install directory. It SHALL stage the new binary inside the install directory and rename it into place. It SHALL NOT modify configuration, state or running sessions.
 
 #### Scenario: Original Herdr on PATH
 - **WHEN** a `herdr` executable from another installation is on `PATH`
@@ -45,6 +45,14 @@ The installer SHALL update only an installation it created, and SHALL decide bef
 #### Scenario: Upstream Herdr in the install directory
 - **WHEN** `<install dir>/herdr` is a regular file whose `--version` output does not contain `(superherdr `
 - **THEN** the installer SHALL exit without downloading or changing anything and SHALL name the path
+
+#### Scenario: Herdr shadowed later on PATH
+- **WHEN** the install directory is earlier on `PATH` than a directory containing upstream Herdr's `herdr`
+- **THEN** the installer SHALL exit without changes and name the shadowed path
+
+#### Scenario: Resume an interrupted 0.1.0 upgrade
+- **WHEN** the install directory holds an owned regular `herdr` and a leftover regular `superherdr`
+- **THEN** the installer SHALL complete the upgrade and remove `superherdr`
 
 #### Scenario: Upgrade from Superherdr 0.1.0
 - **WHEN** the install directory holds a regular `superherdr` and a `herdr` symlink pointing at it
