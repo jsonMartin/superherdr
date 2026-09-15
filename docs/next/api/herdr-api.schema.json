@@ -3907,6 +3907,61 @@
           ],
           "type": "object"
         },
+        "ProjectSnoozeParams": {
+          "properties": {
+            "boot_id": {
+              "type": "string"
+            },
+            "deadline_unix_ms": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "duration_seconds": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "project_key": {
+              "type": "string"
+            },
+            "workspace_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspace_id",
+            "project_key",
+            "boot_id"
+          ],
+          "type": "object"
+        },
+        "ProjectWakeParams": {
+          "properties": {
+            "boot_id": {
+              "type": "string"
+            },
+            "expected_revision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "project_key": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "project_key",
+            "boot_id",
+            "expected_revision"
+          ],
+          "type": "object"
+        },
         "ReadFormat": {
           "enum": [
             "text",
@@ -3957,6 +4012,48 @@
               ]
             }
           },
+          "type": "object"
+        },
+        "SnoozeRecordWakeParams": {
+          "properties": {
+            "boot_id": {
+              "type": "string"
+            },
+            "expected_revision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "record_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "record_id",
+            "boot_id",
+            "expected_revision"
+          ],
+          "type": "object"
+        },
+        "SnoozeResetParams": {
+          "properties": {
+            "boot_id": {
+              "type": "string"
+            },
+            "confirmed": {
+              "default": false,
+              "type": "boolean"
+            },
+            "expected_revision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "boot_id",
+            "expected_revision"
+          ],
           "type": "object"
         },
         "SplitDirection": {
@@ -4578,6 +4675,36 @@
           ],
           "type": "object"
         },
+        "WorkspaceSnoozeParams": {
+          "properties": {
+            "boot_id": {
+              "type": "string"
+            },
+            "deadline_unix_ms": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "duration_seconds": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "workspace_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspace_id",
+            "boot_id"
+          ],
+          "type": "object"
+        },
         "WorkspaceTarget": {
           "properties": {
             "workspace_id": {
@@ -4586,6 +4713,33 @@
           },
           "required": [
             "workspace_id"
+          ],
+          "type": "object"
+        },
+        "WorkspaceWakeParams": {
+          "properties": {
+            "boot_id": {
+              "type": "string"
+            },
+            "confirmed": {
+              "default": false,
+              "type": "boolean"
+            },
+            "expected_revision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "workspace_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "boot_id",
+            "expected_revision"
           ],
           "type": "object"
         },
@@ -5107,6 +5261,134 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/WorkspaceCloseParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "workspace.snooze",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/WorkspaceSnoozeParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "workspace.wake",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/WorkspaceWakeParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "snooze.reset",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/SnoozeResetParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "project.snooze",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/ProjectSnoozeParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "project.wake",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/ProjectWakeParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "snooze.record.wake",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/SnoozeRecordWakeParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "workspace.snooze.subscribe",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "snooze.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
             }
           },
           "required": [
@@ -9171,6 +9453,32 @@
             }
           ]
         },
+        "ProjectSnoozeRecord": {
+          "properties": {
+            "boot_id": {
+              "type": "string"
+            },
+            "deadline_unix_ms": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "project_key": {
+              "type": "string"
+            },
+            "revision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "project_key",
+            "boot_id",
+            "deadline_unix_ms",
+            "revision"
+          ],
+          "type": "object"
+        },
         "ReadFormat": {
           "enum": [
             "text",
@@ -9294,6 +9602,38 @@
               "required": [
                 "type",
                 "workspaces"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "state": {
+                  "$ref": "#/schemas/success_response/$defs/WorkspaceSnoozeState"
+                },
+                "type": {
+                  "const": "workspace_snooze",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "state"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "state": {
+                  "$ref": "#/schemas/success_response/$defs/WorkspaceSnoozeState"
+                },
+                "type": {
+                  "const": "workspace_wake",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "state"
               ],
               "type": "object"
             },
@@ -10627,6 +10967,77 @@
           ],
           "type": "object"
         },
+        "SnoozePersistenceInfo": {
+          "properties": {
+            "notice": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "records": {
+              "items": {
+                "$ref": "#/schemas/success_response/$defs/SnoozeStoredRecordInfo"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "records"
+          ],
+          "type": "object"
+        },
+        "SnoozeStoredRecordInfo": {
+          "properties": {
+            "available": {
+              "type": "boolean"
+            },
+            "created_unix_ms": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "deadline_unix_ms": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "label": {
+              "type": "string"
+            },
+            "project_key": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "project_label": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "record_id": {
+              "type": "string"
+            },
+            "scope": {
+              "type": "string"
+            },
+            "workspace_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "record_id",
+            "scope",
+            "label",
+            "created_unix_ms",
+            "deadline_unix_ms",
+            "available"
+          ],
+          "type": "object"
+        },
         "SplitDirection": {
           "enum": [
             "right",
@@ -10735,6 +11146,73 @@
             "tab_count",
             "active_tab_id",
             "agent_status"
+          ],
+          "type": "object"
+        },
+        "WorkspaceSnoozeRecord": {
+          "properties": {
+            "boot_id": {
+              "type": "string"
+            },
+            "deadline_unix_ms": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "revision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "workspace_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspace_id",
+            "boot_id",
+            "deadline_unix_ms",
+            "revision"
+          ],
+          "type": "object"
+        },
+        "WorkspaceSnoozeState": {
+          "properties": {
+            "boot_id": {
+              "type": "string"
+            },
+            "persistence": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/SnoozePersistenceInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "project_records": {
+              "default": [],
+              "items": {
+                "$ref": "#/schemas/success_response/$defs/ProjectSnoozeRecord"
+              },
+              "type": "array"
+            },
+            "records": {
+              "items": {
+                "$ref": "#/schemas/success_response/$defs/WorkspaceSnoozeRecord"
+              },
+              "type": "array"
+            },
+            "revision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "boot_id",
+            "revision",
+            "records"
           ],
           "type": "object"
         },
