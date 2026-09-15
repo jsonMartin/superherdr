@@ -1,6 +1,6 @@
 # Superherdr
 
-Superherdr is a terminal runtime for coding agents, forked from [Herdr](https://github.com/herdrdev/herdr). It adds Focus, shared Snooze, and the Top-level Agents view, and ships its own binaries, shell installer, and Homebrew formula. Build and run `superherdr`. Keep `HERDR_*` integration names and frozen protocol identifiers compatible with Herdr.
+Superherdr is a terminal runtime for coding agents, forked from [Herdr](https://github.com/herdrdev/herdr). It adds Focus, shared Snooze, and the Top-level Agents view, and ships its own binaries, shell installer, and Homebrew formula. It installs and runs as the `herdr` command and uses Herdr's configuration and state directories. Keep `HERDR_*` integration names and frozen protocol identifiers compatible with Herdr.
 
 These instructions apply to every person and agent working in this repository. Read [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution process, and the [behavior baseline](openspec/README.md) for Superherdr-specific behavior.
 
@@ -82,7 +82,7 @@ Unit tests live next to the code (`#[cfg(test)] mod tests`). New `AppState` or `
 
 For broad refactors or release-risk regressions, classify the risk before editing. Treat changes as refactor-risk when they touch two or more core surfaces, persisted state, protocol or API IDs, workspace/tab/pane identity, restore or handoff, agent detection authority, or UI/input state projection. Before moving code, identify the protected behavior and add or name characterization tests. Identity and state refactors should use `AppState::assert_invariants_for_test()` or `Workspace::assert_invariants_for_test()` with adversarial state from `AppState::test_with_adversarial_identity_state()` or `Workspace::test_adversarial_identity_state()`.
 
-When testing a build from inside an existing Superherdr or Herdr session, clear inherited socket overrides so the debug binary talks to its own `superherdr-dev` server instead of a production server:
+When testing a build from inside an existing Superherdr or Herdr session, clear inherited socket overrides so the debug binary talks to its own `herdr-dev` server instead of a production server:
 
 ```bash
 env -u HERDR_SOCKET_PATH -u HERDR_CLIENT_SOCKET_PATH cargo run -- <command>
@@ -92,9 +92,9 @@ Never stop, restart, or replace a running production server or its state while t
 
 ## Agent detection
 
-Detection rules are evidence-based. When changing `src/detect/manifests/`, first capture the relevant bottom-buffer state with `superherdr agent read <pane> --source detection --format text`, and `--format ansi` when styling or the alternate screen matters. Decide which visible controls are invariant and which are alternatives, and encode them as explicit AND/OR gates. Do not match whole-pane incidental text, and do not use the user-visible viewport for agent status, because users can scroll it.
+Detection rules are evidence-based. When changing `src/detect/manifests/`, first capture the relevant bottom-buffer state with `herdr agent read <pane> --source detection --format text`, and `--format ansi` when styling or the alternate screen matters. Decide which visible controls are invariant and which are alternatives, and encode them as explicit AND/OR gates. Do not match whole-pane incidental text, and do not use the user-visible viewport for agent status, because users can scroll it.
 
-Inspect matching with `superherdr agent explain <pane> --json`, test a rule through a local override in `~/.config/superherdr/agent-detection/<agent>.toml`, and apply it with `superherdr server reload-agent-manifests`. Never overwrite or remove an existing override without the owner's agreement, and remove the temporary override afterwards so the bundled manifest stays the source of truth.
+Inspect matching with `herdr agent explain <pane> --json`, test a rule through a local override in `~/.config/herdr-dev/agent-detection/<agent>.toml` (debug) or `~/.config/herdr/agent-detection/<agent>.toml`, and apply it with `herdr server reload-agent-manifests`. Never overwrite or remove an existing override without the owner's agreement, and remove the temporary override afterwards so the bundled manifest stays the source of truth.
 
 Detection fixes that apply equally to Herdr belong upstream. Keep `distribution/agent-detection/` aligned with the bundled manifests; `scripts/agent_detection_manifest_check.py` enforces this. Do not add large agent-specific full-screen fixture suites for routine tuning; keep Rust tests focused on manifest parsing, rule semantics, source precedence, reload, and update behavior.
 
@@ -108,7 +108,7 @@ When updating libghostty-vt, check every active patch. If the new upstream commi
 
 ## Documentation
 
-Superherdr-specific user documentation lives in `README.md` and `docs/next/`. Inherited behavior is documented by [Herdr's documentation](https://herdr.dev/docs/); do not copy it here. Update documentation in the same pull request as a user-facing change. `skills/superherdr/SKILL.md` describes the CLI for agents; keep it accurate when commands, IDs, or agent lifecycle semantics change.
+Superherdr-specific user documentation lives in `README.md` and `docs/next/`. Inherited behavior is documented by [Herdr's documentation](https://herdr.dev/docs/); do not copy it here. Update documentation in the same pull request as a user-facing change. `skills/herdr/SKILL.md` describes the CLI for agents; it is inherited from Herdr; keep it accurate when commands, IDs, or agent lifecycle semantics change.
 
 Add user-facing entries to `CHANGELOG.md` under an Unreleased heading when a change is user-visible. Do not add entries for documentation-only, CI, or repository-maintenance changes.
 

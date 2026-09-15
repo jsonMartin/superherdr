@@ -6,7 +6,7 @@ Focus shows the project or workspace you want to work on in one client. Snooze h
 
 ## Install
 
-Superherdr 0.1.0 provides macOS Apple Silicon and Linux x86_64 binaries from [GitHub releases](https://github.com/jsonMartin/superherdr/releases).
+Superherdr installs as the `herdr` command and is a drop-in replacement for Herdr: it reads Herdr's configuration, keybindings, plugins, and sessions from the same directories. Releases provide macOS Apple Silicon and Linux x86_64 binaries on [GitHub releases](https://github.com/jsonMartin/superherdr/releases).
 
 ### macOS: Homebrew
 
@@ -15,19 +15,19 @@ brew install jsonmartin/tap/superherdr
 herdr
 ```
 
-The formula provides both `superherdr` and `herdr`. If the original Homebrew `herdr` formula is linked, unlink it first with `brew unlink herdr`; this keeps its installed files. See [Homebrew installation notes](docs/next/homebrew.md).
+If the original Homebrew `herdr` formula is linked, unlink it first with `brew unlink herdr`; this keeps its installed files. See [Homebrew installation notes](docs/next/homebrew.md).
 
 ### Linux x86_64: shell installer
 
 Download the versioned installer, inspect it, then run it:
 
 ```sh
-curl -fsSL https://github.com/jsonMartin/superherdr/releases/download/superherdr-v0.1.0/install.sh -o install-superherdr.sh
+curl -fsSL https://github.com/jsonMartin/superherdr/releases/download/superherdr-v0.9.0.1/install.sh -o install-superherdr.sh
 sh install-superherdr.sh
 herdr
 ```
 
-The installer verifies the release archive checksum and installs `superherdr` plus a `herdr` alias into `~/.local/bin`. It exits without changes if any other `herdr` or `superherdr` is on PATH, including the original Herdr; remove or move that first, or extract the release archive by hand. It also supports macOS Apple Silicon; Linux ARM64, Intel Mac, Windows, and Android/Termux are not supported by these release artifacts. The Linux binary is statically linked and was tested on Ubuntu x86_64; an earlier build also ran on Arch Linux. The macOS binary targets macOS 13 and was tested on macOS 27.
+The installer verifies the release archive checksum and installs `herdr` into `~/.local/bin`. It exits without changes if another `herdr` is installed, including the original Herdr in `~/.local/bin` or anywhere on `PATH`; remove or move that first, or extract the release archive by hand. It also supports macOS Apple Silicon; Linux ARM64, Intel Mac, Windows, and Android/Termux are not supported by these release artifacts. The Linux binary is statically linked; the macOS binary targets macOS 13 and is tested on macOS 27.
 
 ### Build from source
 
@@ -35,35 +35,41 @@ With the repository-pinned Rust toolchain and Zig 0.15.2 installed:
 
 ```sh
 cargo install --path . --locked
-superherdr
+herdr
 ```
 
-A source install provides `superherdr`; it does not create the `herdr` alias. See [0.1.0 build and installation notes](docs/next/superherdr-0.1.0.md).
+See [release and build notes](docs/next/superherdr-0.9.0.1.md).
+
+### Versions
+
+Superherdr versions are the Herdr version they are based on plus a Superherdr revision: `0.9.0.1` is the first Superherdr release on Herdr 0.9.0. `herdr --version` prints both, for example `herdr 0.9.0 (superherdr 0.9.0.1)`, so tools that read Herdr's version keep working.
 
 ### Updates and existing sessions
 
-Use `brew upgrade jsonmartin/tap/superherdr` for Homebrew installations. For direct installations, download the installer from the desired release and rerun it with that version, for example `sh install-superherdr.sh 0.1.0`. Binary self-update is disabled.
+Use `brew upgrade jsonmartin/tap/superherdr` for Homebrew installations. For direct installations, download the installer from the desired release and rerun it. Binary self-update is disabled.
 
-Installing Superherdr does not migrate or stop original Herdr sessions. Unix release builds use `~/.config/superherdr` and `~/.local/state/superherdr`; debug builds use `superherdr-dev`. XDG overrides are supported. A command alias does not migrate session state. Replacing a running original Herdr server requires a separate compatible handoff; do not run two servers against the same writable session directory.
+Superherdr uses Herdr's directories: `~/.config/herdr` and `~/.local/state/herdr` for release builds, `herdr-dev` for debug builds, honoring `XDG_CONFIG_HOME` and `XDG_STATE_HOME`. Your existing Herdr sessions, configuration, and plugins carry over, and switching back to Herdr keeps them too. Only one server runs per session: if a Herdr server is already running, Superherdr attaches to it as a client and Snooze is unavailable until that server is restarted with Superherdr.
+
+To keep a separate setup instead, opt in with an override: `HERDR_CONFIG_PATH=/path/to/config.toml herdr` for a separate configuration file, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` for fully separate directories, or `herdr --session <name>` for a separate session.
 
 ## Use
 
 ```sh
-superherdr --help
-superherdr completion zsh
-superherdr --skill
-superherdr
+herdr --help
+herdr completion zsh
+herdr --skill
+herdr
 ```
 
 `ctrl+b q` detaches the client. Running the same command reattaches. Focus and Snooze are available in the sidebar and workspace/project context menus.
 
-For SSH, install a matching Superherdr build remotely or provide `HERDR_REMOTE_BINARY` pointing to a Superherdr build for the remote platform. Default discovery and installation use `superherdr`, not stock `herdr`. There is no fallback download of upstream Herdr as a Superherdr binary.
+For SSH, `herdr --remote <host>` uses a compatible `herdr` on the remote host, whether Herdr or Superherdr; Snooze needs Superherdr on the remote. If none is installed, it offers to install your local binary, or the build named by `HERDR_REMOTE_BINARY`, at `~/.local/bin/herdr`. It never downloads release binaries.
 
 ## Compatibility and upstream
 
-Superherdr is a fork of [Herdr](https://github.com/herdrdev/herdr), created by Ogulcan Celik and the Herdr contributors. Its terminal runtime, agent detection, CLI, and socket API come from Herdr, and credit for that work belongs to them. Superherdr adds its own features on top and merges upstream releases regularly. [Herdr's documentation](https://herdr.dev/docs/) describes the inherited behavior; use `superherdr` in its command examples.
+Superherdr is a fork of [Herdr](https://github.com/herdrdev/herdr), created by Ogulcan Celik and the Herdr contributors. Its terminal runtime, agent detection, CLI, and socket API come from Herdr, and credit for that work belongs to them. Superherdr adds its own features on top and merges upstream releases regularly. [Herdr's documentation](https://herdr.dev/docs/) describes the inherited behavior, and its command examples work as written.
 
-The `HERDR_*` environment variables, socket filenames, integration asset names, API/schema identifiers, and frozen endpoint codecs keep their upstream names for compatibility. Socket files live inside the separate Superherdr directories.
+The `HERDR_*` environment variables, socket filenames, integration asset names, API/schema identifiers, and frozen endpoint codecs keep their upstream names for compatibility. Socket files live in the same Herdr directories.
 
 Agent status detection rules update from Herdr's published catalog at `herdr.dev` in the background when Superherdr starts, so detection fixes arrive as soon as Herdr publishes them. If the catalog is unreachable, Superherdr uses its bundled rules. To use only the bundled rules and make no request to `herdr.dev`, set this in your configuration:
 

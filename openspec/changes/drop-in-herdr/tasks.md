@@ -25,7 +25,7 @@
 
 ## 5. Documentation and release notes
 
-- [ ] 5.1 Update `README.md` (install, use and compatibility sections: the `herdr` command, shared Herdr directories, 0.1.0 directories no longer read, how to replace upstream Herdr, remote behavior) and `docs/next/homebrew.md`; add `docs/next/superherdr-0.9.0.1.md` release notes; keep `docs/next/superherdr-0.1.0.md` as history. Verify: `git grep -n 'superherdr ' -- README.md docs/next/homebrew.md docs/next/superherdr-0.9.0.1.md` shows no command examples.
+- [ ] 5.1 Update `README.md` (install, use and compatibility sections: the `herdr` command, shared Herdr directories, 0.1.0 directories no longer read, how to replace upstream Herdr, remote behavior) and `docs/next/homebrew.md`; replace `docs/next/superherdr-0.1.0.md` with `docs/next/superherdr-0.9.0.1.md` release notes and make 0.9.0.1 the first entry in `CHANGELOG.md`, because the maintainer is withdrawing the 0.1.0 release. Verify: `git grep -n 'superherdr ' -- README.md docs/next/homebrew.md docs/next/superherdr-0.9.0.1.md` shows no command examples.
 - [ ] 5.2 Update `AGENTS.md` and `CONTRIBUTING.md` (`herdr` command, `herdr-dev`, `~/.config/herdr/agent-detection`, `skills/herdr/SKILL.md`) and `openspec/README.md` (evidence pointer `tests/drop_in_herdr.rs`, row title for shared Herdr state). Verify: `git grep -n superherdr -- AGENTS.md CONTRIBUTING.md` shows only package, tag, tap and repository names.
 - [ ] 5.3 Add an Unreleased entry to `CHANGELOG.md` covering the single `herdr` command, Herdr directories, 0.1.0 directories no longer read, installer upgrade behavior, the worktree default and remote discovery. Verify: the entry is present under an Unreleased heading.
 
