@@ -459,7 +459,7 @@ fn client_sees_headless_startup_config_diagnostic() {
     assert!(
         wait_until(Duration::from_secs(8), Duration::from_millis(20), || {
             let output = read_output(&output);
-            output.contains("config.toml") && output.contains("herdr config check")
+            output.contains("config.toml") && output.contains("superherdr config check")
         }),
         "client shell should render startup config diagnostic; output: {:?}",
         read_output(&output)
@@ -510,7 +510,7 @@ fn server_unreachable_shows_clear_error() {
         "stderr should mention connection failure: {stderr}"
     );
     assert!(
-        stderr.contains("Is herdr server running?"),
+        stderr.contains("Is superherdr server running?"),
         "stderr should include actionable guidance: {stderr}"
     );
     assert!(
@@ -879,7 +879,7 @@ fn federated_client_starts_without_local_and_survives_its_restart() {
     let bin = base.join("bin");
     fs::create_dir_all(&bin).unwrap();
     fs::create_dir_all(base.join("home")).unwrap();
-    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_superherdr"), bin.join("herdr")).unwrap();
+    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_superherdr"), bin.join("superherdr")).unwrap();
     let quote =
         |path: &std::path::Path| format!("'{}'", path.display().to_string().replace('\'', "'\\''"));
     fs::write(bin.join("ssh"), format!(

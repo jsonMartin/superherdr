@@ -13,8 +13,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = REPO_ROOT / "distribution" / "install.sh"
+# GNU tar runs gzip as a child process for .tar.gz archives.
 REQUIRED_COMMANDS = (
-    "awk", "cat", "chmod", "cp", "grep", "ln", "mkdir", "mktemp", "mv",
+    "awk", "cat", "chmod", "cp", "grep", "gzip", "ln", "mkdir", "mktemp", "mv",
     "readlink", "rm", "tar",
 )
 ARCHIVE_NAME = "superherdr-0.1.0-linux-x86_64.tar.gz"
