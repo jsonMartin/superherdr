@@ -546,7 +546,7 @@ fn client_error_display_detached_default_session_reattach_hint() {
     };
     let msg = err.to_string();
     assert!(
-        msg.contains("Run `superherdr` to reattach"),
+        msg.contains("Run `herdr` to reattach"),
         "should suggest default reattach command: {msg}"
     );
 }
@@ -561,7 +561,7 @@ fn client_error_display_detached_named_session_reattach_hint() {
     };
     let msg = err.to_string();
     assert!(
-        msg.contains("Run `superherdr session attach work` to reattach"),
+        msg.contains("Run `herdr session attach work` to reattach"),
         "should suggest named session reattach command: {msg}"
     );
 }
@@ -606,7 +606,7 @@ fn client_error_display_remote_connection_lost_has_reattach_hint() {
     let err = ClientError::ConnectionLost(io::Error::new(io::ErrorKind::BrokenPipe, "broken pipe"));
     let msg = err.to_string();
     assert!(
-        msg.contains("lost connection to remote Superherdr"),
+        msg.contains("lost connection to remote Herdr"),
         "should mention remote connection loss: {msg}"
     );
     assert!(

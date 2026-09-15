@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-HERDR_BIN="${HERDR_BIN:-$ROOT/target/debug/superherdr}"
+HERDR_BIN="${HERDR_BIN:-$ROOT/target/debug/herdr}"
 BASE="${BASE:-$(mktemp -d /tmp/herdr-handoff-smoke.XXXXXX)}"
 CONFIG_HOME="$BASE/config"
 RUNTIME_DIR="$BASE/runtime"
@@ -47,9 +47,9 @@ run_herdr() {
 session_dir() {
   local session="$1"
   if [[ "$session" == "default" ]]; then
-    printf '%s/superherdr-dev' "$CONFIG_HOME"
+    printf '%s/herdr-dev' "$CONFIG_HOME"
   else
-    printf '%s/superherdr-dev/sessions/%s' "$CONFIG_HOME" "$session"
+    printf '%s/herdr-dev/sessions/%s' "$CONFIG_HOME" "$session"
   fi
 }
 
@@ -64,7 +64,7 @@ client_socket() {
 assert_smoke_socket() {
   local socket="$1"
   case "$socket" in
-    "$CONFIG_HOME"/superherdr-dev/herdr.sock | "$CONFIG_HOME"/superherdr-dev/sessions/*/herdr.sock)
+    "$CONFIG_HOME"/herdr-dev/herdr.sock | "$CONFIG_HOME"/herdr-dev/sessions/*/herdr.sock)
       ;;
     *)
       echo "refusing to use non-smoke socket: $socket" >&2
@@ -178,12 +178,12 @@ smoke_http_count() {
   printf '%s\n' "$count"
 }
 
-echo "using superherdr: $HERDR_BIN"
+echo "using herdr: $HERDR_BIN"
 echo "smoke base: $BASE"
 
 cargo build --locked --manifest-path "$ROOT/Cargo.toml" >/dev/null
-mkdir -p "$CONFIG_HOME/superherdr-dev" "$RUNTIME_DIR" "$STATE_DIR"
-printf 'onboarding = false\n' > "$CONFIG_HOME/superherdr-dev/config.toml"
+mkdir -p "$CONFIG_HOME/herdr-dev" "$RUNTIME_DIR" "$STATE_DIR"
+printf 'onboarding = false\n' > "$CONFIG_HOME/herdr-dev/config.toml"
 
 for session in "${sessions[@]}"; do
   echo "starting smoke session $session at $(api_socket "$session")"

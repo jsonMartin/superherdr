@@ -2,6 +2,9 @@
 
 pub const BASE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+// Superherdr releases are `<Herdr base>.<revision>`; reset to 1 when merging a new Herdr base.
+pub const SUPERHERDR_REVISION: u32 = 1;
+
 // Plugin requirements track inherited Herdr capabilities, not Superherdr release numbers.
 pub const HERDR_PLUGIN_COMPATIBILITY_VERSION: &str = "0.9.0";
 
@@ -21,6 +24,10 @@ pub fn version() -> String {
             None => format!("{BASE_VERSION}-{channel}"),
         },
     }
+}
+
+pub fn superherdr_version() -> String {
+    format!("{BASE_VERSION}.{SUPERHERDR_REVISION}")
 }
 
 pub fn is_preview() -> bool {

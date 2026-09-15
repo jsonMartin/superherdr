@@ -790,6 +790,21 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_rewritten_without_lifetime_id_still_loads() {
+        // Herdr drops the field when it rewrites a session that Superherdr saved.
+        let state = state_with_workspaces(&["one"]);
+        let mut value = serde_json::to_value(capture_from_state(&state)).unwrap();
+        for workspace in value["workspaces"].as_array_mut().unwrap() {
+            workspace.as_object_mut().unwrap().remove("lifetime_id");
+        }
+
+        let parsed = parse_snapshot(&value.to_string()).unwrap();
+
+        assert_eq!(parsed.workspaces.len(), 1);
+        assert_eq!(parsed.workspaces[0].lifetime_id, None);
+    }
+
+    #[test]
     fn malformed_workspace_lifetime_id_is_treated_as_missing() {
         let json = serde_json::json!({
             "version": SNAPSHOT_VERSION,

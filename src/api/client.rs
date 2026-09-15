@@ -84,10 +84,12 @@ impl ApiClient {
                 version,
                 protocol,
                 capabilities,
+                superherdr_version,
             } => Ok(crate::api::RuntimeStatus {
                 version: Some(version),
                 protocol: Some(protocol),
                 capabilities,
+                superherdr_version,
             }),
             result => Err(ApiClientError::UnexpectedResult(format!("{result:?}"))),
         }

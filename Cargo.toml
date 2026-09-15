@@ -1,6 +1,7 @@
 [package]
 name = "superherdr"
-version = "0.1.0"
+# Herdr base version; the Superherdr revision lives in src/build_info.rs.
+version = "0.9.0"
 edition = "2021"
 build = "build.rs"
 description = "Superherdr: a terminal project built on Herdr with Focus and Snooze"
@@ -11,12 +12,16 @@ include = [
     "src/**/*",
     "assets/sounds/*",
     "docs/next/api/herdr-api.schema.json",
-    "skills/superherdr/SKILL.md",
+    "skills/herdr/SKILL.md",
     "distribution/install.ps1",
     "README.md",
     "LICENSE",
     "Cargo.toml",
 ]
+
+[[bin]]
+name = "herdr"
+path = "src/main.rs"
 
 [dependencies]
 base64 = "0.22.1"

@@ -108,7 +108,7 @@ just test-one <filter>    # one test filter, for a focused change
 
 CI runs these checks on Linux and macOS. Windows and Nix files are inherited from Herdr and are not supported targets.
 
-When testing a build from inside an existing Superherdr or Herdr session, clear inherited socket overrides so the debug build talks to its own `superherdr-dev` server:
+When testing a build from inside an existing Superherdr or Herdr session, clear inherited socket overrides so the debug build talks to its own `herdr-dev` server:
 
 ```sh
 env -u HERDR_SOCKET_PATH -u HERDR_CLIENT_SOCKET_PATH cargo run -- <command>

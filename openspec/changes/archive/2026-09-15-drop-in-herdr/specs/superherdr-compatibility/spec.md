@@ -1,9 +1,9 @@
-# superherdr-compatibility Specification
+## RENAMED Requirements
 
-## Purpose
-Run Superherdr as a drop-in `herdr` that shares Herdr's command, configuration and state while identifying itself in version output and staying compatible with Herdr's clients, plugins, integrations and upstream merges. This is a Full specification because it governs executable identity, persisted state locations, environment and wire contracts.
+- FROM: `### Requirement: Separate configuration and state`
+- TO: `### Requirement: Herdr configuration and state`
 
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Executable identity
 Superherdr SHALL build, install and run as a single command named `herdr`. No distribution channel (release archive, shell installer, Homebrew formula, Arch Linux package or source install) SHALL create a `superherdr` command or alias. The Cargo package SHALL remain `superherdr` with a binary target named `herdr`. Superherdr versions SHALL be `<Herdr base version>.<revision>`, with the revision starting at 1 for each Herdr base. `herdr --version` SHALL print `herdr <base> (superherdr <base>.<revision>)`, where a preview build MAY append a `-` suffix to the base; the first two words SHALL match upstream Herdr's output format, and the parenthesized part identifies Superherdr to users, the shell installer and scripts. The Cargo package version SHALL be the three-part Herdr base. Help output, usage and error messages, `completion` output including `#compdef herdr`, `--default-config` comments and `--skill` SHALL use Herdr's wording and the `herdr` command, except where Superherdr's behavior differs: self-update is disabled and background version checks are off by default. `herdr status client --json` SHALL keep Herdr's fields (`version`, `channel`, `protocol`, `endpoint_protocol_generation`, `endpoint_capabilities`, `binary`, `session`) with the three-part Herdr base in `version`, and SHALL add the optional field `superherdr_version` with the four-part version; the socket API `Pong` response SHALL carry the same optional `superherdr_version`, so server status reports the same pair. The stale-server check SHALL compare `superherdr_version` when both client and server report it, and `version` otherwise.
@@ -61,28 +61,3 @@ Release builds SHALL use Herdr's configuration and state directories, `~/.config
 #### Scenario: Remote host has no compatible herdr
 - **WHEN** the remote `herdr` is missing or fails the endpoint checks
 - **THEN** Superherdr SHALL ask before installing the local binary at `~/.local/bin/herdr` and SHALL NOT download a release asset
-
-### Requirement: Endpoint and protocol compatibility
-Superherdr SHALL keep Herdr's client endpoint generation 1 and its frozen codecs, fixtures and method shapes unchanged. New shared features SHALL be additive and optional, so a Herdr client or server without them loses only the affected action. Changing the private same-install protocol incompatibly SHALL increase `PROTOCOL_VERSION` once per published protocol.
-
-#### Scenario: Herdr client without shared Snooze
-- **WHEN** a client without Superherdr's optional Snooze feature connects
-- **THEN** the connection SHALL succeed and that client SHALL simply not hide snoozed work
-
-### Requirement: Plugin compatibility level
-Superherdr SHALL report the Herdr plugin compatibility level it inherits (`0.9.0` for Superherdr 0.1.0), independent of Superherdr's own version, so existing Herdr plugins keep working.
-
-#### Scenario: Install an existing Herdr plugin
-- **WHEN** a user installs a plugin that requires Herdr plugin compatibility 0.9.0
-- **THEN** Superherdr SHALL accept it
-
-### Requirement: Upstream agent-detection catalog
-While Superherdr's detection engine and rules match Herdr's, release builds of Superherdr SHALL fetch agent-detection rule updates from Herdr's published catalog at startup when `update.manifest_check` is enabled, which is the default. It SHALL reject rules that require a newer detection engine and SHALL fall back to bundled rules when the catalog is unreachable. Setting `update.manifest_check = false` SHALL stop all catalog requests. A change that makes Superherdr's detection engine or rules diverge from Herdr's SHALL move the catalog to Superherdr-hosted infrastructure in the same change.
-
-#### Scenario: Catalog unreachable
-- **WHEN** the catalog cannot be fetched at startup
-- **THEN** agent detection SHALL continue with the bundled rules
-
-#### Scenario: Opt out
-- **WHEN** a user sets `update.manifest_check = false`
-- **THEN** Superherdr SHALL make no request to the catalog

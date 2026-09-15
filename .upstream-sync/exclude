@@ -34,6 +34,5 @@ scripts/test_config_reference_check.py
 scripts/test_docs_translation_parity.py
 scripts/test_preview.py
 scripts/windows_arm64_installer_test.ps1
-skills/herdr/
 SPONSORS.md
 workers/plugin-marketplace/

@@ -9515,6 +9515,13 @@
                   "minimum": 0,
                   "type": "integer"
                 },
+                "superherdr_version": {
+                  "description": "Four-part Superherdr version; absent from Herdr servers.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "type": {
                   "const": "pong",
                   "type": "string"

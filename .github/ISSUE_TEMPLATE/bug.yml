@@ -47,7 +47,7 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: Superherdr version is required (`superherdr --version`). Include whether the bug also happens in Herdr, if you know.
+      description: Superherdr version is required (`herdr --version`). Include whether the bug also happens in Herdr, if you know.
       value: |
         - Superherdr version:
         - Operating system:

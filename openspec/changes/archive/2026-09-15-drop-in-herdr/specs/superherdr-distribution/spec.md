@@ -1,9 +1,13 @@
-# superherdr-distribution Specification
+## ADDED Requirements
 
-## Purpose
-Define how Superherdr is released and installed: versioned GitHub release assets, a checksum-verifying shell installer, and a Homebrew formula. Installing never takes over another installation or touches session state.
+### Requirement: Arch Linux package
+The `superherdr-bin` AUR package SHALL use the four-part Superherdr version as `pkgver` and SHALL install the Linux x86_64 release binary as `/usr/bin/herdr` only, SHALL provide `superherdr` and `herdr`, and SHALL conflict with `superherdr`, `herdr`, `herdr-bin` and `herdr-git`, so a package that depends on `herdr` accepts Superherdr and no system holds two `herdr` binaries.
 
-## Requirements
+#### Scenario: Herdr package installed
+- **WHEN** `herdr-bin` is installed and a user installs `superherdr-bin`
+- **THEN** pacman SHALL report the conflict and SHALL install `superherdr-bin` only after the user removes `herdr-bin`
+
+## MODIFIED Requirements
 
 ### Requirement: Release assets
 Each release SHALL be published under the tag `superherdr-v<version>` in `jsonMartin/superherdr`, where `<version>` is the four-part Superherdr version (for example `superherdr-v0.9.0.1`), with an archive per supported target named `superherdr-<version>-<target>.tar.gz`, an `install.sh`, and a `SHA256SUMS` file listing every asset. Supported targets SHALL be `macos-aarch64` and `linux-x86_64`. Each archive SHALL contain the `herdr` binary, `LICENSE` and `licenses/`, and SHALL NOT contain a `superherdr` file.
@@ -28,7 +32,7 @@ The installer SHALL support Linux x86_64 and macOS Apple Silicon and SHALL refus
 - **THEN** it SHALL exit with an error before downloading anything
 
 ### Requirement: Installation ownership
-The installer SHALL update only an installation it created, and SHALL decide before downloading. It SHALL treat `<install dir>/herdr` as its own when it is a regular file whose `--version` output contains `(superherdr `, or when the Superherdr 0.1.0 layout is present: a `herdr` symlink whose target is exactly the regular, executable `<install dir>/superherdr` whose `--version` output starts with `superherdr `. Upgrading the 0.1.0 layout SHALL replace the `herdr` symlink with the new binary and then delete the owned `superherdr` file, so no second command remains. It SHALL also treat such a `superherdr` beside an owned regular `herdr` as a leftover from an interrupted 0.1.0 upgrade and remove it. It SHALL refuse, naming the path: a `herdr` symlink with any other target; a regular `herdr` that is not executable or does not identify itself as Superherdr, such as upstream Herdr's installed binary; a `superherdr` file without its 0.1.0 alias or an owned `herdr` beside it; and an executable `herdr` or `superherdr` in any `PATH` directory other than the install directory, including directories later on `PATH` than the install directory. It SHALL stage the new binary inside the install directory and rename it into place. It SHALL NOT modify configuration, state or running sessions.
+The installer SHALL update only an installation it created, and SHALL decide before downloading. It SHALL treat `<install dir>/herdr` as its own when it is a regular file whose `--version` output contains `(superherdr `, or when the Superherdr 0.1.0 layout is present: a `herdr` symlink whose target is exactly the regular `<install dir>/superherdr`. Upgrading the 0.1.0 layout SHALL replace the `herdr` symlink with the new binary and then delete the owned `superherdr` file, so no second command remains. It SHALL also treat a regular `superherdr` beside an owned regular `herdr` as a leftover from an interrupted 0.1.0 upgrade and remove it. It SHALL refuse, naming the path: a `herdr` symlink with any other target; a regular `herdr` that is not executable or does not identify itself as Superherdr, such as upstream Herdr's installed binary; a `superherdr` file without its 0.1.0 alias or an owned `herdr` beside it; and an executable `herdr` or `superherdr` in any `PATH` directory other than the install directory, including directories later on `PATH` than the install directory. It SHALL stage the new binary inside the install directory and rename it into place. It SHALL NOT modify configuration, state or running sessions.
 
 #### Scenario: Original Herdr on PATH
 - **WHEN** a `herdr` executable from another installation is on `PATH`
@@ -71,10 +75,3 @@ Superherdr SHALL NOT replace its own binary. `herdr update` SHALL fail with a me
 #### Scenario: Run update
 - **WHEN** a user runs `herdr update`
 - **THEN** the command SHALL exit unsuccessfully and state that self-update is disabled for Superherdr
-
-### Requirement: Arch Linux package
-The `superherdr-bin` AUR package SHALL use the four-part Superherdr version as `pkgver` and SHALL install the Linux x86_64 release binary as `/usr/bin/herdr` only, SHALL provide `superherdr` and `herdr`, and SHALL conflict with `superherdr`, `herdr`, `herdr-bin` and `herdr-git`, so a package that depends on `herdr` accepts Superherdr and no system holds two `herdr` binaries.
-
-#### Scenario: Herdr package installed
-- **WHEN** `herdr-bin` is installed and a user installs `superherdr-bin`
-- **THEN** pacman SHALL report the conflict and SHALL install `superherdr-bin` only after the user removes `herdr-bin`
