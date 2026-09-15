@@ -28,7 +28,7 @@ main() {
     echo ""
 
     VERSION="${SUPERHERDR_VERSION:-${1:-$DEFAULT_VERSION}}"
-    if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$'; then
+    if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
         err "invalid version '$VERSION': expected a release version such as 0.9.0.1"
     fi
 
