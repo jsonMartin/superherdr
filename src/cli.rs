@@ -50,8 +50,8 @@ pub(crate) const AGENT_HELP_FOOTER: &str = concat!(
     "    https://herdr.dev/agent-guide.md\n",
     "  Upstream Herdr debugging reference:\n",
     "    https://herdr.dev/llms.txt\n",
-    "  Control Superherdr panes, agents, or workspaces:\n",
-    "    SKIP if a Superherdr skill is already in your context. Otherwise run: herdr --skill",
+    "  Control Herdr panes, agents, or workspaces:\n",
+    "    SKIP if a Herdr skill is already in your context. Otherwise run: herdr --skill",
 );
 
 pub(crate) fn parse_token_assignment(raw: &str) -> Result<(String, Option<String>), String> {
@@ -196,7 +196,7 @@ fn channel_set(args: &[String]) -> std::io::Result<i32> {
     }
     std::fs::write(&path, updated)?;
     println!(
-        "Superherdr update channel set to {channel} in {}.",
+        "Herdr update channel set to {channel} in {}.",
         path.display()
     );
 
@@ -374,10 +374,8 @@ fn config_reset_keys(args: &[String]) -> std::io::Result<i32> {
         "Removed [keys], [keys.indexed], and [[keys.command]] from {}.",
         path.display()
     );
-    println!("Built-in v2 keybindings will apply after Superherdr restarts or reloads config.");
-    println!(
-        "If a Superherdr server is running, run `herdr server reload-config` to apply this now."
-    );
+    println!("Built-in v2 keybindings will apply after Herdr restarts or reloads config.");
+    println!("If a Herdr server is running, run `herdr server reload-config` to apply this now.");
     println!(
         "To restore: cp {} {}",
         backup_path.display(),

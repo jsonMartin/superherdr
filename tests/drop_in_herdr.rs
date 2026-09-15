@@ -39,9 +39,9 @@ fn herdr_command_identifies_superherdr_and_cannot_self_update() {
     let help = String::from_utf8_lossy(&help.stdout);
     assert!(help.contains("Usage: herdr"));
     assert!(help.contains(if cfg!(debug_assertions) {
-        "herdr-dev"
+        "/herdr-dev/config.toml"
     } else {
-        "herdr"
+        "/herdr/config.toml"
     }));
     assert!(!help.contains("superherdr"));
 

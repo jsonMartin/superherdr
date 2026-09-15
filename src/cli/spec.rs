@@ -12,7 +12,7 @@ pub(super) fn command() -> Command {
         .disable_version_flag(true)
         .arg(help_flag())
         .arg(option("session", "NAME").help("Use or create a named persistent session"))
-        .arg(option("remote", "TARGET").help("Attach through SSH to a remote Superherdr server"))
+        .arg(option("remote", "TARGET").help("Attach through SSH to a remote Herdr server"))
         .arg(
             option("remote-keybindings", "MODE")
                 .value_parser(["local", "server"])
@@ -297,7 +297,7 @@ fn tab_command() -> Command {
 
 fn notification_command() -> Command {
     Command::new("notification")
-        .about("Show Superherdr notifications")
+        .about("Show Herdr notifications")
         .subcommand(
             Command::new("show")
                 .about("Show a notification")

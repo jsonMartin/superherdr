@@ -606,7 +606,7 @@ fn client_error_display_remote_connection_lost_has_reattach_hint() {
     let err = ClientError::ConnectionLost(io::Error::new(io::ErrorKind::BrokenPipe, "broken pipe"));
     let msg = err.to_string();
     assert!(
-        msg.contains("lost connection to remote Superherdr"),
+        msg.contains("lost connection to remote Herdr"),
         "should mention remote connection loss: {msg}"
     );
     assert!(

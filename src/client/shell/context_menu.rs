@@ -90,7 +90,7 @@ impl ClientContextMenuOverlay {
                     item("Zoom", Action::Zoom),
                     item(
                         if *right_click_passthrough {
-                            "Use Superherdr right-click menu"
+                            "Use Herdr right-click menu"
                         } else {
                             "Send right-clicks to pane"
                         },

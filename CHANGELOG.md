@@ -16,3 +16,5 @@ First Superherdr release, based on Herdr 0.9.0. Superherdr versions are the Herd
 - Superherdr installs and runs as the `herdr` command and uses Herdr's configuration, state, plugins, and sessions, so it is a drop-in replacement. Separate setups are opt-in with `HERDR_CONFIG_PATH`, `XDG_CONFIG_HOME`/`XDG_STATE_HOME`, or `--session`.
 - `herdr --version` prints the Herdr base and the Superherdr version, for example `herdr 0.9.0 (superherdr 0.9.0.1)`.
 - Binary self-update is disabled.
+- New worktrees default to `~/.herdr/worktrees`, as in Herdr.
+- Connecting to a remote host finds and installs `herdr` in the same places Herdr does. Superherdr does not download release binaries for remote hosts; set `HERDR_REMOTE_BINARY` or install herdr there.

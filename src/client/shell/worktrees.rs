@@ -227,9 +227,8 @@ impl ClientShellState {
                 workspace_id: workspace_id.clone(),
             },
             KeybindAction::RemoveWorktree if !linked => {
-                self.endpoint_error = Some(
-                    "This workspace is not a Superherdr-managed worktree checkout.".to_owned(),
-                );
+                self.endpoint_error =
+                    Some("This workspace is not a Herdr-managed worktree checkout.".to_owned());
                 outcome.repaint = true;
                 return;
             }
@@ -477,9 +476,8 @@ impl ClientShellState {
                         },
                     ));
                 } else {
-                    self.endpoint_error = Some(
-                        "This workspace is not a Superherdr-managed worktree checkout.".to_owned(),
-                    );
+                    self.endpoint_error =
+                        Some("This workspace is not a Herdr-managed worktree checkout.".to_owned());
                 }
                 true
             }

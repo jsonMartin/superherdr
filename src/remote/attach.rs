@@ -660,6 +660,13 @@ pub(super) fn prepare_remote_herdr(
         }
     }
 
+    // Refuse before asking to install or stop a server when no source exists.
+    if env!("CARGO_PKG_NAME") == "superherdr"
+        && override_binary.is_none()
+        && !local_binary_can_seed_remote(&remote_herdr.platform)
+    {
+        return Err(io::Error::other(SUPERHERDR_NO_REMOTE_DOWNLOAD));
+    }
     let mut stop_after_install_approved = false;
     if let Some(status_probe_herdr) = remote_binary_candidates.first().or_else(|| {
         remote_binary_exists(ssh, &remote_herdr)
@@ -1521,11 +1528,11 @@ fn remote_shell_resolves_managed_install(stdout: &str) -> bool {
         .is_some_and(|path| path.ends_with("/.local/bin/herdr"))
 }
 
+const SUPERHERDR_NO_REMOTE_DOWNLOAD: &str = "Superherdr does not download release binaries for remote hosts; set HERDR_REMOTE_BINARY to a Superherdr build for the remote platform or install herdr there";
+
 fn download_release_asset(platform: &RemotePlatform) -> io::Result<InstallSource> {
     if env!("CARGO_PKG_NAME") == "superherdr" {
-        return Err(io::Error::other(
-            "Superherdr does not download release binaries for remote hosts; set HERDR_REMOTE_BINARY to a Superherdr build for the remote platform or install herdr there",
-        ));
+        return Err(io::Error::other(SUPERHERDR_NO_REMOTE_DOWNLOAD));
     }
     let asset_key = platform.asset_key();
     let asset = remote_release_asset(&asset_key)?;

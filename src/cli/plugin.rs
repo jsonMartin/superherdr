@@ -998,7 +998,7 @@ fn verify_plugin_link_source_response(
         || plugin.source.managed_path != expected.managed_path
     {
         return Err(std::io::Error::other(
-            "running Superherdr server did not persist GitHub plugin source metadata",
+            "running Herdr server did not persist GitHub plugin source metadata",
         ));
     }
     Ok(())
@@ -1591,7 +1591,7 @@ fn plugin_checkout_lifecycle_error(operation: &str, path: &Path, err: io::Error)
         return io::Error::new(
             err.kind(),
             format!(
-                "failed to {operation} managed plugin checkout at {}; close any Superherdr plugin panes or plugin commands using that checkout, then retry: {err}",
+                "failed to {operation} managed plugin checkout at {}; close any Herdr plugin panes or plugin commands using that checkout, then retry: {err}",
                 path.display()
             ),
         );

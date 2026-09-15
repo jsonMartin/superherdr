@@ -209,9 +209,7 @@ fn print_ready_message(api_socket: &Path, client_socket: &Path) {
             .join("herdr-server.log")
             .display()
     );
-    eprintln!(
-        "did you mean to open the Superherdr TUI? run `herdr`; you do not need `herdr server`."
-    );
+    eprintln!("did you mean to open the Herdr TUI? run `herdr`; you do not need `herdr server`.");
 }
 
 /// Initialize logging for the server process.

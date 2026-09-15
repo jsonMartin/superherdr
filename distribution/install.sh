@@ -184,6 +184,13 @@ is_superherdr_binary() {
         && "$1" --version 2>/dev/null | grep -q '(superherdr '
 }
 
+# A regular, executable superherdr whose version output starts with its name,
+# as Superherdr 0.1.0 printed.
+is_legacy_binary() {
+    [ -f "$1" ] && [ ! -L "$1" ] && [ -x "$1" ] \
+        && "$1" --version 2>/dev/null | grep -q '^superherdr '
+}
+
 physical_dir() {
     (cd "$1" 2>/dev/null && pwd -P)
 }
@@ -202,7 +209,7 @@ check_destinations() {
         link_target="$(readlink "$target")"
         case "$link_target" in
             "$LEGACY_BIN"|"$legacy")
-                if [ -f "$legacy" ] && [ ! -L "$legacy" ]; then
+                if is_legacy_binary "$legacy"; then
                     REMOVE_LEGACY=1
                 else
                     err "${target} is a symlink to ${link_target}, which is not a regular Superherdr install; refusing to overwrite it."
@@ -223,7 +230,7 @@ check_destinations() {
     if [ -L "$legacy" ]; then
         err "${legacy} is a symlink; refusing to touch it (it may be package-managed). Remove it manually if it is yours."
     elif [ -e "$legacy" ] && [ -z "$REMOVE_LEGACY" ]; then
-        if [ -n "$owned_herdr" ] && [ -f "$legacy" ]; then
+        if [ -n "$owned_herdr" ] && is_legacy_binary "$legacy"; then
             # an interrupted 0.1.0 upgrade already replaced herdr
             REMOVE_LEGACY=1
         else
@@ -234,11 +241,14 @@ check_destinations() {
     # Check every PATH entry, not just the first match: an install directory
     # earlier on PATH would otherwise hide another herdr later on PATH.
     install_physical="$(physical_dir "$INSTALL_DIR" || true)"
+    # set -f keeps glob characters in PATH entries literal
     old_ifs="$IFS"
     IFS=:
+    set -f
     for dir in $PATH; do
         IFS="$old_ifs"
-        [ -n "$dir" ] || continue
+        # an empty entry means the current directory
+        dir="${dir:-.}"
         if [ "$dir" = "$INSTALL_DIR" ] || { [ -n "$install_physical" ] && [ "$(physical_dir "$dir" || true)" = "$install_physical" ]; }; then
             continue
         fi
@@ -248,6 +258,7 @@ check_destinations() {
             fi
         done
     done
+    set +f
     IFS="$old_ifs"
 }
 

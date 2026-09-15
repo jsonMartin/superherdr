@@ -74,7 +74,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 #                  vesper
 # name = "catppuccin"
 
-# Follow host terminal light/dark appearance and switch Superherdr UI themes.
+# Follow host terminal light/dark appearance and switch Herdr UI themes.
 # Existing manual behavior is unchanged unless this is true.
 # auto_switch = false
 # dark_name = "catppuccin"
@@ -111,7 +111,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 
 # CWD policy for new panes, tabs, and workspaces when no explicit --cwd is provided.
 # Use "follow" to inherit the source pane/workspace, "home" for $HOME,
-# "current" for Superherdr's process directory, or a fixed path such as "~/Projects".
+# "current" for Herdr's process directory, or a fixed path such as "~/Projects".
 # new_cwd = "follow"
 
 # Render pane images in Kitty graphics-compatible outer terminals.
@@ -243,11 +243,11 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Collapsed sidebar presentation: "compact" keeps the narrow status rail, "hidden" uses zero width.
 # sidebar_collapsed_mode = "compact"
 
-# Terminal width at or below which Superherdr uses the mobile single-column layout.
+# Terminal width at or below which Herdr uses the mobile single-column layout.
 # Increase this for foldables, tablets, or wide phone terminals.
 # mobile_width_threshold = 64
 
-# Capture mouse input for Superherdr's mouse UI.
+# Capture mouse input for Herdr's mouse UI.
 # Set false to let the terminal handle normal clicks, such as Cmd-clicking URLs.
 # Pane apps like lazygit and btop can still receive mouse when they request it.
 # mouse_capture = true
@@ -258,16 +258,16 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # copy_on_select = true
 
 # Host cursor policy: "auto", "native", or "drawn".
-# "auto" draws Superherdr's own cursor on native Windows builds and WSL to avoid ConPTY cursor flicker, and uses the native terminal cursor elsewhere.
-# "native" always uses the outer terminal cursor. "drawn" always draws Superherdr's cursor as terminal cell content.
+# "auto" draws Herdr's own cursor on native Windows builds and WSL to avoid ConPTY cursor flicker, and uses the native terminal cursor elsewhere.
+# "native" always uses the outer terminal cursor. "drawn" always draws Herdr's cursor as terminal cell content.
 # host_cursor = "auto"
 
-# Optional modifier that forwards right-click hold/drag gestures to pane apps instead of opening Superherdr's pane menu.
+# Optional modifier that forwards right-click hold/drag gestures to pane apps instead of opening Herdr's pane menu.
 # Empty/off disables this. Shift is intentionally unsupported because terminals commonly reserve Shift+mouse.
 # right_click_passthrough_modifier = ""
 
 # Force a full redraw when the outer terminal regains focus.
-# Set false to reduce visible flashing when switching back to Superherdr.
+# Set false to reduce visible flashing when switching back to Herdr.
 # Trade-off: rare host terminal surface corruption may persist until the next full redraw.
 # redraw_on_focus_gained = true
 
@@ -313,14 +313,14 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 
 # Ordered status entries at the right edge of the desktop tab bar.
 # Supported types: zoom, hostname, datetime, text, and command.
-# Hostname, datetime, and command entries resolve on the Superherdr server.
+# Hostname, datetime, and command entries resolve on the Herdr server.
 # tab_bar_right = []
 # tab_bar_right_separator = " "
 
-# Title Superherdr writes to the terminal it runs in, which is what window managers
+# Title Herdr writes to the terminal it runs in, which is what window managers
 # show in title, tab, and group bars. Tokens are {hostname}, {workspace}, {tab},
 # {pane}, and {terminal_title}; {{ and }} are literal braces.
-# The title renders on the Superherdr server, so {hostname} names the host the panes
+# The title renders on the Herdr server, so {hostname} names the host the panes
 # run on even when attaching from a remote client.
 # Set to "" to leave the outer terminal title alone.
 # window_title = "{hostname}: {workspace}"
@@ -389,7 +389,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 
 [session]
 # Resume supported AI-agent panes into their native conversation sessions after
-# a Superherdr server restart. Requires official integrations that report session refs.
+# a Herdr server restart. Requires official integrations that report session refs.
 # resume_agents_on_restore = true
 
 [remote]
@@ -397,7 +397,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # When true (default), herdr runs remote ssh through a generated config that
 # includes your ~/.ssh/config first and adds ServerAliveInterval/
 # ServerAliveCountMax as fallbacks (so any keepalive values you set yourself
-# still win) to survive idle network/NAT timeouts. Superherdr also uses a private
+# still win) to survive idle network/NAT timeouts. Herdr also uses a private
 # per-attach OpenSSH control socket to reuse the first authenticated connection.
 # Set false to run plain ssh against your ssh config unchanged — this does not
 # force keepalive or multiplexing off, it only stops herdr from adding its own.
@@ -678,7 +678,7 @@ fn main() -> io::Result<()> {
         println!();
         println!("Options:");
         println!("  --session <name>    Use or create a named persistent session");
-        println!("  --remote <target>   Attach through SSH to a remote Superherdr server");
+        println!("  --remote <target>   Attach through SSH to a remote Herdr server");
         println!("  --remote-keybindings <local|server>");
         println!("                      Keybindings for --remote app attach (default: local)");
         println!("  --handoff           Opt into live handoff for update or remote attach");
@@ -690,7 +690,7 @@ fn main() -> io::Result<()> {
         println!("Config: {}", config::config_path().display());
         println!("Logs:   {}", logging::help_log_paths_summary());
         println!("Env:    HERDR_CONFIG_PATH overrides config file path");
-        println!("Upstream: https://herdr.dev");
+        println!("Home:   https://herdr.dev");
         println!();
         println!("{}", cli::AGENT_HELP_FOOTER);
         return Ok(());

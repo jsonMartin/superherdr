@@ -237,24 +237,31 @@ fi
         self.assertEqual(result.returncode, 0, result.stderr)
         self._assert_only_new_herdr_installed()
 
-    def test_checksum_mismatch_preserves_both_previous_layouts(self) -> None:
+    def _snapshot_install_dir(self) -> dict[str, bytes | str]:
+        return {
+            p.name: os.readlink(p) if p.is_symlink() else p.read_bytes()
+            for p in self.install_dir.iterdir()
+        }
+
+    def _assert_failure_preserves_both_layouts(
+        self, expected_error: str, checksum: str, extra_env: dict[str, str] | None = None
+    ) -> None:
         for install_previous in (self._install_previous_superherdr, self._install_legacy_pair):
             with self.subTest(layout=install_previous.__name__):
                 shutil.rmtree(self.install_dir, ignore_errors=True)
                 install_previous()
-                before = {p.name: (p.is_symlink(), os.readlink(p) if p.is_symlink() else p.read_bytes())
-                          for p in self.install_dir.iterdir()}
+                before = self._snapshot_install_dir()
 
-                result = self._run_installer("0" * 64)
+                result = self._run_installer(checksum, extra_env)
 
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("checksum did not match", result.stderr)
-                after = {p.name: (p.is_symlink(), os.readlink(p) if p.is_symlink() else p.read_bytes())
-                         for p in self.install_dir.iterdir()}
-                self.assertEqual(before, after)
+                self.assertIn(expected_error, result.stderr)
+                self.assertEqual(self._snapshot_install_dir(), before)
 
-    def test_failed_staged_rename_preserves_legacy_pair(self) -> None:
-        self._install_legacy_pair()
+    def test_checksum_mismatch_preserves_both_previous_layouts(self) -> None:
+        self._assert_failure_preserves_both_layouts("checksum did not match", "0" * 64)
+
+    def test_failed_staged_rename_preserves_both_previous_layouts(self) -> None:
         real_mv = os.readlink(self.bin_dir / "mv")
         (self.bin_dir / "mv").unlink()
         self._write_executable(
@@ -270,43 +277,51 @@ exec "{real_mv}" "$@"
 """,
         )
 
-        result = self._run_installer(self.expected_sha256)
+        # the snapshot also proves the staging directory was cleaned up
+        self._assert_failure_preserves_both_layouts("injected rename failure", self.expected_sha256)
 
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("injected rename failure", result.stderr)
-        self.assertEqual((self.install_dir / "superherdr").read_bytes(), LEGACY_BINARY)
-        self.assertEqual(os.readlink(self.install_dir / "herdr"), "superherdr")
-        # the task-owned staging directory is cleaned up even on failure
-        self.assertEqual(list(self.install_dir.glob(".superherdr-stage.*")), [])
-
-    def test_corrupt_archive_preserves_previous_binary(self) -> None:
-        self._install_previous_superherdr()
+    def test_corrupt_archive_preserves_both_previous_layouts(self) -> None:
         corrupt = self.root / "corrupt.tar.gz"
         corrupt.write_bytes(b"\x1f\x8b not really a gzip stream")
         # publish the corrupt archive's own digest so the run reaches extraction
-        corrupt_sha256 = hashlib.sha256(corrupt.read_bytes()).hexdigest()
-
-        result = self._run_installer(
-            corrupt_sha256, extra_env={"FAKE_ARCHIVE": str(corrupt)}
+        self._assert_failure_preserves_both_layouts(
+            "could not extract",
+            hashlib.sha256(corrupt.read_bytes()).hexdigest(),
+            {"FAKE_ARCHIVE": str(corrupt)},
         )
 
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("could not extract", result.stderr)
-        self.assertEqual((self.install_dir / "herdr").read_bytes(), PREVIOUS_SUPERHERDR)
-
-    def test_archive_missing_binary_preserves_previous_binary(self) -> None:
-        self._install_previous_superherdr()
+    def test_archive_missing_binary_preserves_both_previous_layouts(self) -> None:
         incomplete = self.root / "incomplete.tar.gz"
         self._write_archive(incomplete, include_binary=False)
-        incomplete_sha256 = hashlib.sha256(incomplete.read_bytes()).hexdigest()
-
-        result = self._run_installer(
-            incomplete_sha256, extra_env={"FAKE_ARCHIVE": str(incomplete)}
+        self._assert_failure_preserves_both_layouts(
+            "archive does not contain herdr",
+            hashlib.sha256(incomplete.read_bytes()).hexdigest(),
+            {"FAKE_ARCHIVE": str(incomplete)},
         )
 
+    def test_update_through_symlinked_install_dir_on_path(self) -> None:
+        self._install_previous_superherdr()
+        alias = self.root / "alias-bin"
+        alias.symlink_to(self.install_dir)
+
+        result = self._run_installer(
+            self.expected_sha256,
+            extra_env={"PATH": f"{alias}::{self.bin_dir}"},
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self._assert_only_new_herdr_installed()
+
+    def test_foreign_superherdr_beside_owned_herdr_is_refused(self) -> None:
+        self._install_previous_superherdr()
+        self._write_executable(self.install_dir / "superherdr", UPSTREAM_HERDR)
+
+        result = self._run_installer(self.expected_sha256)
+
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("archive does not contain herdr", result.stderr)
-        self.assertEqual((self.install_dir / "herdr").read_bytes(), PREVIOUS_SUPERHERDR)
+        self.assertIn("this installer did not create it", result.stderr)
+        self.assertEqual((self.install_dir / "superherdr").read_bytes(), UPSTREAM_HERDR)
+        self._assert_fetch_never_happened()
 
     def test_unsupported_target_is_refused_before_fetching(self) -> None:
         result = self._run_installer(

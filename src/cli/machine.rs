@@ -10,11 +10,11 @@ const HELP: &str = "Usage:
   herdr machine enable <profile-id>
   herdr machine disable <profile-id>
 
-Add prepares the remote Superherdr installation and starts its server before saving.
+Add prepares the remote Herdr installation and starts its server before saving.
 Missing or incompatible installations require approval in an interactive terminal.
-Changes apply automatically to open local Superherdr clients.
+Changes apply automatically to open local Herdr clients.
 Removing or disabling a machine leaves its remote sessions running.
-Saved machines contain only a label, SSH target, explicit Superherdr session, and enabled state.
+Saved machines contain only a label, SSH target, explicit Herdr session, and enabled state.
 SSH credentials and key material remain owned by OpenSSH.";
 
 #[derive(Serialize)]
@@ -166,7 +166,7 @@ fn add(args: &[String]) -> std::io::Result<i32> {
         ))
     })?;
     println!("Saved SSH machine {id}. Remote server is ready.");
-    println!("Open Superherdr clients connect automatically.");
+    println!("Open Herdr clients connect automatically.");
     Ok(0)
 }
 
