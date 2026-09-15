@@ -459,7 +459,7 @@ fn client_sees_headless_startup_config_diagnostic() {
     assert!(
         wait_until(Duration::from_secs(8), Duration::from_millis(20), || {
             let output = read_output(&output);
-            output.contains("config.toml") && output.contains("herdr config check")
+            output.contains("config.toml") && output.contains("superherdr config check")
         }),
         "client shell should render startup config diagnostic; output: {:?}",
         read_output(&output)
