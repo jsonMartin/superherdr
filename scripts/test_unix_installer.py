@@ -18,11 +18,15 @@ REQUIRED_COMMANDS = (
     "awk", "cat", "chmod", "cp", "grep", "gzip", "ln", "mkdir", "mktemp", "mv",
     "readlink", "rm", "tar",
 )
-ARCHIVE_NAME = "superherdr-0.1.0-linux-x86_64.tar.gz"
+VERSION = "0.9.0.1"
+ARCHIVE_NAME = f"superherdr-{VERSION}-linux-x86_64.tar.gz"
 OWNED_URL_BASE = (
-    "https://github.com/jsonMartin/superherdr/releases/download/superherdr-v0.1.0"
+    f"https://github.com/jsonMartin/superherdr/releases/download/superherdr-v{VERSION}"
 )
-PREVIOUS_BINARY = b"previous-superherdr\n"
+NEW_BINARY = b'#!/bin/sh\necho "herdr 0.9.0 (superherdr 0.9.0.1)"\n'
+PREVIOUS_SUPERHERDR = b'#!/bin/sh\necho "herdr 0.9.0 (superherdr 0.9.0.0)"\n'
+LEGACY_BINARY = b'#!/bin/sh\necho "superherdr 0.1.0"\n'
+UPSTREAM_HERDR = b'#!/bin/sh\necho "herdr 0.9.0"\n'
 
 
 @unittest.skipUnless(os.name == "posix", "Unix installer requires a POSIX host")
@@ -37,7 +41,6 @@ class UnixInstallerTests(unittest.TestCase):
         self.license_dir = self.xdg_data_dir / "superherdr" / "licenses"
         self.curl_log = self.root / "curl-log"
         self.archive = self.root / ARCHIVE_NAME
-        self.payload = b"#!/bin/sh\necho fake-superherdr\n"
         self._write_archive()
         self.expected_sha256 = hashlib.sha256(self.archive.read_bytes()).hexdigest()
 
@@ -48,7 +51,7 @@ class UnixInstallerTests(unittest.TestCase):
             (self.bin_dir / command).symlink_to(path)
 
         self._write_executable(
-            "uname",
+            self.bin_dir / "uname",
             """#!/bin/sh
 case "$1" in
   -s) echo "${FAKE_UNAME_S:-Linux}" ;;
@@ -59,7 +62,7 @@ esac
 """,
         )
         self._write_executable(
-            "curl",
+            self.bin_dir / "curl",
             """#!/bin/sh
 url=""
 out=""
@@ -105,10 +108,10 @@ fi
     ) -> None:
         with tarfile.open(path or self.archive, "w:gz") as tar:
             if include_binary:
-                info = tarfile.TarInfo("superherdr")
-                info.size = len(self.payload)
+                info = tarfile.TarInfo("herdr")
+                info.size = len(NEW_BINARY)
                 info.mode = 0o755
-                tar.addfile(info, io.BytesIO(self.payload))
+                tar.addfile(info, io.BytesIO(NEW_BINARY))
             license_text = b"fake-license\n"
             info = tarfile.TarInfo("LICENSE")
             info.size = len(license_text)
@@ -117,9 +120,12 @@ fi
             info.size = len(license_text)
             tar.addfile(info, io.BytesIO(license_text))
 
-    def _write_executable(self, name: str, content: str) -> None:
-        path = self.bin_dir / name
-        path.write_text(content, encoding="utf-8")
+    def _write_executable(self, path: Path, content: str | bytes) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(content, str):
+            path.write_text(content, encoding="utf-8")
+        else:
+            path.write_bytes(content)
         path.chmod(0o755)
 
     def _write_sums(self, checksum: str) -> Path:
@@ -152,25 +158,29 @@ fi
             check=False,
         )
 
-    def _install_previous_release(self) -> None:
-        self.install_dir.mkdir(parents=True)
-        (self.install_dir / "superherdr").write_bytes(PREVIOUS_BINARY)
-        (self.install_dir / "superherdr").chmod(0o755)
+    def _install_previous_superherdr(self) -> None:
+        self._write_executable(self.install_dir / "herdr", PREVIOUS_SUPERHERDR)
+
+    def _install_legacy_pair(self) -> None:
+        self._write_executable(self.install_dir / "superherdr", LEGACY_BINARY)
         (self.install_dir / "herdr").symlink_to("superherdr")
 
     def _assert_fetch_never_happened(self) -> None:
         self.assertFalse(self.curl_log.exists())
 
-    def test_successful_archive_installation_in_temporary_home(self) -> None:
+    def _assert_only_new_herdr_installed(self) -> None:
+        herdr = self.install_dir / "herdr"
+        self.assertFalse(herdr.is_symlink())
+        self.assertEqual(herdr.read_bytes(), NEW_BINARY)
+        self.assertTrue(os.access(herdr, os.X_OK))
+        self.assertFalse((self.install_dir / "superherdr").exists())
+        self.assertEqual(list(self.install_dir.glob(".superherdr-stage.*")), [])
+
+    def test_fresh_install_creates_only_herdr(self) -> None:
         result = self._run_installer(self.expected_sha256.upper())
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        installed = self.install_dir / "superherdr"
-        self.assertEqual(installed.read_bytes(), self.payload)
-        self.assertTrue(os.access(installed, os.X_OK))
-        alias = self.install_dir / "herdr"
-        self.assertTrue(alias.is_symlink())
-        self.assertEqual(os.readlink(alias), "superherdr")
+        self._assert_only_new_herdr_installed()
         self.assertTrue((self.license_dir / "LICENSE").is_file())
         self.assertTrue((self.license_dir / "libghostty-vt-LICENSE").is_file())
         # the fixture curl must have talked only to the owned release base,
@@ -180,56 +190,78 @@ fi
             [f"{OWNED_URL_BASE}/SHA256SUMS", f"{OWNED_URL_BASE}/{ARCHIVE_NAME}"],
         )
 
-    def test_update_over_previous_direct_install(self) -> None:
-        self._install_previous_release()
+    def test_update_over_owned_herdr(self) -> None:
+        self._install_previous_superherdr()
 
-        # destination on PATH so the ownership check sees the recognized
-        # direct install through command -v as well
+        # destination on PATH: the PATH scan must skip the install directory
         result = self._run_installer(
             self.expected_sha256,
             extra_env={"PATH": f"{self.install_dir}:{self.bin_dir}"},
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual((self.install_dir / "superherdr").read_bytes(), self.payload)
-        self.assertTrue((self.install_dir / "herdr").is_symlink())
-        self.assertEqual(os.readlink(self.install_dir / "herdr"), "superherdr")
+        self._assert_only_new_herdr_installed()
 
     def test_upgrade_with_trailing_slash_install_dir_on_path(self) -> None:
-        self._install_previous_release()
+        self._install_previous_superherdr()
 
         result = self._run_installer(
             self.expected_sha256,
             extra_env={
                 "SUPERHERDR_INSTALL_DIR": f"{self.install_dir}/",
-                "PATH": f"{self.install_dir}:{self.bin_dir}",
+                "PATH": f"{self.install_dir}/:{self.bin_dir}",
             },
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual((self.install_dir / "superherdr").read_bytes(), self.payload)
+        self._assert_only_new_herdr_installed()
 
-    def test_checksum_mismatch_leaves_existing_binary_intact(self) -> None:
-        self._install_previous_release()
+    def test_upgrade_from_legacy_pair_removes_superherdr(self) -> None:
+        self._install_legacy_pair()
 
-        result = self._run_installer("0" * 64)
-
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("checksum did not match", result.stderr)
-        self.assertEqual(
-            (self.install_dir / "superherdr").read_bytes(), PREVIOUS_BINARY
+        result = self._run_installer(
+            self.expected_sha256,
+            extra_env={"PATH": f"{self.install_dir}:{self.bin_dir}"},
         )
-        self.assertEqual(os.readlink(self.install_dir / "herdr"), "superherdr")
 
-    def test_failed_staged_rename_preserves_previous_binary(self) -> None:
-        self._install_previous_release()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self._assert_only_new_herdr_installed()
+
+    def test_resumes_interrupted_legacy_upgrade(self) -> None:
+        # herdr was already replaced, but the 0.1.0 superherdr was not removed
+        self._install_previous_superherdr()
+        self._write_executable(self.install_dir / "superherdr", LEGACY_BINARY)
+
+        result = self._run_installer(self.expected_sha256)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self._assert_only_new_herdr_installed()
+
+    def test_checksum_mismatch_preserves_both_previous_layouts(self) -> None:
+        for install_previous in (self._install_previous_superherdr, self._install_legacy_pair):
+            with self.subTest(layout=install_previous.__name__):
+                shutil.rmtree(self.install_dir, ignore_errors=True)
+                install_previous()
+                before = {p.name: (p.is_symlink(), os.readlink(p) if p.is_symlink() else p.read_bytes())
+                          for p in self.install_dir.iterdir()}
+
+                result = self._run_installer("0" * 64)
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("checksum did not match", result.stderr)
+                after = {p.name: (p.is_symlink(), os.readlink(p) if p.is_symlink() else p.read_bytes())
+                         for p in self.install_dir.iterdir()}
+                self.assertEqual(before, after)
+
+    def test_failed_staged_rename_preserves_legacy_pair(self) -> None:
+        self._install_legacy_pair()
         real_mv = os.readlink(self.bin_dir / "mv")
         (self.bin_dir / "mv").unlink()
         self._write_executable(
-            "mv",
+            self.bin_dir / "mv",
             f"""#!/bin/sh
 for argument in "$@"; do
-  if [ "$argument" = "{self.install_dir}/superherdr" ]; then
+  if [ "$argument" = "{self.install_dir}/herdr" ]; then
     echo "injected rename failure" >&2
     exit 1
   fi
@@ -242,15 +274,13 @@ exec "{real_mv}" "$@"
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("injected rename failure", result.stderr)
-        self.assertEqual(
-            (self.install_dir / "superherdr").read_bytes(), PREVIOUS_BINARY
-        )
+        self.assertEqual((self.install_dir / "superherdr").read_bytes(), LEGACY_BINARY)
         self.assertEqual(os.readlink(self.install_dir / "herdr"), "superherdr")
         # the task-owned staging directory is cleaned up even on failure
         self.assertEqual(list(self.install_dir.glob(".superherdr-stage.*")), [])
 
     def test_corrupt_archive_preserves_previous_binary(self) -> None:
-        self._install_previous_release()
+        self._install_previous_superherdr()
         corrupt = self.root / "corrupt.tar.gz"
         corrupt.write_bytes(b"\x1f\x8b not really a gzip stream")
         # publish the corrupt archive's own digest so the run reaches extraction
@@ -262,13 +292,10 @@ exec "{real_mv}" "$@"
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("could not extract", result.stderr)
-        self.assertEqual(
-            (self.install_dir / "superherdr").read_bytes(), PREVIOUS_BINARY
-        )
-        self.assertEqual(os.readlink(self.install_dir / "herdr"), "superherdr")
+        self.assertEqual((self.install_dir / "herdr").read_bytes(), PREVIOUS_SUPERHERDR)
 
     def test_archive_missing_binary_preserves_previous_binary(self) -> None:
-        self._install_previous_release()
+        self._install_previous_superherdr()
         incomplete = self.root / "incomplete.tar.gz"
         self._write_archive(incomplete, include_binary=False)
         incomplete_sha256 = hashlib.sha256(incomplete.read_bytes()).hexdigest()
@@ -278,11 +305,8 @@ exec "{real_mv}" "$@"
         )
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("archive does not contain superherdr", result.stderr)
-        self.assertEqual(
-            (self.install_dir / "superherdr").read_bytes(), PREVIOUS_BINARY
-        )
-        self.assertEqual(os.readlink(self.install_dir / "herdr"), "superherdr")
+        self.assertIn("archive does not contain herdr", result.stderr)
+        self.assertEqual((self.install_dir / "herdr").read_bytes(), PREVIOUS_SUPERHERDR)
 
     def test_unsupported_target_is_refused_before_fetching(self) -> None:
         result = self._run_installer(
@@ -304,41 +328,57 @@ exec "{real_mv}" "$@"
         self.assertIn("Android/Termux is not supported", result.stderr)
         self._assert_fetch_never_happened()
 
-    def test_package_managed_symlink_in_install_dir_is_refused(self) -> None:
+    def test_upstream_herdr_in_install_dir_is_refused(self) -> None:
+        self._write_executable(self.install_dir / "herdr", UPSTREAM_HERDR)
+
+        result = self._run_installer(self.expected_sha256)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("is not Superherdr", result.stderr)
+        self.assertEqual((self.install_dir / "herdr").read_bytes(), UPSTREAM_HERDR)
+        self._assert_fetch_never_happened()
+
+    def test_non_executable_herdr_is_refused(self) -> None:
         self.install_dir.mkdir(parents=True)
+        (self.install_dir / "herdr").write_bytes(NEW_BINARY)
+        (self.install_dir / "herdr").chmod(0o644)
+
+        result = self._run_installer(self.expected_sha256)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not an executable file", result.stderr)
+        self._assert_fetch_never_happened()
+
+    def test_package_managed_symlink_in_install_dir_is_refused(self) -> None:
         foreign = self.root / "package" / "bin" / "herdr"
-        foreign.parent.mkdir(parents=True)
-        foreign.write_bytes(b"package-managed\n")
+        self._write_executable(foreign, UPSTREAM_HERDR)
+        self.install_dir.mkdir(parents=True)
         (self.install_dir / "herdr").symlink_to(foreign)
 
         result = self._run_installer(self.expected_sha256)
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("refusing to overwrite", result.stderr)
-        self.assertEqual(foreign.read_bytes(), b"package-managed\n")
         self.assertEqual(os.readlink(self.install_dir / "herdr"), str(foreign))
         self._assert_fetch_never_happened()
 
     def test_external_superherdr_alias_is_refused(self) -> None:
-        # an alias whose target merely ends in /superherdr is not ours
-        self.install_dir.mkdir(parents=True)
+        # a herdr symlink whose target merely ends in /superherdr is not ours
         target = self.root / "package" / "bin" / "superherdr"
-        target.parent.mkdir(parents=True)
-        target.write_bytes(b"package-managed-superherdr\n")
+        self._write_executable(target, LEGACY_BINARY)
+        self.install_dir.mkdir(parents=True)
         (self.install_dir / "herdr").symlink_to(target)
 
         result = self._run_installer(self.expected_sha256)
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("refusing to overwrite", result.stderr)
-        self.assertEqual(target.read_bytes(), b"package-managed-superherdr\n")
         self.assertEqual(os.readlink(self.install_dir / "herdr"), str(target))
         self._assert_fetch_never_happened()
 
     def test_dangling_external_superherdr_alias_is_refused(self) -> None:
-        self.install_dir.mkdir(parents=True)
         target = self.root / "package" / "bin" / "superherdr"
-        target.parent.mkdir(parents=True)
+        self.install_dir.mkdir(parents=True)
         (self.install_dir / "herdr").symlink_to(target)
         self.assertFalse(target.exists())
 
@@ -346,32 +386,41 @@ exec "{real_mv}" "$@"
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("refusing to overwrite", result.stderr)
-        self.assertEqual(os.readlink(self.install_dir / "herdr"), str(target))
         self._assert_fetch_never_happened()
 
-    def test_unknown_regular_binary_without_owned_alias_is_refused(self) -> None:
-        self.install_dir.mkdir(parents=True)
-        (self.install_dir / "superherdr").write_bytes(b"mystery-superherdr\n")
-        (self.install_dir / "superherdr").chmod(0o755)
+    def test_unpaired_superherdr_is_refused(self) -> None:
+        self._write_executable(self.install_dir / "superherdr", LEGACY_BINARY)
 
         result = self._run_installer(self.expected_sha256)
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("this installer did not create it", result.stderr)
-        self.assertEqual(
-            (self.install_dir / "superherdr").read_bytes(), b"mystery-superherdr\n"
-        )
+        self.assertEqual((self.install_dir / "superherdr").read_bytes(), LEGACY_BINARY)
         self.assertFalse((self.install_dir / "herdr").exists())
         self._assert_fetch_never_happened()
 
-    def test_conflicting_install_outside_install_dir_is_refused(self) -> None:
-        (self.bin_dir / "superherdr").write_bytes(b"#!/bin/sh\necho homebrew-superherdr\n")
-        (self.bin_dir / "superherdr").chmod(0o755)
+    def test_conflicting_install_elsewhere_on_path_is_refused(self) -> None:
+        self._write_executable(self.bin_dir / "herdr", UPSTREAM_HERDR)
 
         result = self._run_installer(self.expected_sha256)
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("never takes over another installation", result.stderr)
+        self._assert_fetch_never_happened()
+
+    def test_herdr_shadowed_later_on_path_is_refused(self) -> None:
+        self._install_previous_superherdr()
+        other = self.root / "usr-local-bin"
+        self._write_executable(other / "herdr", UPSTREAM_HERDR)
+
+        result = self._run_installer(
+            self.expected_sha256,
+            extra_env={"PATH": f"{self.install_dir}:{self.bin_dir}:{other}"},
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(str(other / "herdr"), result.stderr)
+        self.assertEqual((self.install_dir / "herdr").read_bytes(), PREVIOUS_SUPERHERDR)
         self._assert_fetch_never_happened()
 
 

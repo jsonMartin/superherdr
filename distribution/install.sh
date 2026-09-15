@@ -1,9 +1,10 @@
 #!/bin/sh
 set -eu
 
-BIN="superherdr"
-ALIAS="herdr"
-DEFAULT_VERSION="0.1.0"
+BIN="herdr"
+# Superherdr 0.1.0 installed `superherdr` plus a `herdr` symlink to it.
+LEGACY_BIN="superherdr"
+DEFAULT_VERSION="0.9.0.1"
 # Fixed to Superherdr's own GitHub releases; tests stub curl rather than
 # re-pointing the installer at another base.
 RELEASE_URL_BASE="https://github.com/jsonMartin/superherdr/releases/download"
@@ -18,15 +19,17 @@ LICENSE_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/superherdr/licenses"
 # else is ever deleted
 TMP=""
 STAGE=""
+# set by check_destinations: remove the 0.1.0 `superherdr` after installing
+REMOVE_LEGACY=""
 
 main() {
     echo ""
-    echo "  superherdr installer (terminal agent runtime built on Herdr)"
+    echo "  superherdr installer (installs the herdr command)"
     echo ""
 
     VERSION="${SUPERHERDR_VERSION:-${1:-$DEFAULT_VERSION}}"
-    if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-        err "invalid version '$VERSION': expected N.N.N (e.g. 0.1.0)"
+    if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$'; then
+        err "invalid version '$VERSION': expected a release version such as 0.9.0.1"
     fi
 
     # detect platform; only release targets that actually ship are supported
@@ -67,7 +70,7 @@ main() {
 
     # refuse conflicting installs before downloading anything; never touch
     # another installation (package-managed binaries, upstream Herdr, or a
-    # Homebrew superherdr) and never disturb existing config, state, or sessions
+    # Homebrew install) and never disturb existing config, state, or sessions
     check_destinations
 
     # fetch the published SHA256SUMS and this archive's expected digest
@@ -119,9 +122,9 @@ main() {
 
     # install into the user-local directory (no root); re-running this
     # installer is the direct-install update path. The new binary is staged
-    # inside INSTALL_DIR and chmodded before the final rename so the last
-    # move is a same-filesystem rename and an interrupted copy can never
-    # truncate the previous binary.
+    # inside INSTALL_DIR and chmodded before the final rename, so the last move
+    # is a same-filesystem rename that replaces a previous herdr file or the
+    # 0.1.0 herdr symlink in one step and never truncates the previous binary.
     mkdir -p "$INSTALL_DIR"
     STAGE="$(mktemp -d "${INSTALL_DIR}/.superherdr-stage.XXXXXX")"
     mv "${TMP}/pkg/${BIN}" "${STAGE}/${BIN}"
@@ -130,10 +133,12 @@ main() {
     rm -rf "${STAGE}"
     STAGE=""
 
-    # herdr alias so inherited HERDR_* tooling keeps working; only reached
-    # when check_destinations confirmed the name is ours or free
-    rm -f "${INSTALL_DIR}/${ALIAS}"
-    ln -s "${BIN}" "${INSTALL_DIR}/${ALIAS}"
+    # only after herdr is in place, so an interruption before this point keeps
+    # the old pair and one after it is resumed by the next run
+    if [ -n "$REMOVE_LEGACY" ]; then
+        rm -f "${INSTALL_DIR}/${LEGACY_BIN}"
+        log "removed ${INSTALL_DIR}/${LEGACY_BIN} from Superherdr 0.1.0"
+    fi
 
     # distribute the bundled licenses alongside the binary
     mkdir -p "$LICENSE_DIR"
@@ -145,7 +150,6 @@ main() {
     fi
 
     log "installed ${BIN} to ${INSTALL_DIR}/${BIN}"
-    log "created alias ${INSTALL_DIR}/${ALIAS} -> ${BIN}"
     log "licenses copied to ${LICENSE_DIR}"
 
     case ":${PATH}:" in
@@ -161,7 +165,7 @@ main() {
     esac
 
     echo ""
-    log "ready. run 'superherdr' (or 'herdr') to get started."
+    log "ready. run 'herdr' to get started."
     log "to update later: re-run this installer. it does not self-update."
     echo ""
 }
@@ -174,42 +178,77 @@ cleanup() {
     done
 }
 
-# Fail safely on any existing destination this installer did not create:
-# package-managed symlinks, Homebrew superherdr, or upstream Herdr's `herdr`.
-# A previous direct install is recognized only by its exact owned pairing: a
-# regular ${INSTALL_DIR}/superherdr plus a ${INSTALL_DIR}/herdr symlink whose
-# target is exactly that binary (relative or absolute). An external symlink is
-# never mistaken for ownership, even when its target ends in /superherdr.
+# A regular, executable herdr whose version output names Superherdr.
+is_superherdr_binary() {
+    [ -f "$1" ] && [ ! -L "$1" ] && [ -x "$1" ] \
+        && "$1" --version 2>/dev/null | grep -q '(superherdr '
+}
+
+physical_dir() {
+    (cd "$1" 2>/dev/null && pwd -P)
+}
+
+# Fail safely on any destination this installer did not create: upstream
+# Herdr's herdr, package-managed symlinks, or a Homebrew install elsewhere on
+# PATH. Owned layouts are a Superherdr herdr file, the 0.1.0 pair (regular
+# superherdr plus a herdr symlink to exactly it), or a Superherdr herdr beside
+# a superherdr left by an interrupted 0.1.0 upgrade.
 check_destinations() {
-    LINK_TARGET=""
-    if [ -L "${INSTALL_DIR}/${BIN}" ]; then
-        err "${INSTALL_DIR}/${BIN} is a symlink; refusing to overwrite it (it may be package-managed). Remove it manually if it is yours."
-    fi
-    if [ -L "${INSTALL_DIR}/${ALIAS}" ]; then
-        LINK_TARGET="$(readlink "${INSTALL_DIR}/${ALIAS}")"
-        case "$LINK_TARGET" in
-            "$BIN"|"${INSTALL_DIR}/${BIN}") ;;
-            *) err "${INSTALL_DIR}/${ALIAS} is a symlink to ${LINK_TARGET}; refusing to overwrite it (it may be package-managed or another install)." ;;
+    target="${INSTALL_DIR}/${BIN}"
+    legacy="${INSTALL_DIR}/${LEGACY_BIN}"
+    owned_herdr=""
+
+    if [ -L "$target" ]; then
+        link_target="$(readlink "$target")"
+        case "$link_target" in
+            "$LEGACY_BIN"|"$legacy")
+                if [ -f "$legacy" ] && [ ! -L "$legacy" ]; then
+                    REMOVE_LEGACY=1
+                else
+                    err "${target} is a symlink to ${link_target}, which is not a regular Superherdr install; refusing to overwrite it."
+                fi
+                ;;
+            *) err "${target} is a symlink to ${link_target}; refusing to overwrite it (it may be package-managed or another install)." ;;
         esac
-    elif [ -e "${INSTALL_DIR}/${ALIAS}" ]; then
-        err "${INSTALL_DIR}/${ALIAS} already exists as a regular file; it may be the original Herdr. Remove or move it yourself, or set SUPERHERDR_INSTALL_DIR."
-    fi
-    if [ -e "${INSTALL_DIR}/${BIN}" ]; then
-        case "$LINK_TARGET" in
-            "$BIN"|"${INSTALL_DIR}/${BIN}") ;;
-            *) err "${INSTALL_DIR}/${BIN} already exists but ${INSTALL_DIR}/${ALIAS} does not point at it; this installer did not create it. Remove it manually if it is yours." ;;
-        esac
-    fi
-    for name in "$BIN" "$ALIAS"; do
-        if FOUND="$(command -v "$name" 2>/dev/null)"; then
-            case "$FOUND" in
-                "${INSTALL_DIR}/${name}") ;;
-                *)
-                    err "existing ${name} found at ${FOUND} (outside ${INSTALL_DIR}). Installing would shadow or conflict with it. Remove it first (e.g. 'brew uninstall' or your package manager); this installer never takes over another installation."
-                    ;;
-            esac
+    elif [ -e "$target" ]; then
+        if [ ! -f "$target" ] || [ ! -x "$target" ]; then
+            err "${target} exists but is not an executable file; this installer did not create it. Remove it yourself, or set SUPERHERDR_INSTALL_DIR."
         fi
+        if ! is_superherdr_binary "$target"; then
+            err "${target} exists and is not Superherdr; it may be the original Herdr. Remove or move it yourself, or set SUPERHERDR_INSTALL_DIR."
+        fi
+        owned_herdr=1
+    fi
+
+    if [ -L "$legacy" ]; then
+        err "${legacy} is a symlink; refusing to touch it (it may be package-managed). Remove it manually if it is yours."
+    elif [ -e "$legacy" ] && [ -z "$REMOVE_LEGACY" ]; then
+        if [ -n "$owned_herdr" ] && [ -f "$legacy" ]; then
+            # an interrupted 0.1.0 upgrade already replaced herdr
+            REMOVE_LEGACY=1
+        else
+            err "${legacy} exists but ${target} is not its Superherdr alias; this installer did not create it. Remove it manually if it is yours."
+        fi
+    fi
+
+    # Check every PATH entry, not just the first match: an install directory
+    # earlier on PATH would otherwise hide another herdr later on PATH.
+    install_physical="$(physical_dir "$INSTALL_DIR" || true)"
+    old_ifs="$IFS"
+    IFS=:
+    for dir in $PATH; do
+        IFS="$old_ifs"
+        [ -n "$dir" ] || continue
+        if [ "$dir" = "$INSTALL_DIR" ] || { [ -n "$install_physical" ] && [ "$(physical_dir "$dir" || true)" = "$install_physical" ]; }; then
+            continue
+        fi
+        for name in "$BIN" "$LEGACY_BIN"; do
+            if [ -x "${dir}/${name}" ] && [ ! -d "${dir}/${name}" ]; then
+                err "existing ${name} found at ${dir}/${name} (outside ${INSTALL_DIR}). Installing would shadow or conflict with it. Remove it first (e.g. 'brew uninstall' or your package manager); this installer never takes over another installation."
+            fi
+        done
     done
+    IFS="$old_ifs"
 }
 
 log()  { printf '  \033[32m>\033[0m %s\n' "$1"; }
