@@ -48,6 +48,7 @@ impl ClientShellState {
         press: ClientWorkspacePress,
         outcome: &mut ClientShellInput,
     ) {
+<<<<<<< HEAD
         self.empty_presentation = false;
         if press.endpoint_id == self.active_endpoint_id {
             self.push_endpoint_method(
@@ -66,6 +67,13 @@ impl ClientShellState {
             self.receive_endpoint_unavailable(format!("{label} is not ready"));
             outcome.repaint = true;
         }
+=======
+        self.focus_or_activate(
+            press.endpoint_id,
+            ClientEndpointFocusTarget::Workspace(press.workspace_id),
+            outcome,
+        );
+>>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
     }
 
     pub(super) fn handle_endpoint_machine_click(
@@ -73,21 +81,25 @@ impl ClientShellState {
         point: (u16, u16),
         outcome: &mut ClientShellInput,
     ) -> bool {
-        let Some(endpoint_id) = self
+        let Some(hit) = self
             .hits
             .machines
             .iter()
             .find(|hit| super::contains(hit.rect, point))
-            .map(|hit| hit.endpoint_id.clone())
         else {
             return false;
         };
-        if endpoint_id == self.active_endpoint_id {
+        let endpoint_id = hit.endpoint_id.clone();
+        let collapse_toggle = super::contains(hit.collapse_toggle, point);
+        if collapse_toggle || endpoint_id == self.active_endpoint_id {
             if !self.collapsed_endpoints.remove(&endpoint_id) {
-                self.collapsed_endpoints.insert(endpoint_id);
+                self.collapsed_endpoints.insert(endpoint_id.clone());
             }
             outcome.repaint = true;
-        } else if self.endpoint_is_online(&endpoint_id) {
+            if !collapse_toggle && endpoint_id.is_local() {
+                self.activate_endpoint(endpoint_id, outcome);
+            }
+        } else if endpoint_id.is_local() || self.endpoint_is_online(&endpoint_id) {
             outcome.actions.push(ClientShellAction::ActivateEndpoint {
                 endpoint_id,
                 target: None,
@@ -114,21 +126,11 @@ impl ClientShellState {
         else {
             return false;
         };
-        if !self.endpoint_is_online(&endpoint_id) {
-            let label = self.endpoint_label(&endpoint_id).to_owned();
-            self.receive_endpoint_unavailable(format!("{label} is reconnecting"));
-            outcome.repaint = true;
-        } else if endpoint_id == self.active_endpoint_id {
-            self.push_endpoint_method(
-                crate::api::schema::Method::PaneFocus(crate::api::schema::PaneTarget { pane_id }),
-                outcome,
-            );
-        } else {
-            outcome.actions.push(ClientShellAction::ActivateEndpoint {
-                endpoint_id,
-                target: Some(ClientEndpointFocusTarget::Pane(pane_id)),
-            });
-        }
+        self.focus_or_activate(
+            endpoint_id,
+            ClientEndpointFocusTarget::Pane(pane_id),
+            outcome,
+        );
         true
     }
 
@@ -209,6 +211,7 @@ impl ClientShellState {
         ) {
             let agents = super::aggregate_navigation::online_agent_targets(
                 &self.endpoints,
+                &self.active_endpoint_id,
                 self.config.agent_panel_sort,
                 self.config.top_level_agents,
             );
@@ -258,13 +261,16 @@ impl ClientShellState {
         endpoint_id: ClientEndpointId,
         outcome: &mut ClientShellInput,
     ) -> bool {
-        if !self.endpoint_is_online(&endpoint_id) {
+        let online = self.endpoint_is_online(&endpoint_id);
+        if !online && !endpoint_id.is_local() {
             let label = self.endpoint_label(&endpoint_id).to_owned();
             self.receive_endpoint_unavailable(format!("{label} is not ready"));
             outcome.repaint = true;
             return false;
         }
-        if endpoint_id != self.active_endpoint_id {
+        if (endpoint_id.is_local() && (self.multi_endpoint_active() || !online))
+            || endpoint_id != self.active_endpoint_id
+        {
             outcome.actions.push(ClientShellAction::ActivateEndpoint {
                 endpoint_id,
                 target: None,
@@ -279,14 +285,23 @@ impl ClientShellState {
         target: ClientEndpointFocusTarget,
         outcome: &mut ClientShellInput,
     ) -> bool {
-        if !self.endpoint_is_online(&endpoint_id) {
+        let online = self.endpoint_is_online(&endpoint_id);
+        if !online && !endpoint_id.is_local() {
             let label = self.endpoint_label(&endpoint_id).to_owned();
             self.receive_endpoint_unavailable(format!("{label} is not ready"));
             outcome.repaint = true;
             return false;
         }
+<<<<<<< HEAD
         if endpoint_id == self.active_endpoint_id {
             self.empty_presentation = false;
+=======
+        // Local can still be displayed while a remote activation is pending.
+        // Route explicit selections through the runtime so they can cancel that handoff.
+        if endpoint_id == self.active_endpoint_id
+            && !(endpoint_id.is_local() && (self.multi_endpoint_active() || !online))
+        {
+>>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
             let method = match target {
                 ClientEndpointFocusTarget::Workspace(workspace_id) => {
                     crate::api::schema::Method::WorkspaceFocus(

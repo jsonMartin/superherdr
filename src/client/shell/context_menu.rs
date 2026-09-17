@@ -381,6 +381,7 @@ impl ClientShellState {
                     .count()
                     >= 2
         });
+<<<<<<< HEAD
         let collapsed =
             worktree.is_some_and(|worktree| self.collapsed_groups.contains(&worktree.key));
         let can_clear_focus = self.focus_scope.is_some();
@@ -412,6 +413,10 @@ impl ClientShellState {
                     })
                 })
                 .flatten()
+=======
+        let collapsed = worktree.is_some_and(|worktree| {
+            self.group_is_collapsed(&self.active_endpoint_id, &worktree.key)
+>>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
         });
         self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
             target: ClientContextMenuTarget::Workspace {
@@ -731,8 +736,7 @@ impl ClientShellState {
                 if let Some(label) = label {
                     self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
                         title: "rename workspace",
-                        input: label,
-                        replace_on_type: false,
+                        input: TextEditor::new(&label, false),
                         target: ClientRenameTarget::Workspace { workspace_id },
                     }));
                 }
@@ -771,9 +775,8 @@ impl ClientShellState {
                         .map(|worktree| worktree.key.clone())
                 });
                 if let Some(key) = key {
-                    if !self.collapsed_groups.remove(&key) {
-                        self.collapsed_groups.insert(key);
-                    }
+                    let endpoint_id = self.active_endpoint_id.clone();
+                    self.toggle_collapsed_group(&endpoint_id, key);
                     self.persist_chrome_preferences(outcome);
                 }
             }
@@ -955,8 +958,7 @@ impl ClientShellState {
                     .to_string();
                     self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
                         title: "new tab",
-                        input: default_name.clone(),
-                        replace_on_type: true,
+                        input: TextEditor::new(&default_name, true),
                         target: ClientRenameTarget::NewTab {
                             workspace_id,
                             default_name,
@@ -983,8 +985,7 @@ impl ClientShellState {
                 if let Some(tab) = tab {
                     self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
                         title: "rename tab",
-                        input: tab.label.clone(),
-                        replace_on_type: false,
+                        input: TextEditor::new(&tab.label, false),
                         target: ClientRenameTarget::Tab {
                             tab_id,
                             auto_name: !tab.custom_label,
@@ -1025,8 +1026,7 @@ impl ClientShellState {
                 });
                 self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
                     title: "rename pane",
-                    input: label.clone().unwrap_or_default(),
-                    replace_on_type: label.is_none(),
+                    input: TextEditor::new(label.as_deref().unwrap_or_default(), label.is_none()),
                     target: ClientRenameTarget::Pane { pane_id },
                 }));
             }

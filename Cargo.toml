@@ -1,7 +1,12 @@
 [package]
+<<<<<<< HEAD
 name = "superherdr"
 # Herdr base version; the Superherdr revision lives in src/build_info.rs.
 version = "0.9.0"
+=======
+name = "herdr"
+version = "0.9.1"
+>>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
 edition = "2021"
 build = "build.rs"
 description = "Superherdr: a terminal project built on Herdr with Focus and Snooze"
@@ -48,6 +53,7 @@ toml = "0.8"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 unicode-width = "0.2"
+unicode-segmentation = "1.13.1"
 schemars = { version = "1.2.1", features = ["derive"] }
 uuid = { version = "1.22.0", features = ["v4"] }
 
