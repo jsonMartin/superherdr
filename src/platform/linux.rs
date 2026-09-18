@@ -16,18 +16,11 @@ use super::{
 
 pub(crate) use super::unix_common::{
     configure_status_command, create_remote_private_dir, create_remote_ssh_config_dir,
-<<<<<<< HEAD
     create_remote_ssh_config_file, hostname, local_datetime, local_datetime_at, local_timestamp,
     remote_bridge_endpoint_path, remote_private_temp_base, remote_reattach_argument,
     remote_reattach_program, remote_ssh_config_paths, set_default_plugin_pane_pwd,
-    status_commands_supported, wait_client_stream_readable, StatusCommandGuard,
-=======
-    create_remote_ssh_config_file, hostname, local_datetime, remote_bridge_endpoint_path,
-    remote_private_temp_base, remote_reattach_argument, remote_reattach_program,
-    remote_ssh_config_paths, set_default_plugin_pane_pwd, shutdown_client_stream,
-    status_commands_supported, wait_client_stream_readable, write_client_stream,
-    ClientStreamReader, StatusCommandGuard,
->>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
+    shutdown_client_stream, status_commands_supported, wait_client_stream_readable,
+    write_client_stream, ClientStreamReader, StatusCommandGuard,
 };
 
 #[cfg(test)]

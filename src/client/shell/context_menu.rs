@@ -208,7 +208,8 @@ impl ClientShellState {
         let snapshot = self.snapshot.as_deref()?;
         let workspace_id = if self.mode == ClientShellMode::Navigate {
             self.navigate_workspace_id
-                .as_deref()
+                .as_ref()
+                .map(|target| target.workspace_id.as_str())
                 .filter(|selected| {
                     self.navigation_workspace_entries(snapshot)
                         .iter()
@@ -381,9 +382,9 @@ impl ClientShellState {
                     .count()
                     >= 2
         });
-<<<<<<< HEAD
-        let collapsed =
-            worktree.is_some_and(|worktree| self.collapsed_groups.contains(&worktree.key));
+        let collapsed = worktree.is_some_and(|worktree| {
+            self.group_is_collapsed(&self.active_endpoint_id, &worktree.key)
+        });
         let can_clear_focus = self.focus_scope.is_some();
         let snooze_state = self
             .endpoints
@@ -413,10 +414,6 @@ impl ClientShellState {
                     })
                 })
                 .flatten()
-=======
-        let collapsed = worktree.is_some_and(|worktree| {
-            self.group_is_collapsed(&self.active_endpoint_id, &worktree.key)
->>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
         });
         self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
             target: ClientContextMenuTarget::Workspace {

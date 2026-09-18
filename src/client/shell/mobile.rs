@@ -612,13 +612,9 @@ fn mobile_items(
     }
     let agents = super::aggregate_navigation::aggregate_agent_rows(
         endpoints,
-<<<<<<< HEAD
-        config.agent_panel_sort,
-        config.top_level_agents,
-=======
         active_endpoint_id,
         config.agent_panel_sort,
->>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
+        config.top_level_agents,
     );
     let agent_view_label = snapshot.agent_view_label.as_deref();
     if !agents.is_empty()

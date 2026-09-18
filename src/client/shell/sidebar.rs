@@ -599,7 +599,6 @@ pub(crate) fn workspace_entries_with_filter(
     entries
 }
 
-<<<<<<< HEAD
 pub(crate) fn workspace_entries(
     snapshot: &ClientShellSnapshot,
     collapsed_groups: &HashSet<String>,
@@ -608,9 +607,6 @@ pub(crate) fn workspace_entries(
 }
 
 pub(super) fn parent_group_key(snapshot: &ClientShellSnapshot, index: usize) -> Option<String> {
-=======
-fn parent_group_key(snapshot: &ClientShellSnapshot, index: usize) -> Option<String> {
->>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
     let workspace = snapshot.workspaces.get(index)?;
     let worktree = workspace.worktree.as_ref()?;
     if worktree.is_linked_worktree {

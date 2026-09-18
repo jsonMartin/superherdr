@@ -670,44 +670,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
-<<<<<<< HEAD
-=======
-name = "herdr"
-version = "0.9.1"
-dependencies = [
- "base64",
- "bincode",
- "bytes",
- "clap",
- "clap_complete",
- "crossterm",
- "ctrlc",
- "interprocess",
- "jsonc-parser",
- "libc",
- "png",
- "portable-pty",
- "ratatui",
- "regex",
- "schemars",
- "serde",
- "serde_ignored",
- "serde_json",
- "sha2",
- "time",
- "tokio",
- "toml",
- "tracing",
- "tracing-subscriber",
- "unicode-segmentation",
- "unicode-width",
- "widestring",
- "windows-sys",
- "wmi",
-]
-
-[[package]]
->>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
 name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1718,7 +1680,7 @@ dependencies = [
 
 [[package]]
 name = "superherdr"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "base64",
  "bincode",
@@ -1744,6 +1706,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "unicode-segmentation",
  "unicode-width",
  "uuid",
  "widestring",

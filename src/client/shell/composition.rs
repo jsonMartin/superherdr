@@ -35,34 +35,6 @@ impl ClientShellState {
         } else {
             Rect::new(0, 1, cols, rows.saturating_sub(2))
         };
-<<<<<<< HEAD
-        super::endpoint_sidebar::render_expanded(
-            &mut buffer,
-            sidebar,
-            self.snapshot.as_deref(),
-            &self.config,
-            &mut render::ShellRenderState {
-                endpoints: &self.endpoints,
-                active_endpoint_id: &self.active_endpoint_id,
-                collapsed_endpoints: &self.collapsed_endpoints,
-                collapsed_groups: &self.collapsed_groups,
-                workspace_scroll: &mut self.workspace_scroll,
-                agent_scroll: &mut self.agent_scroll,
-                tab_scroll: &mut self.tab_scroll,
-                reveal_focused_workspace: &mut self.reveal_focused_workspace,
-                reveal_focused_tab: &mut self.reveal_focused_tab,
-                sidebar_collapsed: false,
-                sidebar_section_split: self.sidebar_section_split,
-                tab_drag_insert_index: None,
-                selected_workspace_id: self.navigate_workspace_id.as_deref(),
-                dragged_workspace_id: None,
-                workspace_drop_indicator_row: None,
-                focus_scope: self.focus_scope.as_ref(),
-                snooze_state: self.snooze_state.as_ref(),
-            },
-            &mut self.hits,
-        );
-=======
         let valid_navigation_target = self.mode == ClientShellMode::Navigate
             && self
                 .navigate_workspace_id
@@ -97,6 +69,8 @@ impl ClientShellState {
             reveal_navigation_workspace: &mut self.reveal_navigation_workspace,
             dragged_workspace_id: None,
             workspace_drop_indicator_row: None,
+            focus_scope: self.focus_scope.as_ref(),
+            snooze_state: self.snooze_state.as_ref(),
         };
         if let Some(snapshot) = local_snapshot {
             render::render_sidebar(
@@ -117,7 +91,6 @@ impl ClientShellState {
                 &mut self.hits,
             );
         }
->>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
         if !self.config.mouse_capture {
             self.hits = ShellHitMap::default();
         }
@@ -166,6 +139,7 @@ impl ClientShellState {
             if let ClientShellOverlay::ContextMenu(menu) = overlay {
                 self.hits.context_menu_rows =
                     render::render_context_menu(&mut buffer, menu, &self.config.palette)
+                        .map(|rendered| rendered.menu_rows)
                         .unwrap_or_default();
             } else if let Some(snapshot) = self.snapshot.as_deref() {
                 if let ClientShellOverlay::GlobalMenu(menu) = overlay {
@@ -176,6 +150,7 @@ impl ClientShellState {
                         snapshot,
                         &self.config.palette,
                     )
+                    .map(|rendered| rendered.menu_rows)
                     .unwrap_or_default();
                 } else if let Some(rendered) = render::render_client_overlay(
                     &mut buffer,
@@ -245,6 +220,7 @@ impl ClientShellState {
                     active_endpoint_id: &self.active_endpoint_id,
                     collapsed_endpoints: &self.collapsed_endpoints,
                     collapsed_groups: &self.collapsed_groups,
+                    remote_collapsed_groups: &self.remote_collapsed_groups,
                     workspace_scroll: &mut self.workspace_scroll,
                     agent_scroll: &mut self.agent_scroll,
                     tab_scroll: &mut self.tab_scroll,
@@ -253,7 +229,8 @@ impl ClientShellState {
                     sidebar_collapsed: false,
                     sidebar_section_split: self.sidebar_section_split,
                     tab_drag_insert_index: None,
-                    selected_workspace_id: self.navigate_workspace_id.as_deref(),
+                    selected_workspace_id: self.navigate_workspace_id.as_ref(),
+                    reveal_navigation_workspace: &mut self.reveal_navigation_workspace,
                     dragged_workspace_id: None,
                     workspace_drop_indicator_row: None,
                     focus_scope: self.focus_scope.as_ref(),
@@ -347,6 +324,7 @@ impl ClientShellState {
             if let ClientShellOverlay::ContextMenu(menu) = overlay {
                 self.hits.context_menu_rows =
                     render::render_context_menu(&mut buffer, menu, &self.config.palette)
+                        .map(|rendered| rendered.menu_rows)
                         .unwrap_or_default();
             } else if let Some(snapshot) = self.snapshot.as_deref() {
                 if let ClientShellOverlay::GlobalMenu(menu) = overlay {
@@ -357,6 +335,7 @@ impl ClientShellState {
                         snapshot,
                         &self.config.palette,
                     )
+                    .map(|rendered| rendered.menu_rows)
                     .unwrap_or_default();
                 } else if let Some(rendered) = render::render_client_overlay(
                     &mut buffer,
@@ -396,17 +375,14 @@ impl ClientShellState {
             self.reveal_mobile_workspace = true;
         }
         self.last_composed_size = Some((cols, rows));
-<<<<<<< HEAD
         if self.empty_presentation {
             return Some(self.compose_empty_presentation(cols, rows));
         }
-=======
         let valid_navigation_target = self.mode == ClientShellMode::Navigate
             && self
                 .navigate_workspace_id
                 .as_ref()
                 .is_some_and(|target| self.navigation_target_valid(target));
->>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
         if self.snapshot.is_none() || self.pane_surface.is_none() {
             return Some(self.compose_unavailable(cols, rows));
         }
@@ -916,7 +892,7 @@ impl ClientShellState {
                     &self.config.keybinds,
                     &self.config.palette,
                 )?;
-<<<<<<< HEAD
+                occlusion.cover(rendered.area);
                 if self.config.mouse_capture {
                     self.hits.overlay_primary = rendered.primary;
                     self.hits.overlay_clear = rendered.clear;
@@ -953,32 +929,6 @@ impl ClientShellState {
                     self.hits.release_notes_scroll_metrics = rendered.release_notes_scroll_metrics;
                     self.hits.release_notes_max_scroll = rendered.release_notes_max_scroll;
                 }
-=======
-                occlusion.cover(rendered.area);
-                self.hits.overlay_primary = rendered.primary;
-                self.hits.overlay_clear = rendered.clear;
-                self.hits.overlay_cancel = rendered.cancel;
-                self.hits.navigator_popup = rendered.navigator_popup;
-                self.hits.navigator_search = rendered.navigator_search;
-                self.hits.navigator_rows = rendered.navigator_rows;
-                self.hits.worktree_search = rendered.worktree_search;
-                self.hits.worktree_rows = rendered.worktree_rows;
-                self.hits.help_popup = rendered.help_popup;
-                self.hits.help_scrollbar = rendered.help_scrollbar;
-                self.hits.help_scroll_metrics = rendered.help_scroll_metrics;
-                self.hits.help_max_scroll = rendered.help_max_scroll;
-                self.hits.settings_popup = rendered.settings_popup;
-                self.hits.settings_tabs = rendered.settings_tabs;
-                self.hits.settings_choices = rendered.settings_choices;
-                self.hits.product_announcement_scrollbar = rendered.product_announcement_scrollbar;
-                self.hits.product_announcement_scroll_metrics =
-                    rendered.product_announcement_scroll_metrics;
-                self.hits.product_announcement_max_scroll =
-                    rendered.product_announcement_max_scroll;
-                self.hits.release_notes_scrollbar = rendered.release_notes_scrollbar;
-                self.hits.release_notes_scroll_metrics = rendered.release_notes_scroll_metrics;
-                self.hits.release_notes_max_scroll = rendered.release_notes_max_scroll;
->>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
                 rendered.cursor
             };
             frame.replace_from_ratatui_buffer_preserving_effects(&composed, cursor);

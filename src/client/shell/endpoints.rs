@@ -232,20 +232,16 @@ impl ClientShellState {
             self.pane_surface = None;
             self.pending_pane_surface = None;
         }
-<<<<<<< HEAD
         self.snooze_state = self
             .endpoints
             .iter()
             .find(|candidate| &candidate.endpoint_id == endpoint_id)
             .and_then(|endpoint| endpoint.snooze_state.clone());
-        self.apply_active_snapshot(snapshot);
-=======
         self.apply_active_snapshot(snapshot, generation);
         if switching_endpoint {
             // The aggregate agent list belongs to the client, not one endpoint.
             self.agent_scroll = agent_scroll;
         }
->>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
         true
     }
 
@@ -707,16 +703,12 @@ impl ClientShellState {
             return;
         };
         if endpoint_id == &self.active_endpoint_id {
-<<<<<<< HEAD
             self.snooze_state = self
                 .endpoints
                 .iter()
                 .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
                 .and_then(|endpoint| endpoint.snooze_state.clone());
-            self.apply_active_snapshot(snapshot);
-=======
             self.apply_active_snapshot(snapshot, generation);
->>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
         }
     }
 }

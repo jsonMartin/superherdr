@@ -48,32 +48,12 @@ impl ClientShellState {
         press: ClientWorkspacePress,
         outcome: &mut ClientShellInput,
     ) {
-<<<<<<< HEAD
         self.empty_presentation = false;
-        if press.endpoint_id == self.active_endpoint_id {
-            self.push_endpoint_method(
-                crate::api::schema::Method::WorkspaceFocus(crate::api::schema::WorkspaceTarget {
-                    workspace_id: press.workspace_id,
-                }),
-                outcome,
-            );
-        } else if self.endpoint_is_online(&press.endpoint_id) {
-            outcome.actions.push(ClientShellAction::ActivateEndpoint {
-                endpoint_id: press.endpoint_id,
-                target: Some(ClientEndpointFocusTarget::Workspace(press.workspace_id)),
-            });
-        } else {
-            let label = self.endpoint_label(&press.endpoint_id).to_owned();
-            self.receive_endpoint_unavailable(format!("{label} is not ready"));
-            outcome.repaint = true;
-        }
-=======
         self.focus_or_activate(
             press.endpoint_id,
             ClientEndpointFocusTarget::Workspace(press.workspace_id),
             outcome,
         );
->>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
     }
 
     pub(super) fn handle_endpoint_machine_click(
@@ -292,16 +272,10 @@ impl ClientShellState {
             outcome.repaint = true;
             return false;
         }
-<<<<<<< HEAD
-        if endpoint_id == self.active_endpoint_id {
-            self.empty_presentation = false;
-=======
-        // Local can still be displayed while a remote activation is pending.
-        // Route explicit selections through the runtime so they can cancel that handoff.
         if endpoint_id == self.active_endpoint_id
             && !(endpoint_id.is_local() && (self.multi_endpoint_active() || !online))
         {
->>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
+            self.empty_presentation = false;
             let method = match target {
                 ClientEndpointFocusTarget::Workspace(workspace_id) => {
                     crate::api::schema::Method::WorkspaceFocus(

@@ -14,6 +14,8 @@ async fn snooze_subscribe_and_initial_state() {
 
     assert!(
         server.handle_server_event(ServerEvent::ClientShellConnected {
+            surface_reuse: false,
+            surface_delta: false,
             client_id,
             surface_cols: 80,
             surface_rows: 24,
@@ -99,6 +101,8 @@ async fn two_clients_receive_authoritative_workspace_snooze_state() {
     for (client_id, writer) in [(10, writer_a), (20, writer_b)] {
         assert!(
             server.handle_server_event(ServerEvent::ClientShellConnected {
+                surface_reuse: false,
+                surface_delta: false,
                 client_id,
                 surface_cols: 80,
                 surface_rows: 24,
@@ -456,6 +460,8 @@ async fn workspace_snooze_rejects_noncanonical_ids_without_record() {
     let (writer, control_rx, _render_rx) = test_client_writer();
     let client_id = 41;
     let _ = server.handle_server_event(ServerEvent::ClientShellConnected {
+        surface_reuse: false,
+        surface_delta: false,
         client_id,
         surface_cols: 80,
         surface_rows: 24,
@@ -507,6 +513,8 @@ async fn stale_boot_and_revision_wake_are_rejected() {
     let client_id = 31;
     assert!(
         server.handle_server_event(ServerEvent::ClientShellConnected {
+            surface_reuse: false,
+            surface_delta: false,
             client_id,
             surface_cols: 80,
             surface_rows: 24,

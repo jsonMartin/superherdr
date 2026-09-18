@@ -249,11 +249,8 @@ mod chrome_context;
 mod copy;
 mod endpoint_requests;
 mod endpoints;
-<<<<<<< HEAD
 mod focus_snooze;
-=======
 mod graphics;
->>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
 #[path = "input.rs"]
 mod input_domain;
 mod keybindings_settings;

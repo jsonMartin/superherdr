@@ -11,12 +11,9 @@ pub(super) struct CachedEndpointSnapshot<'a> {
     pub(super) status: ClientEndpointStatus,
     pub(super) snapshot: &'a ClientShellSnapshot,
     pub(super) agent_recency: &'a HashMap<String, u64>,
-<<<<<<< HEAD
     pub(super) snooze_state: Option<&'a crate::api::schema::WorkspaceSnoozeState>,
     pub(super) focus_scope: Option<&'a ClientFocusScope>,
-=======
     pub(super) agent_presentation: &'a super::endpoint_agent_state::EndpointAgentPresentation,
->>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
 }
 
 impl CachedEndpointSnapshot<'_> {
@@ -28,22 +25,6 @@ impl CachedEndpointSnapshot<'_> {
 pub(super) fn cached_endpoint_snapshots(
     endpoints: &[ClientShellEndpoint],
 ) -> impl Iterator<Item = CachedEndpointSnapshot<'_>> {
-<<<<<<< HEAD
-    endpoints.iter().filter_map(|endpoint| {
-        endpoint
-            .snapshot
-            .as_deref()
-            .map(|snapshot| CachedEndpointSnapshot {
-                endpoint_id: &endpoint.endpoint_id,
-                label: &endpoint.label,
-                status: endpoint.status,
-                snapshot,
-                agent_recency: &endpoint.agent_recency,
-                snooze_state: endpoint.snooze_state.as_ref(),
-                focus_scope: endpoint.focus_scope.as_ref(),
-            })
-    })
-=======
     endpoints
         .iter()
         .enumerate()
@@ -58,10 +39,11 @@ pub(super) fn cached_endpoint_snapshots(
                     status: endpoint.status,
                     snapshot,
                     agent_recency: &endpoint.agent_recency,
+                    snooze_state: endpoint.snooze_state.as_ref(),
+                    focus_scope: endpoint.focus_scope.as_ref(),
                     agent_presentation: &endpoint.agent_presentation,
                 })
         })
->>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
 }
 
 pub(super) struct AggregateAgentRow<'a> {
@@ -79,43 +61,7 @@ pub(super) fn aggregate_agent_rows<'a>(
     endpoints: &'a [ClientShellEndpoint],
     active_endpoint_id: &ClientEndpointId,
     sort: crate::config::AgentPanelSortConfig,
-<<<<<<< HEAD
     top_level_agents: bool,
-) -> Vec<AggregateAgentRow<'_>> {
-    let mut rows = Vec::new();
-    for endpoint in cached_endpoint_snapshots(endpoints) {
-        let visible_workspaces = super::agent_scope::visible_agent_workspace_ids(
-            endpoint.snapshot,
-            endpoint.focus_scope,
-            endpoint.snooze_state,
-            endpoint.endpoint_id,
-            top_level_agents,
-        );
-        for pane_id in super::agent_sidebar::ordered_agent_pane_ids_with_filter(
-            endpoint.snapshot,
-            sort,
-            |agent| visible_workspaces.contains(&agent.workspace_id),
-        ) {
-            let Some(agent) = endpoint
-                .snapshot
-                .agents
-                .iter()
-                .find(|agent| agent.pane_id == pane_id)
-            else {
-                continue;
-            };
-            rows.push(AggregateAgentRow {
-                recency: endpoint
-                    .agent_recency
-                    .get(&pane_id)
-                    .copied()
-                    .unwrap_or_default(),
-                endpoint,
-                agent,
-            });
-        }
-    }
-=======
 ) -> Vec<AggregateAgentRow<'a>> {
     let active_index = endpoints
         .iter()
@@ -189,28 +135,39 @@ pub(super) fn aggregate_agent_rows<'a>(
         return rows;
     }
 
-    let mut rows = cached_endpoint_snapshots(endpoints)
-        .flat_map(|endpoint| {
-            super::agent_sidebar::ordered_agent_pane_ids(endpoint.snapshot, sort)
-                .into_iter()
-                .filter_map(move |pane_id| {
-                    let agent = endpoint
-                        .snapshot
-                        .agents
-                        .iter()
-                        .find(|agent| agent.pane_id == pane_id)?;
-                    Some(AggregateAgentRow {
-                        recency: endpoint
-                            .agent_recency
-                            .get(&pane_id)
-                            .copied()
-                            .unwrap_or_default(),
-                        endpoint,
-                        agent,
-                    })
-                })
-        })
-        .collect::<Vec<_>>();
+    let mut rows = Vec::new();
+    for endpoint in cached_endpoint_snapshots(endpoints) {
+        let visible_workspaces = super::agent_scope::visible_agent_workspace_ids(
+            endpoint.snapshot,
+            endpoint.focus_scope,
+            endpoint.snooze_state,
+            endpoint.endpoint_id,
+            top_level_agents,
+        );
+        for pane_id in super::agent_sidebar::ordered_agent_pane_ids_with_filter(
+            endpoint.snapshot,
+            sort,
+            |agent| visible_workspaces.contains(&agent.workspace_id),
+        ) {
+            let Some(agent) = endpoint
+                .snapshot
+                .agents
+                .iter()
+                .find(|agent| agent.pane_id == pane_id)
+            else {
+                continue;
+            };
+            rows.push(AggregateAgentRow {
+                recency: endpoint
+                    .agent_recency
+                    .get(&pane_id)
+                    .copied()
+                    .unwrap_or_default(),
+                endpoint,
+                agent,
+            });
+        }
+    }
     sort_aggregate_rows(&mut rows, sort);
     rows
 }
@@ -219,7 +176,6 @@ fn sort_aggregate_rows(
     rows: &mut [AggregateAgentRow<'_>],
     sort: crate::config::AgentPanelSortConfig,
 ) {
->>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
     if sort == crate::config::AgentPanelSortConfig::Priority {
         rows.sort_by_key(|row| {
             (
@@ -326,11 +282,7 @@ pub(super) fn online_agent_targets(
     sort: crate::config::AgentPanelSortConfig,
     top_level_agents: bool,
 ) -> Vec<AggregateAgentTarget> {
-<<<<<<< HEAD
-    aggregate_agent_rows(endpoints, sort, top_level_agents)
-=======
-    aggregate_agent_rows(endpoints, active_endpoint_id, sort)
->>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
+    aggregate_agent_rows(endpoints, active_endpoint_id, sort, top_level_agents)
         .into_iter()
         .filter(|row| !row.endpoint.stale())
         .map(|row| AggregateAgentTarget {

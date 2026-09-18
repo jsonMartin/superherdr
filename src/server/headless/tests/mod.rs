@@ -2,15 +2,12 @@ use super::*;
 
 #[path = "pane_graphics.rs"]
 mod pane_graphics_tests;
-<<<<<<< HEAD
-#[path = "project_snooze.rs"]
-mod project_snooze_tests;
-=======
 #[path = "pane_move.rs"]
 mod pane_move_tests;
+#[path = "project_snooze.rs"]
+mod project_snooze_tests;
 #[path = "surface_delta.rs"]
 mod surface_delta_tests;
->>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
 #[path = "surface_interest.rs"]
 mod surface_interest_tests;
 #[path = "workspace_snooze.rs"]

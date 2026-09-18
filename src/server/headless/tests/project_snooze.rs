@@ -292,6 +292,8 @@ async fn project_snooze_endpoint_hides_future_matching_workspace_and_preserves_u
     let client_id = 7;
     assert!(
         server.handle_server_event(ServerEvent::ClientShellConnected {
+            surface_reuse: false,
+            surface_delta: false,
             client_id,
             surface_cols: 80,
             surface_rows: 24,

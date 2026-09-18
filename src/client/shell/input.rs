@@ -538,7 +538,6 @@ impl ClientShellState {
         if matches!(key.code, KeyCode::Modifier(_)) {
             return None;
         }
-<<<<<<< HEAD
         if self.empty_presentation
             && key.kind == KeyEventKind::Press
             && key.code == KeyCode::Char('w')
@@ -548,10 +547,7 @@ impl ClientShellState {
             outcome.repaint = true;
             return None;
         }
-        self.pending_word_selection = None;
-=======
         self.word_selection_gesture = None;
->>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
         if self.mode != ClientShellMode::Copy
             && self.copy_or_terminal_mode() != ClientShellMode::Copy
             && !self.config.copy_on_select
@@ -747,25 +743,6 @@ impl ClientShellState {
 
         if modifiers.is_empty() {
             match code {
-<<<<<<< HEAD
-                KeyCode::Enter => {
-                    let selected = self.navigate_workspace_id.clone();
-                    self.mode = ClientShellMode::Terminal;
-                    self.navigate_workspace_id = None;
-                    if let Some(workspace_id) = selected {
-                        self.empty_presentation = false;
-                        self.push_endpoint_method(
-                            crate::api::schema::Method::WorkspaceFocus(
-                                crate::api::schema::WorkspaceTarget { workspace_id },
-                            ),
-                            outcome,
-                        );
-                    }
-                    outcome.repaint = true;
-                    return;
-                }
-=======
->>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
                 KeyCode::Tab => {
                     self.record_navigate_binding(
                         KeybindMatch::Action(KeybindAction::CyclePaneNext),

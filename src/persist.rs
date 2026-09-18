@@ -10,13 +10,7 @@ mod restore;
 mod snapshot;
 mod writer;
 
-<<<<<<< HEAD
-pub(crate) use self::io::{
-    checkpoint_session_pair, clear, clear_history, load, load_history, save,
-};
-=======
-pub use self::io::{clear_history, load, load_history};
->>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
+pub(crate) use self::io::{checkpoint_session_pair, clear_history, load, load_history};
 pub use self::restore::restore;
 #[cfg(unix)]
 pub use self::restore::{handoff_pane_aliases, restore_handoff};

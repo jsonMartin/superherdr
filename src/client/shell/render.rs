@@ -298,15 +298,11 @@ pub(super) fn render_shell(
                 layout.sidebar,
                 snapshot,
                 config,
-<<<<<<< HEAD
-                state.selected_workspace_id,
-                state.focus_scope,
-                state.snooze_state,
-=======
                 state
                     .selected_workspace_id
                     .map(|target| target.workspace_id.as_str()),
->>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
+                state.focus_scope,
+                state.snooze_state,
                 &mut hits,
             );
         } else {

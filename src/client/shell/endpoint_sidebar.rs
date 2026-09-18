@@ -115,12 +115,11 @@ pub(super) fn render_collapsed(
             &snapshot.workspaces,
         );
         for workspace in &snapshot.workspaces {
-<<<<<<< HEAD
             if !visible_workspaces.contains(&workspace.workspace_id) {
-=======
+                continue;
+            }
             if skip > 0 {
                 skip -= 1;
->>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
                 continue;
             }
             if y >= workspace_area.bottom() {
@@ -272,7 +271,8 @@ pub(super) fn render_expanded(
             continue;
         }
         if let Some(snapshot) = endpoint.snapshot.as_deref() {
-<<<<<<< HEAD
+            let collapsed_groups = collapsed_groups_for_endpoint(state, &endpoint.endpoint_id)
+                .unwrap_or(&empty_collapsed_groups);
             let visible_workspaces = super::focus_snooze::visible_workspace_ids(
                 state.focus_scope,
                 endpoint.snooze_state.as_ref(),
@@ -283,7 +283,7 @@ pub(super) fn render_expanded(
             rows.extend(
                 super::sidebar::workspace_entries_with_filter(
                     snapshot,
-                    &HashSet::new(),
+                    collapsed_groups,
                     |workspace| visible_workspaces.contains(&workspace.workspace_id),
                 )
                 .into_iter()
@@ -291,17 +291,6 @@ pub(super) fn render_expanded(
                     endpoint: endpoint_index,
                     entry,
                 }),
-=======
-            let collapsed_groups = collapsed_groups_for_endpoint(state, &endpoint.endpoint_id)
-                .unwrap_or(&empty_collapsed_groups);
-            rows.extend(
-                super::sidebar::workspace_entries(snapshot, collapsed_groups)
-                    .into_iter()
-                    .map(|entry| Row::Workspace {
-                        endpoint: endpoint_index,
-                        entry,
-                    }),
->>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
             );
         }
     }

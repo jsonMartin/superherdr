@@ -2165,7 +2165,6 @@ impl ClientShellState {
                     self.persist_chrome_preferences(outcome);
                     return;
                 }
-<<<<<<< HEAD
                 // Sidebar footer focus toggle: 🎯 (focus active) clears only the Focus scope;
                 // 🌐 (all projects) focuses the current valid workspace via the shared action.
                 if super::contains(self.hits.feature_clear_focus, point)
@@ -2187,18 +2186,6 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return;
                 }
-                for hit in &self.hits.workspaces {
-                    if let Some((rect, key)) = &hit.group_toggle {
-                        if super::contains(*rect, point) {
-                            if !self.collapsed_groups.remove(key) {
-                                self.collapsed_groups.insert(key.clone());
-                            }
-                            outcome.repaint = true;
-                            self.persist_chrome_preferences(outcome);
-                            return;
-                        }
-                    }
-=======
                 let group_toggle = self.hits.workspaces.iter().find_map(|hit| {
                     let (rect, key) = hit.group_toggle.as_ref()?;
                     super::contains(*rect, point).then(|| (hit.endpoint_id.clone(), key.clone()))
@@ -2208,7 +2195,6 @@ impl ClientShellState {
                     outcome.repaint = true;
                     self.persist_chrome_preferences(outcome);
                     return;
->>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
                 }
                 let workspace_press = self
                     .hits

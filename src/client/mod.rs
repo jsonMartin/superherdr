@@ -2041,7 +2041,7 @@ async fn run_client_loop(
                                         &mut write_stream,
                                         state.shell.as_mut(),
                                         &mut state.detached_process_children,
-                                        &event_tx,
+                                        &mut scheduled_activation,
                                     )?;
                                     if let Some(frame) = state.shell.as_mut().and_then(|shell| {
                                         shell.compose(state.reported_size.0, state.reported_size.1)
@@ -2307,11 +2307,8 @@ async fn run_client_loop(
                         let (effects, notification_repaint) = shell.tick_notifications(now);
                         outcome.repaint |= notification_repaint
                             | shell.tick_copy_feedback(now)
-<<<<<<< HEAD
-                            | shell.tick_snooze_management_clock();
-=======
+                            | shell.tick_snooze_management_clock()
                             | shell.tick_endpoint_error(now);
->>>>>>> 065ef9d6a531c49fb8bee7e818ef837065b21ee9
                         let frame = outcome
                             .repaint
                             .then(|| shell.compose(state.reported_size.0, state.reported_size.1))

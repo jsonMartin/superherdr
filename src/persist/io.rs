@@ -268,13 +268,8 @@ mod tests {
     #[test]
     fn snooze_checkpoint_replaces_history_and_propagates_history_failure() {
         let (session, history) = temp_session_paths("snooze-pair");
-        save_to_paths(
-            &session,
-            &history,
-            &empty_snapshot(),
-            Some(&history_snapshot("old")),
-        )
-        .unwrap();
+        save_to_path(&session, &empty_snapshot()).unwrap();
+        save_history_to_path(&history, Some(&history_snapshot("old"))).unwrap();
         checkpoint_session_pair_to_paths(
             &session,
             &history,
