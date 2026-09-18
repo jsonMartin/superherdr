@@ -1189,7 +1189,7 @@ fn focus_snooze_launcher_targets_navigate_selection_and_is_reachable_when_empty(
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.set_snapshot(Box::new(two_workspace_snapshot()));
     state.mode = ClientShellMode::Navigate;
-    state.navigate_workspace_id = Some("ws_2".into());
+    state.navigate_workspace_id = state.navigation_target(&ClientEndpointId::Local, "ws_2");
     state.record_binding(
         crate::input::KeybindMatch::Action(KeybindAction::FocusProject),
         &mut ClientShellInput::default(),
@@ -1240,7 +1240,7 @@ fn focus_snooze_launcher_cannot_target_stale_hidden_navigate_workspace() {
     state.set_snapshot(Box::new(two_workspace_snapshot()));
     state.set_snooze_state(snooze_state(&["ws_2"], 1));
     state.mode = ClientShellMode::Navigate;
-    state.navigate_workspace_id = Some("ws_2".into());
+    state.navigate_workspace_id = state.navigation_target(&ClientEndpointId::Local, "ws_2");
     let mut outcome = ClientShellInput::default();
     state.record_binding(
         crate::input::KeybindMatch::Action(KeybindAction::SnoozeWorkspace),

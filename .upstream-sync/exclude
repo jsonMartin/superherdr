@@ -36,3 +36,8 @@ scripts/test_preview.py
 scripts/windows_arm64_installer_test.ps1
 SPONSORS.md
 workers/plugin-marketplace/
+scripts/release-workflows.test.ts
+scripts/release.py
+scripts/test_release.py
+scripts/windows_cross.py
+scripts/test_windows_cross.py

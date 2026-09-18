@@ -8,10 +8,9 @@ mod io;
 pub mod plugin_registry;
 mod restore;
 mod snapshot;
+mod writer;
 
-pub(crate) use self::io::{
-    checkpoint_session_pair, clear, clear_history, load, load_history, save,
-};
+pub(crate) use self::io::{checkpoint_session_pair, clear_history, load, load_history};
 pub use self::restore::restore;
 #[cfg(unix)]
 pub use self::restore::{handoff_pane_aliases, restore_handoff};
@@ -19,3 +18,4 @@ pub use self::snapshot::{
     capture, capture_history, DirectionSnapshot, LayoutSnapshot, SessionHistorySnapshot,
     SessionSnapshot, TabSnapshot, WorkspaceSnapshot,
 };
+pub(crate) use self::writer::SessionWriter;

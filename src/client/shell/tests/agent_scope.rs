@@ -55,6 +55,7 @@ fn state() -> ClientShellState {
 fn targets(state: &ClientShellState) -> Vec<(ClientEndpointId, String)> {
     super::super::aggregate_navigation::online_agent_targets(
         &state.endpoints,
+        &state.active_endpoint_id,
         state.config.agent_panel_sort,
         state.config.top_level_agents,
     )

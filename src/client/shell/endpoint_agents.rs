@@ -103,22 +103,19 @@ fn agent_rows(
         .iter()
         .filter_map(|endpoint| {
             endpoint.snapshot.as_deref().map(|snapshot| {
-                let visible_workspaces = super::agent_scope::visible_agent_workspace_ids(
-                    snapshot,
-                    endpoint.focus_scope.as_ref(),
-                    endpoint.snooze_state.as_ref(),
-                    &endpoint.endpoint_id,
-                    config.top_level_agents,
-                );
-                super::agent_sidebar::agent_rows_with_filter(
-                    snapshot,
-                    config,
-                    Some(&endpoint.label),
-                    |agent| visible_workspaces.contains(&agent.workspace_id),
-                )
-                .into_iter()
-                .map(|agent| ((endpoint.endpoint_id.clone(), agent.pane_id.clone()), agent))
-                .collect::<Vec<_>>()
+                snapshot
+                    .agents
+                    .iter()
+                    .filter_map(|agent| {
+                        super::agent_sidebar::agent_row(
+                            snapshot,
+                            &agent.pane_id,
+                            config,
+                            Some(&endpoint.label),
+                        )
+                    })
+                    .map(|agent| ((endpoint.endpoint_id.clone(), agent.pane_id.clone()), agent))
+                    .collect::<Vec<_>>()
             })
         })
         .flatten()
@@ -126,6 +123,7 @@ fn agent_rows(
 
     super::aggregate_navigation::aggregate_agent_rows(
         endpoints,
+        active_endpoint_id,
         config.agent_panel_sort,
         config.top_level_agents,
     )
