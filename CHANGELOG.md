@@ -2,6 +2,14 @@
 
 Superherdr's release history. Superherdr is a fork of [Herdr](https://github.com/herdrdev/herdr); changes inherited from upstream are described in [Herdr's releases](https://github.com/herdrdev/herdr/releases).
 
+## [0.9.1.1] - 2026-09-18
+
+Based on Herdr 0.9.1. All changes inherited from upstream are listed in [Herdr's 0.9.1 release notes](https://github.com/herdrdev/herdr/releases/tag/v0.9.1), including saved-machine CLI control (`herdr --machine`), cursor-aware text editing, Ctrl-click link highlighting, large SSH bandwidth and idle-CPU reductions, and the full fixes list.
+
+- Focus, Snooze, and the Top-level Agents view continue to work across the new upstream agent-view projection, per-machine workspace navigation, and collapsed-group changes.
+- The vendored libghostty-vt build now requires Zig 0.16.0 (inherited from upstream; CI builds with it).
+- Upstream's release, preview, and Windows cross-compile tooling is excluded from the fork as before.
+
 ## [0.9.0.1] - 2026-09-15
 
 First Superherdr release, based on Herdr 0.9.0. Superherdr versions are the Herdr base version plus a Superherdr revision.
