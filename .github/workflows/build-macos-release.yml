@@ -1,0 +1,78 @@
+name: Build macOS release
+
+# Manually builds the macOS aarch64 release archive for a commit.
+# The maintainer verifies the uploaded artifact and attaches it to the GitHub
+# release; this workflow publishes nothing.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit, branch, or tag to build
+        required: true
+        default: main
+
+permissions:
+  contents: read
+
+env:
+  RUST_TOOLCHAIN_VERSION: 1.96.1
+  TARGET: aarch64-apple-darwin
+
+jobs:
+  macos-aarch64:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
+
+      - name: Install Zig
+        uses: vercel-labs/setup-zig@83c1594f26b86da8a9a8ddd9b5ee5f3af0f96943 # v1.0.2
+        with:
+          version: 0.16.0
+
+      - name: Build
+        env:
+          HERDR_BUILD_CHANNEL: stable
+          MACOSX_DEPLOYMENT_TARGET: "13.0"
+        run: cargo build --release --locked
+
+      - name: Verify binary
+        run: |
+          bin="target/release/herdr"
+          base="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          revision="$(sed -n 's/^pub const SUPERHERDR_REVISION: u32 = \([0-9][0-9]*\);/\1/p' src/build_info.rs)"
+          test -n "$base" && test -n "$revision"
+          version="$base.$revision"
+          file "$bin"
+          test "$("$bin" --version)" = "herdr $base (superherdr $version)"
+          "$bin" status client --json | tee status.json
+          grep -q '"channel":"stable"' status.json
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Package
+        run: |
+          stage="$(mktemp -d)"
+          cp target/release/herdr "$stage/"
+          cp LICENSE "$stage/"
+          cp -R licenses "$stage/"
+          tar -czf "superherdr-$VERSION-macos-aarch64.tar.gz" -C "$stage" herdr LICENSE licenses
+          shasum -a 256 "superherdr-$VERSION-macos-aarch64.tar.gz" > "superherdr-$VERSION-macos-aarch64.tar.gz.sha256"
+          cat "superherdr-$VERSION-macos-aarch64.tar.gz.sha256"
+
+      - name: Upload archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: superherdr-macos-aarch64
+          path: |
+            superherdr-*-macos-aarch64.tar.gz
+            superherdr-*-macos-aarch64.tar.gz.sha256
+          if-no-files-found: error
