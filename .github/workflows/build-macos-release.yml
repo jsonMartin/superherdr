@@ -60,13 +60,15 @@ jobs:
 
       - name: Package
         run: |
-          stage="$(mktemp -d)"
-          cp target/release/herdr "$stage/"
-          cp LICENSE "$stage/"
-          cp -R licenses "$stage/"
-          tar -czf "superherdr-$VERSION-macos-aarch64.tar.gz" -C "$stage" herdr LICENSE licenses
-          shasum -a 256 "superherdr-$VERSION-macos-aarch64.tar.gz" > "superherdr-$VERSION-macos-aarch64.tar.gz.sha256"
-          cat "superherdr-$VERSION-macos-aarch64.tar.gz.sha256"
+          name="superherdr-$VERSION-macos-aarch64"
+          stage="$RUNNER_TEMP/$name"
+          mkdir -p "$stage/licenses"
+          cp target/release/herdr "$stage/herdr"
+          cp LICENSE "$stage/LICENSE"
+          cp vendor/libghostty-vt/LICENSE "$stage/licenses/libghostty-vt-LICENSE"
+          cp vendor/portable-pty/LICENSE.md "$stage/licenses/portable-pty-LICENSE.md"
+          tar -C "$stage" -czf "$name.tar.gz" herdr LICENSE licenses
+          shasum -a 256 "$name.tar.gz" | tee "$name.tar.gz.sha256"
 
       - name: Upload archive
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
