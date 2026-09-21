@@ -60,6 +60,15 @@ pub(super) fn render_collapsed(
     let mut skip = *state.workspace_scroll;
     let mut y = workspace_area.y;
     for (index, endpoint) in state.endpoints.iter().enumerate() {
+        // A focus scope on another machine hides this machine entirely while
+        // scoped (SHERDR-20): the sidebar shows only the focused context.
+        if state
+            .focus_scope
+            .as_ref()
+            .is_some_and(|scope| scope.endpoint_id() != &endpoint.endpoint_id)
+        {
+            continue;
+        }
         if y >= workspace_area.bottom() {
             break;
         }
@@ -266,6 +275,15 @@ pub(super) fn render_expanded(
     }
     let mut rows = Vec::new();
     for (endpoint_index, endpoint) in state.endpoints.iter().enumerate() {
+        // A focus scope on another machine hides this machine entirely while
+        // scoped (SHERDR-20): the sidebar shows only the focused context.
+        if state
+            .focus_scope
+            .as_ref()
+            .is_some_and(|scope| scope.endpoint_id() != &endpoint.endpoint_id)
+        {
+            continue;
+        }
         rows.push(Row::Endpoint(endpoint_index));
         if state.collapsed_endpoints.contains(&endpoint.endpoint_id) {
             continue;

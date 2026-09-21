@@ -20,6 +20,14 @@ pub(crate) enum ClientFocusScope {
 }
 
 impl ClientFocusScope {
+    pub(crate) fn endpoint_id(&self) -> &ClientEndpointId {
+        match self {
+            Self::Worktree { endpoint_id, .. } | Self::StandaloneWorkspace { endpoint_id, .. } => {
+                endpoint_id
+            }
+        }
+    }
+
     pub(crate) fn matches_workspace(
         &self,
         endpoint_id: &ClientEndpointId,

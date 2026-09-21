@@ -1450,10 +1450,18 @@ fn snooze_reset_client_empty_view_binding_and_stale_confirmation_are_safe() {
     let mut newer = two_workspace_snapshot();
     newer.boot_id = "replacement-boot".into();
     state.set_snapshot(Box::new(newer));
+    // The boot reset closes the confirmation overlay and the stale focus
+    // scope is cleared (SHERDR-20), so the stale confirmation can never fire;
+    // the Enter press falls through to the presented pane as plain input.
+    assert!(state.focus_scope.is_none());
+    assert!(state.overlay.is_none());
     let outcome = state.handle_raw_events(vec![crate::raw_input::RawInputEvent::Key(
         crate::input::TerminalKey::new(KeyCode::Enter, KeyModifiers::empty()),
     )]);
-    assert!(outcome.actions.is_empty() && outcome.requests.is_empty());
+    assert!(
+        outcome.actions.is_empty(),
+        "stale confirmation must not emit actions"
+    );
 }
 
 #[test]
@@ -1845,4 +1853,126 @@ fn focused_header_names_scope_and_clears_without_waking() {
         .collect();
     assert_eq!(header, normal_header);
     assert_eq!(state.hits.focus_header_clear, Rect::default());
+}
+
+// SHERDR-20: navigation away from the focused context drops focus mode.
+
+fn local_scope_workspace(workspace_id: &str) -> ClientFocusScope {
+    ClientFocusScope::StandaloneWorkspace {
+        endpoint_id: ClientEndpointId::Local,
+        boot_id: "boot-1".into(),
+        workspace_id: workspace_id.into(),
+    }
+}
+
+fn local_scope_worktree(worktree_key: &str) -> ClientFocusScope {
+    ClientFocusScope::Worktree {
+        endpoint_id: ClientEndpointId::Local,
+        boot_id: "boot-1".into(),
+        worktree_key: worktree_key.into(),
+    }
+}
+
+#[test]
+fn focus_scope_survives_in_flight_snapshot_without_focus_transition() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut snapshot = two_workspace_snapshot();
+    state.set_snapshot(Box::new(snapshot.clone()));
+    state.set_focus_scope(Some(local_scope_worktree("repo-b")));
+    snapshot.revision += 1;
+    // In-flight snapshot: still shows the workspace focused before the scope
+    // was set, while the focus request to the scoped workspace is pending.
+    state.set_snapshot(Box::new(snapshot));
+    assert!(state.focus_scope.is_some());
+}
+
+#[test]
+fn focus_scope_clears_when_navigation_moves_focus_outside_scope() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(two_workspace_snapshot()));
+    state.set_focus_scope(Some(local_scope_workspace("ws_1")));
+    let mut snapshot = two_workspace_snapshot();
+    snapshot.revision += 1;
+    snapshot.focused_workspace_id = Some("ws_2".into());
+    state.set_snapshot(Box::new(snapshot));
+    assert!(state.focus_scope.is_none());
+    assert!(state.is_workspace_id_visible("ws_2"));
+}
+
+#[test]
+fn focus_scope_kept_when_focus_moves_within_scope() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(two_workspace_snapshot()));
+    state.set_focus_scope(Some(local_scope_worktree("repo-b")));
+    let mut snapshot = two_workspace_snapshot();
+    snapshot.revision += 1;
+    snapshot.focused_workspace_id = Some("ws_2".into());
+    state.set_snapshot(Box::new(snapshot));
+    assert!(state.focus_scope.is_some());
+}
+
+#[test]
+fn stale_focus_scope_clears_when_target_workspace_closes() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(two_workspace_snapshot()));
+    state.set_focus_scope(Some(local_scope_workspace("ws_2")));
+    let mut snapshot = two_workspace_snapshot();
+    snapshot.revision += 1;
+    snapshot.workspaces.retain(|ws| ws.workspace_id != "ws_2");
+    snapshot.focused_workspace_id = Some("ws_1".into());
+    state.set_snapshot(Box::new(snapshot));
+    assert!(state.focus_scope.is_none());
+}
+
+#[test]
+fn focus_scope_clears_when_focus_moves_to_out_of_scope_snoozed_workspace() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(two_workspace_snapshot()));
+    state.set_focus_scope(Some(local_scope_workspace("ws_1")));
+    state.set_snooze_state(snooze_state(&["ws_2"], 1));
+    assert!(state.focus_scope.is_some());
+    let mut snapshot = two_workspace_snapshot();
+    snapshot.revision += 1;
+    snapshot.focused_workspace_id = Some("ws_2".into());
+    state.set_snapshot(Box::new(snapshot));
+    assert!(state.focus_scope.is_none());
+}
+
+#[test]
+fn close_refocus_outside_project_drops_focus_mode() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut snapshot = two_workspace_snapshot();
+    let mut sibling = snapshot.workspaces[1].clone();
+    sibling.workspace_id = "ws_3".into();
+    sibling.active_tab_id = "tab_3".into();
+    sibling.number = 3;
+    snapshot.workspaces.push(sibling);
+    snapshot.focused_workspace_id = Some("ws_2".into());
+    state.set_snapshot(Box::new(snapshot));
+    state.set_focus_scope(Some(local_scope_worktree("repo-b")));
+    let mut snapshot = two_workspace_snapshot();
+    snapshot.revision += 1;
+    snapshot.workspaces.retain(|ws| ws.workspace_id != "ws_2");
+    // Server close-refocus clamped to a workspace outside the project while a
+    // scoped sibling remains; dropping the scope is the accepted behavior.
+    snapshot.focused_workspace_id = Some("ws_1".into());
+    state.set_snapshot(Box::new(snapshot));
+    assert!(state.focus_scope.is_none());
+}
+
+#[test]
+fn focus_scope_qualified_to_other_endpoint_clears_on_snapshot() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(two_workspace_snapshot()));
+    state.set_focus_scope(Some(ClientFocusScope::StandaloneWorkspace {
+        endpoint_id: ClientEndpointId::Ssh(
+            crate::client::endpoint::ProfileId::parse("0123456789abcdef0123456789abcdef").unwrap(),
+        ),
+        boot_id: "boot-1".into(),
+        workspace_id: "ws_1".into(),
+    }));
+    let mut snapshot = two_workspace_snapshot();
+    snapshot.revision += 1;
+    state.set_snapshot(Box::new(snapshot));
+    assert!(state.focus_scope.is_none());
 }

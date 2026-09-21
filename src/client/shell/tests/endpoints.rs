@@ -2694,3 +2694,24 @@ fn navigator_foreign_tab_selection_keeps_the_tab_target() {
         }] if activated == &endpoint_id && tab_id == "tab_1"
     ));
 }
+
+#[test]
+fn focus_scope_hides_other_machines_from_the_sidebar() {
+    let (mut state, remote) = state_with_remote();
+    state.compose(100, 28).expect("unscoped sidebar");
+    assert_eq!(state.hits.machines.len(), 2);
+
+    state.set_focus_scope(Some(ClientFocusScope::StandaloneWorkspace {
+        endpoint_id: ClientEndpointId::Local,
+        boot_id: "boot-1".into(),
+        workspace_id: "ws_1".into(),
+    }));
+    state.compose(100, 28).expect("scoped sidebar");
+    assert_eq!(state.hits.machines.len(), 1);
+    assert_eq!(state.hits.machines[0].endpoint_id, ClientEndpointId::Local);
+
+    state.clear_focus_scope();
+    state.compose(100, 28).expect("cleared sidebar");
+    assert_eq!(state.hits.machines.len(), 2);
+    assert!(state.hits.machines.iter().any(|hit| hit.endpoint_id == remote));
+}

@@ -1491,6 +1491,64 @@ impl ClientShellState {
         self.set_focus_scope(None)
     }
 
+    // SHERDR-20: navigation away from the focused context drops focus mode, so
+    // the sidebar always matches what is on screen. Evaluated on the active
+    // snapshot after install; every snapshot path (including endpoint switches
+    // via activate_endpoint_projection) routes through here.
+    fn apply_focus_scope_navigation_rule(&mut self, previous_focused: Option<String>) {
+        let Some(scope) = self.focus_scope.clone() else {
+            return;
+        };
+        let Some(snapshot) = self.snapshot.as_deref() else {
+            return;
+        };
+        // A scope whose target vanished (workspace closed, server reboot
+        // changed the boot id) is dead weight; drop it regardless of focus.
+        let scope_alive = snapshot.workspaces.iter().any(|workspace| {
+            scope.matches_workspace(
+                &self.active_endpoint_id,
+                Some(snapshot.boot_id.as_str()),
+                workspace,
+            )
+        });
+        if !scope_alive {
+            self.clear_focus_scope();
+            return;
+        }
+        // Only an actual focus transition counts as navigation. In-flight
+        // snapshots that still show the workspace focused before a scope was
+        // set must not clear it while the focus request is still pending.
+        let (Some(previous), Some(current)) = (
+            previous_focused.as_deref(),
+            snapshot.focused_workspace_id.as_deref(),
+        ) else {
+            return;
+        };
+        if previous == current {
+            return;
+        }
+        let Some(current_workspace) = snapshot
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.workspace_id == current)
+        else {
+            return;
+        };
+        if scope.matches_workspace(
+            &self.active_endpoint_id,
+            Some(snapshot.boot_id.as_str()),
+            current_workspace,
+        ) {
+            return;
+        }
+        // Focus moved to a live workspace outside the scope: new workspace via
+        // keybind (WorkspaceCreate focus: true), CLI focus, another client, or
+        // an endpoint switch (a scope qualified to another endpoint rejects
+        // every row here). Server close-refocus after deleting the focused
+        // workspace also lands here by design; see .local/prd/sherdr-20*.
+        self.clear_focus_scope();
+    }
+
     pub(crate) fn set_endpoint_snooze_state(
         &mut self,
         endpoint_id: &ClientEndpointId,
@@ -2016,7 +2074,12 @@ impl ClientShellState {
                 Some(_) => {}
             }
         }
+        let previous_focused_workspace_id = self
+            .snapshot
+            .as_deref()
+            .and_then(|current| current.focused_workspace_id.clone());
         self.snapshot = Some(snapshot);
+        self.apply_focus_scope_navigation_rule(previous_focused_workspace_id);
         let pending_surface = self.pending_pane_surface.take();
         if let Some(surface) = pending_surface {
             let matching = self.snapshot.as_ref().is_some_and(|snapshot| {
