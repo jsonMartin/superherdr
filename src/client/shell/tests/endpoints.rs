@@ -2713,5 +2713,9 @@ fn focus_scope_hides_other_machines_from_the_sidebar() {
     state.clear_focus_scope();
     state.compose(100, 28).expect("cleared sidebar");
     assert_eq!(state.hits.machines.len(), 2);
-    assert!(state.hits.machines.iter().any(|hit| hit.endpoint_id == remote));
+    assert!(state
+        .hits
+        .machines
+        .iter()
+        .any(|hit| hit.endpoint_id == remote));
 }
