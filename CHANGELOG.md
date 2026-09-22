@@ -2,6 +2,12 @@
 
 Superherdr's release history. Superherdr is a fork of [Herdr](https://github.com/herdrdev/herdr); changes inherited from upstream are described in [Herdr's releases](https://github.com/herdrdev/herdr/releases).
 
+## [0.9.1.2] - 2026-09-21
+
+### Changed
+- Focus now clears automatically when navigation leaves the focused context: creating a workspace with the keyboard shortcut, focusing work through the CLI or another client, switching machines, or closing the focused workspace all restore the full sidebar, and a scope whose target closed or whose server rebooted clears on the next snapshot. Snooze-driven hiding still keeps Focus.
+- While Focus is active, machines other than the focused one hide from the sidebar; their agents were already hidden. Clearing Focus brings them back.
+
 ## [0.9.1.1] - 2026-09-18
 
 Based on Herdr 0.9.1. All changes inherited from upstream are listed in [Herdr's 0.9.1 release notes](https://github.com/herdrdev/herdr/releases/tag/v0.9.1), including saved-machine CLI control (`herdr --machine`), cursor-aware text editing, Ctrl-click link highlighting, large SSH bandwidth and idle-CPU reductions, and the full fixes list.
