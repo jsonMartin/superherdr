@@ -18,12 +18,12 @@ REQUIRED_COMMANDS = (
     "awk", "cat", "chmod", "cp", "grep", "gzip", "ln", "mkdir", "mktemp", "mv",
     "readlink", "rm", "tar",
 )
-VERSION = "0.9.1.1"
+VERSION = "0.9.1.2"
 ARCHIVE_NAME = f"superherdr-{VERSION}-linux-x86_64.tar.gz"
 OWNED_URL_BASE = (
     f"https://github.com/jsonMartin/superherdr/releases/download/superherdr-v{VERSION}"
 )
-NEW_BINARY = b'#!/bin/sh\necho "herdr 0.9.1 (superherdr 0.9.1.1)"\n'
+NEW_BINARY = b'#!/bin/sh\necho "herdr 0.9.1 (superherdr 0.9.1.2)"\n'
 PREVIOUS_SUPERHERDR = b'#!/bin/sh\necho "herdr 0.9.0 (superherdr 0.9.0.0)"\n'
 LEGACY_BINARY = b'#!/bin/sh\necho "superherdr 0.1.0"\n'
 UPSTREAM_HERDR = b'#!/bin/sh\necho "herdr 0.9.0"\n'
