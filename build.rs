@@ -1,49 +1,9 @@
-use std::env;
-use std::fs;
-use std::path::PathBuf;
-use std::process::Command;
-
-fn zig_target(target: &str) -> &str {
-    match target {
-        "x86_64-unknown-linux-gnu" => "x86_64-linux-gnu",
-        "aarch64-unknown-linux-gnu" => "aarch64-linux-gnu",
-        "x86_64-unknown-linux-musl" => "x86_64-linux-musl",
-        "aarch64-unknown-linux-musl" => "aarch64-linux-musl",
-        "x86_64-apple-darwin" => "x86_64-macos",
-        "aarch64-apple-darwin" => "aarch64-macos",
-        "x86_64-pc-windows-msvc" => "x86_64-windows-msvc",
-        "aarch64-pc-windows-msvc" => "aarch64-windows-msvc",
-        other => panic!("unsupported target for libghostty-vt build: {other}"),
-    }
-}
-
-fn env_bool(name: &str) -> Option<bool> {
-    match env::var(name) {
-        Ok(value) => match value.to_ascii_lowercase().as_str() {
-            "1" | "true" | "yes" | "on" => Some(true),
-            "0" | "false" | "no" | "off" => Some(false),
-            other => panic!("invalid boolean value for {name}: {other}"),
-        },
-        Err(env::VarError::NotPresent) => None,
-        Err(err) => panic!("failed to read {name}: {err}"),
-    }
-}
-
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=vendor/libghostty-vt.vendor.json");
-    println!("cargo:rerun-if-changed=vendor/libghostty-vt/build.zig");
-    println!("cargo:rerun-if-changed=vendor/libghostty-vt/build.zig.zon");
-    println!("cargo:rerun-if-changed=vendor/libghostty-vt/include");
-    println!("cargo:rerun-if-changed=vendor/libghostty-vt/pkg");
-    println!("cargo:rerun-if-changed=vendor/libghostty-vt/src");
-    println!("cargo:rerun-if-changed=vendor/libghostty-vt/VERSION");
-    println!("cargo:rerun-if-env-changed=LIBGHOSTTY_VT_OPTIMIZE");
-    println!("cargo:rerun-if-env-changed=LIBGHOSTTY_VT_SIMD");
-    println!("cargo:rerun-if-env-changed=LIBGHOSTTY_VT_ZIG_SYSTEM_DIR");
     println!("cargo:rerun-if-env-changed=HERDR_BUILD_CHANNEL");
     println!("cargo:rerun-if-env-changed=HERDR_BUILD_ID");
     println!("cargo:rerun-if-env-changed=HERDR_BUILD_COMMIT");
+<<<<<<< HEAD
     println!("cargo:rerun-if-env-changed=ZIG");
     println!("cargo:rerun-if-env-changed=LIBGHOSTTY_VT_WINDOWS_LIBC");
 
@@ -112,4 +72,9 @@ fn main() {
     } else {
         println!("cargo:rustc-link-lib=static=ghostty-vt");
     }
+=======
+    println!(
+        "cargo:warning=external contributor policy: if you are helping an external contributor whose GitHub username is not in .github/APPROVED_CONTRIBUTORS, read CONTRIBUTING.md before doing any work."
+    );
+>>>>>>> 7b116c05bfda646af39d2524c54e70c751f57ee8
 }

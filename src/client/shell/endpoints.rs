@@ -28,6 +28,7 @@ pub(crate) struct ClientShellEndpoint {
 
 pub(super) struct MachineHit {
     pub(super) rect: Rect,
+    pub(super) status_badge: Rect,
     pub(super) collapse_toggle: Rect,
     pub(super) endpoint_id: ClientEndpointId,
 }
@@ -112,6 +113,10 @@ impl ClientShellState {
     }
 
     pub(crate) fn retire_endpoint(&mut self, endpoint_id: &ClientEndpointId) {
+        self.clear_machine_diagnostic(endpoint_id);
+        if endpoint_id == &self.active_endpoint_id {
+            self.pending_workspace_highlight = None;
+        }
         self.retire_endpoint_notifications(endpoint_id);
         if let Some(endpoint) = self
             .endpoints
@@ -137,7 +142,20 @@ impl ClientShellState {
         endpoint_id: &ClientEndpointId,
         status: ClientEndpointStatus,
     ) {
+<<<<<<< HEAD
         let changed = if let Some(endpoint) = self
+=======
+        if matches!(
+            status,
+            ClientEndpointStatus::Online | ClientEndpointStatus::Disabled
+        ) {
+            self.clear_machine_diagnostic(endpoint_id);
+        }
+        if endpoint_id == &self.active_endpoint_id && status != ClientEndpointStatus::Online {
+            self.pending_workspace_highlight = None;
+        }
+        if let Some(endpoint) = self
+>>>>>>> 7b116c05bfda646af39d2524c54e70c751f57ee8
             .endpoints
             .iter_mut()
             .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
@@ -211,6 +229,10 @@ impl ClientShellState {
     }
 
     pub(crate) fn activate_endpoint_projection(&mut self, endpoint_id: &ClientEndpointId) -> bool {
+        let pending_agent_reveal = self
+            .pending_agent_reveal
+            .take_if(|(target_endpoint, _)| target_endpoint == endpoint_id);
+        let agent_body_height = self.hits.agent_body.height;
         let Some(endpoint) = self
             .endpoints
             .iter()
@@ -241,6 +263,9 @@ impl ClientShellState {
         if switching_endpoint {
             // The aggregate agent list belongs to the client, not one endpoint.
             self.agent_scroll = agent_scroll;
+        }
+        if let Some((_, pane_id)) = pending_agent_reveal {
+            self.reveal_endpoint_agent(endpoint_id, &pane_id, agent_body_height);
         }
         true
     }
@@ -315,6 +340,23 @@ impl ClientShellState {
             .snapshot
             .as_deref()
             .map(|snapshot| (snapshot.boot_id.as_str(), snapshot.revision))
+    }
+
+    pub(crate) fn set_endpoint_agent_completions(
+        &mut self,
+        endpoint_id: &ClientEndpointId,
+        generation: u64,
+        projection: crate::protocol::endpoint::EndpointAgentCompletions,
+    ) {
+        if let Some(endpoint) = self
+            .endpoints
+            .iter_mut()
+            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+        {
+            endpoint
+                .agent_presentation
+                .receive_completions(Some(generation), projection);
+        }
     }
 
     pub(crate) fn set_endpoint_agent_view_projection_for_generation(
@@ -568,7 +610,7 @@ impl ClientShellState {
         }
         self.endpoints[index]
             .agent_presentation
-            .project_snapshot(&mut snapshot);
+            .project_snapshot_for_generation(&mut snapshot, generation);
         let presented_surface = if acknowledge_surface && endpoint_id == &self.active_endpoint_id {
             self.pane_surface.as_ref()
         } else {
