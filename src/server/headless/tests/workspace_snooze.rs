@@ -16,6 +16,7 @@ async fn snooze_subscribe_and_initial_state() {
         server.handle_server_event(ServerEvent::ClientShellConnected {
             surface_reuse: false,
             surface_delta: false,
+            surface_scroll: false,
             client_id,
             surface_cols: 80,
             surface_rows: 24,
@@ -103,6 +104,7 @@ async fn two_clients_receive_authoritative_workspace_snooze_state() {
             server.handle_server_event(ServerEvent::ClientShellConnected {
                 surface_reuse: false,
                 surface_delta: false,
+                surface_scroll: false,
                 client_id,
                 surface_cols: 80,
                 surface_rows: 24,
@@ -117,8 +119,8 @@ async fn two_clients_receive_authoritative_workspace_snooze_state() {
             })
         );
     }
-    let snapshot_a = client_shell_snapshot(recv_server_message(&control_rx_a, "snapshot a"));
-    let snapshot_b = client_shell_snapshot(recv_server_message(&control_rx_b, "snapshot b"));
+    let snapshot_a = client_shell_snapshot(&control_rx_a);
+    let snapshot_b = client_shell_snapshot(&control_rx_b);
     assert_eq!(snapshot_a, snapshot_b);
     assert_eq!(snapshot_a.workspaces.len(), 2);
     assert_eq!(snapshot_a.agents.len(), 2);
@@ -439,8 +441,7 @@ fn dispatch_focus_actions(
             request: (**request).clone(),
             respond_to,
             response_write_complete: None,
-            stream_active: None,
-        },
+            },
     );
     let response = response_rx
         .recv_timeout(std::time::Duration::from_secs(1))
@@ -462,6 +463,7 @@ async fn workspace_snooze_rejects_noncanonical_ids_without_record() {
     let _ = server.handle_server_event(ServerEvent::ClientShellConnected {
         surface_reuse: false,
         surface_delta: false,
+        surface_scroll: false,
         client_id,
         surface_cols: 80,
         surface_rows: 24,
@@ -515,6 +517,7 @@ async fn stale_boot_and_revision_wake_are_rejected() {
         server.handle_server_event(ServerEvent::ClientShellConnected {
             surface_reuse: false,
             surface_delta: false,
+            surface_scroll: false,
             client_id,
             surface_cols: 80,
             surface_rows: 24,
