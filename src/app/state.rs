@@ -760,6 +760,11 @@ pub struct ReleaseNotesState {
     pub body: String,
     pub scroll: u16,
     pub preview: bool,
+    /// True when the view shows the stored release-notes slot; closing it
+    /// dismisses the server-side notes and later snapshots may replace it.
+    /// The embedded history view sets false: closing sends no endpoint
+    /// request and snapshots never close or replace it.
+    pub from_stored_notes: bool,
 }
 
 #[derive(Debug)]
@@ -820,8 +825,7 @@ pub struct AppState {
     /// None means unsupported or not yet reported, which preserves active-pane suppression.
     pub outer_terminal_focus: Option<bool>,
     // Config
-    pub prefix_code: KeyCode,
-    pub prefix_mods: KeyModifiers,
+    pub prefix_keys: Vec<(KeyCode, KeyModifiers)>,
     /// Virtual terminal size (columns, rows) used when no client is attached.
     pub(crate) headless_size: (u16, u16),
     pub agent_panel_sort: AgentPanelSort,
@@ -1046,8 +1050,7 @@ impl AppState {
             toast: None,
             pending_agent_notifications: std::collections::HashMap::new(),
             outer_terminal_focus: None,
-            prefix_code: KeyCode::Char('b'),
-            prefix_mods: KeyModifiers::CONTROL,
+            prefix_keys: vec![(KeyCode::Char('b'), KeyModifiers::CONTROL)],
             headless_size: (
                 crate::config::DEFAULT_HEADLESS_COLS,
                 crate::config::DEFAULT_HEADLESS_ROWS,

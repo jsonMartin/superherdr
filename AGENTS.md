@@ -96,7 +96,11 @@ Detection rules are evidence-based. When changing `src/detect/manifests/`, first
 
 Inspect matching with `herdr agent explain <pane> --json`, test a rule through a local override in `~/.config/herdr-dev/agent-detection/<agent>.toml` (debug) or `~/.config/herdr/agent-detection/<agent>.toml`, and apply it with `herdr server reload-agent-manifests`. Never overwrite or remove an existing override without the owner's agreement, and remove the temporary override afterwards so the bundled manifest stays the source of truth.
 
-Detection fixes that apply equally to Herdr belong upstream. Keep `distribution/agent-detection/` aligned with the bundled manifests; `scripts/agent_detection_manifest_check.py` enforces this. Do not add large agent-specific full-screen fixture suites for routine tuning; keep Rust tests focused on manifest parsing, rule semantics, source precedence, reload, and update behavior.
+Detection fixes that apply equally to Herdr belong upstream. Keep `distribution/agent-detection/` aligned with the bundled manifests; `scripts/agent_detection_manifest_check.py` enforces this.
+
+Unit-test the detection engine, not individual CLI agents' screen or title conventions. Use synthetic manifests and minimal input strings to test parsing, regions, matching, AND/OR/NOT gates, rule priority, skip-state semantics, source precedence, cache reload behavior, and update flow. Keep bundled-manifest schema validation, process identification, and integration hook/protocol tests. Do not add tests that classify captured or invented CLI screens against bundled agent rules, or freeze an agent's specific detection rule IDs and priorities.
+
+Validate agent-specific detection behavior with live smoke tests through the manifest hot-reload loop above. Exercise the changed state and nearby transitions (idle, working, blocked, and background work where supported), including relevant optional OSC settings. Record the CLI version, observed signals, and outcomes. Passing engine tests proves the rules execute as written; it does not prove compatibility with the current CLI.
 
 ## Vendored libghostty-vt
 

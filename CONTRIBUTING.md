@@ -8,6 +8,8 @@ Superherdr is a fork of [Herdr](https://github.com/herdrdev/herdr), a terminal r
 
 Most of Superherdr's runtime comes from Herdr, and upstream releases are merged regularly. If a bug also exists in Herdr and is not caused by Superherdr's changes, consider reporting it [upstream](https://github.com/herdrdev/herdr) so both projects benefit. Superherdr-specific behavior (Focus, Snooze, the Top-level Agents view, installation, and compatibility rules) belongs here. See the [behavior baseline](openspec/README.md).
 
+Every upstream sync must graft the merged release bodies into `CHANGELOG.md` as `### Inherited from Herdr <version>` sections at the end of the file, newest first. The What's New view renders this file in installed builds, so a skipped graft leaves upgraded installs without the new release's notes. Keep each section free of `##`-level headings, `####` headings, emphasis markers, and markdown links: the release-notes renderer styles only `###` headings and renders everything else literally. The full-history tests fail when the newest inherited section is missing, which is the reminder for this step.
+
 ## Choose the contribution path
 
 Search existing issues, pull requests, and [specifications](openspec/specs/) first. Link related work instead of opening duplicates.

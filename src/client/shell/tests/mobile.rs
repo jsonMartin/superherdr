@@ -492,19 +492,19 @@ fn mobile_switcher_create_and_menu_rows_reuse_client_actions() {
 }
 
 #[test]
-fn mobile_menu_keeps_inert_notes_open_and_cancel_without_workspace_in_navigate() {
+fn mobile_menu_opens_history_view_without_notes_and_cancel_without_workspace_in_navigate() {
     let mut source_config = Config::default();
     source_config.ui.prompt_new_workspace_name = true;
     let config = ClientShellConfig::from_config(&source_config);
     let mut projected = snapshot();
-    projected.latest_release_notes_available = true;
+    projected.latest_release_notes_available = false;
     projected.release_notes = None;
     let mut state = ClientShellState::new(config);
     state.set_snapshot(Box::new(projected));
     state.set_pane_surface(surface());
     state.mode = ClientShellMode::Navigate;
     state.compose(44, 20).expect("mobile switcher");
-    let inert_notes = state
+    let notes_row = state
         .hits
         .mobile_targets
         .iter()
@@ -512,13 +512,23 @@ fn mobile_menu_keeps_inert_notes_open_and_cancel_without_workspace_in_navigate()
         .expect("what's new row");
     state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
-        column: inert_notes.x,
-        row: inert_notes.y,
+        column: notes_row.x,
+        row: notes_row.y,
         modifiers: KeyModifiers::empty(),
     })]);
-    assert_eq!(state.mode, ClientShellMode::Navigate);
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::ReleaseNotes(
+            crate::app::state::ReleaseNotesState {
+                from_stored_notes: false,
+                ..
+            }
+        ))
+    ));
+    state.dismiss_release_notes(&mut ClientShellInput::default());
+    // Dismissal returns to the focused workspace's terminal mode.
+    assert_eq!(state.mode, ClientShellMode::Terminal);
     assert!(state.overlay.is_none());
-    assert!(!state.mobile_switcher_suspended);
 
     let mut empty = snapshot();
     empty.focused_workspace_id = None;

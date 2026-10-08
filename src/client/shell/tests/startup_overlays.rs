@@ -142,7 +142,16 @@ fn release_notes_reconcile_and_failed_dismiss_reopens_authoritative_snapshot() {
         preview: true,
     });
     state.set_snapshot(Box::new(endpoint_snapshot.clone()));
-    state.open_release_notes();
+    // The menu opens the embedded history view now, so open the stored-notes
+    // view directly to exercise its reconcile and dismiss plumbing.
+    let stored_notes = state
+        .snapshot
+        .as_deref()
+        .and_then(|snapshot| snapshot.release_notes.clone())
+        .expect("stored notes");
+    state.overlay = Some(ClientShellOverlay::ReleaseNotes(release_notes_state(
+        &stored_notes,
+    )));
 
     endpoint_snapshot.release_notes = Some(crate::protocol::ClientShellReleaseNotes {
         version: "0.8.4".into(),
@@ -722,6 +731,12 @@ fn update_ready_menu_opens_client_owned_release_notes_and_dismisses_by_version()
         state.config.palette.text
     );
     state.activate_global_menu_item(3, &mut ClientShellInput::default());
+    // Even with an update ready, the menu opens the embedded history view.
+    let Some(ClientShellOverlay::ReleaseNotes(history)) = state.overlay.as_ref() else {
+        panic!("history view did not open");
+    };
+    assert!(!history.from_stored_notes);
+    assert!(!history.preview);
     let notes = state.compose(106, 30).expect("release notes");
     let bottom_row_start = usize::from(notes.width) * usize::from(notes.height - 1);
     let bottom_row = notes.cells[bottom_row_start..]
@@ -739,9 +754,8 @@ fn update_ready_menu_opens_client_owned_release_notes_and_dismisses_by_version()
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(text.contains("v0.8.3"));
-    assert!(text.contains("update ready"));
-    assert!(text.contains("detach, run herdr update"));
+    assert!(text.contains("v0.9.3.1"));
+    assert!(text.contains("SUPERHERDR 0.9.1.2"));
     assert!(!state.hits.release_notes_scrollbar.is_empty());
     let outer = crate::ui::centered_popup_rect(
         Rect::new(0, 0, 106, 30),
@@ -844,9 +858,25 @@ fn update_ready_menu_opens_client_owned_release_notes_and_dismisses_by_version()
             crate::app::state::ReleaseNotesState { scroll: 3, .. }
         ))
     ));
+    // Closing the history view sends no endpoint request.
     let dismissed = state.handle_input_bytes(b"\r");
     assert!(state.overlay.is_none());
     assert_eq!(state.mode, ClientShellMode::Terminal);
+    assert!(dismissed.actions.is_empty());
+
+    // The stored-notes view still dismisses by its stored version.
+    let stored = crate::protocol::ClientShellReleaseNotes {
+        version: "0.8.3".into(),
+        body: (0..40)
+            .map(|index| format!("- release line {index}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        preview: true,
+    };
+    state.overlay = Some(ClientShellOverlay::ReleaseNotes(release_notes_state(
+        &stored,
+    )));
+    let dismissed = state.handle_input_bytes(b"\r");
     assert!(matches!(
         &dismissed.actions[..],
         [ClientShellAction::Endpoint { request, .. }]
@@ -955,6 +985,7 @@ fn coalesced_release_notes_open_and_mouse_uses_current_geometry() {
         body,
         scroll: 0,
         preview: true,
+        from_stored_notes: true,
     };
     let metrics = crate::ui::release_notes_scroll_metrics(
         &notes,
@@ -1009,11 +1040,8 @@ fn coalesced_release_notes_open_and_mouse_uses_current_geometry() {
         }),
     ]);
     assert!(state.overlay.is_none());
-    assert!(matches!(
-        &closed.actions[..],
-        [ClientShellAction::Endpoint { request, .. }]
-            if matches!(request.method, crate::api::schema::Method::ReleaseNotesDismiss(_))
-    ));
+    // The menu opens the history view, whose close sends no endpoint request.
+    assert!(closed.actions.is_empty());
 }
 
 #[test]
@@ -1293,4 +1321,85 @@ fn client_settings_preview_restore_and_endpoint_integrations_are_owned_by_overla
             ..
         })) if integration_messages == &["installed codex"]
     ));
+}
+
+#[test]
+fn whats_new_history_opens_without_notes_and_survives_snapshots_without_endpoint_requests() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    // No update, no stored notes, no availability flag: the entry must still
+    // be offered and the history view must still open.
+    let mut endpoint_snapshot = snapshot();
+    endpoint_snapshot.latest_release_notes_available = false;
+    endpoint_snapshot.release_notes = None;
+    state.set_snapshot(Box::new(endpoint_snapshot));
+    state.set_pane_surface(surface());
+    state.compose(106, 30).expect("shell frame");
+    state.toggle_global_menu();
+    let menu = state.compose(106, 30).expect("menu without notes");
+    let text = menu
+        .cells
+        .iter()
+        .map(|cell| cell.symbol.as_str())
+        .collect::<String>();
+    assert!(text.contains("what's new"));
+
+    state.activate_global_menu_item(3, &mut ClientShellInput::default());
+    let Some(ClientShellOverlay::ReleaseNotes(history)) = state.overlay.as_ref() else {
+        panic!("history view did not open");
+    };
+    assert!(!history.from_stored_notes);
+    assert!(
+        history.body.starts_with("### Superherdr "),
+        "{:?}",
+        history.body
+    );
+    assert!(history.body.contains("### Inherited from Herdr 0.9.3"));
+    assert!(!history.body.contains("Unreleased"));
+    let composed = state.compose(106, 30).expect("history frame");
+    let composed_text = composed
+        .cells
+        .chunks(composed.width as usize)
+        .map(|row| {
+            row.iter()
+                .map(|cell| cell.symbol.as_str())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        composed_text.contains("SUPERHERDR 0.9.1.2"),
+        "{composed_text}"
+    );
+
+    // An empty snapshot (no notes, no update) must not close the view.
+    state.set_snapshot(Box::new(snapshot()));
+    state.compose(106, 30).expect("empty snapshot frame");
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::ReleaseNotes(_))
+    ));
+
+    // A stale stored-note snapshot must not replace the history view.
+    let mut stale = snapshot();
+    stale.latest_release_notes_available = true;
+    stale.release_notes = Some(crate::protocol::ClientShellReleaseNotes {
+        version: "0.8.0".into(),
+        body: "### Changed\n- Old body".into(),
+        preview: false,
+    });
+    state.set_snapshot(Box::new(stale));
+    state.compose(106, 30).expect("stale snapshot frame");
+    let Some(ClientShellOverlay::ReleaseNotes(history)) = state.overlay.as_ref() else {
+        panic!("history view closed by a stale-note snapshot");
+    };
+    assert!(history.body.starts_with("### Superherdr "));
+
+    // Closing the history view sends no endpoint request.
+    let dismissed = state.handle_input_bytes(b"\r");
+    assert!(state.overlay.is_none());
+    assert!(
+        dismissed.actions.is_empty(),
+        "history close must not request anything: {:?}",
+        dismissed.actions
+    );
 }

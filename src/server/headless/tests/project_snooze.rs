@@ -28,7 +28,6 @@ fn api_request(server: &mut HeadlessServer, id: &str, method: Method) -> String 
         },
         respond_to,
         response_write_complete: None,
-        stream_active: None,
     });
     response_rx
         .recv_timeout(std::time::Duration::from_secs(1))
@@ -294,6 +293,7 @@ async fn project_snooze_endpoint_hides_future_matching_workspace_and_preserves_u
         server.handle_server_event(ServerEvent::ClientShellConnected {
             surface_reuse: false,
             surface_delta: false,
+            surface_scroll: false,
             client_id,
             surface_cols: 80,
             surface_rows: 24,
@@ -307,7 +307,7 @@ async fn project_snooze_endpoint_hides_future_matching_workspace_and_preserves_u
             writer,
         })
     );
-    let _ = control_rx.recv().expect("initial snapshot");
+    let _ = client_shell_snapshot(&control_rx);
     assert!(!server.handle_server_event(ServerEvent::ClientShellSnoozeSubscribe { client_id }));
     let _ = control_rx.recv().expect("initial snooze state");
 

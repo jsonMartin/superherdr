@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 
 const PENDING_RELEASE_NOTES_PATH: &str = "release-notes.json";
 
+// Embedded at build time so the What's New history view works in installed
+// builds with no checkout, no network, and no config-directory state.
+pub const EMBEDDED_CHANGELOG: &str = include_str!("../CHANGELOG.md");
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReleaseNotes {
     pub version: String,
@@ -150,7 +154,7 @@ fn extract_version_section(content: &str, version: &str) -> Option<String> {
             continue;
         }
 
-        if line.starts_with("## [") {
+        if line.starts_with("## [") || line.starts_with("### Inherited from Herdr") {
             break;
         }
 
@@ -159,6 +163,36 @@ fn extract_version_section(content: &str, version: &str) -> Option<String> {
 
     let body = lines.join("\n").trim().to_string();
     (!body.is_empty()).then_some(body)
+}
+
+/// The merged What's New document: released Superherdr sections first
+/// (newest first, `Unreleased` omitted) followed by the inherited Herdr
+/// sections. Version headings are restyled to `###` so the release-notes
+/// renderer styles them, and inherited sections keep their `### Inherited
+/// from Herdr <version>` headings.
+pub fn full_history_body() -> String {
+    let mut lines = Vec::new();
+    let mut started = false;
+    let mut skipping_unreleased = false;
+
+    for line in EMBEDDED_CHANGELOG.lines() {
+        if let Some(rest) = line.strip_prefix("## [") {
+            started = true;
+            skipping_unreleased = rest.contains("Unreleased");
+            if skipping_unreleased {
+                continue;
+            }
+            let version = rest.split(']').next().unwrap_or(rest).trim();
+            lines.push(format!("### Superherdr {version}"));
+            continue;
+        }
+        if !started || skipping_unreleased {
+            continue;
+        }
+        lines.push(line.to_string());
+    }
+
+    normalize_body(&lines.join("\n"))
 }
 
 pub fn normalize_body(body: &str) -> String {
@@ -181,6 +215,78 @@ mod tests {
             extract_version_section(changelog, "0.2.3").as_deref(),
             Some("### Changed\n- One")
         );
+    }
+
+    #[test]
+    fn version_extraction_excludes_a_following_inherited_section() {
+        let changelog = "# Changelog\n\n## [0.2.3] - 2026-03-31\n\n### Changed\n- One\n\n### Inherited from Herdr 0.9.3\n\nFixed:\n- Upstream fix\n";
+        let body = extract_version_section(changelog, "0.2.3").expect("section body");
+        assert_eq!(body, "### Changed\n- One");
+        assert!(!body.contains("Inherited"));
+    }
+
+    #[test]
+    fn extraction_of_the_last_released_section_excludes_inherited_sections() {
+        let last_version = EMBEDDED_CHANGELOG
+            .lines()
+            .rfind(|line| line.starts_with("## [") && !line.contains("Unreleased"))
+            .and_then(|line| {
+                line.strip_prefix("## [")
+                    .and_then(|rest| rest.split(']').next())
+            })
+            .map(str::to_string)
+            .expect("a released section");
+        let body = extract_version_section(EMBEDDED_CHANGELOG, &last_version)
+            .expect("last released section");
+        assert!(
+            body.contains("### Changed")
+                || body.contains("### Added")
+                || body.contains("### Fixed")
+        );
+        assert!(!body.contains("Inherited from Herdr"));
+    }
+
+    #[test]
+    fn full_history_starts_at_the_newest_released_superherdr_section() {
+        let body = full_history_body();
+        assert!(!body.contains("Unreleased"), "{body}");
+        assert!(body.starts_with("### Superherdr "), "{body}");
+    }
+
+    #[test]
+    fn full_history_lists_superherdr_sections_before_inherited_sections() {
+        let body = full_history_body();
+        let first_inherited = body
+            .find("### Inherited from Herdr")
+            .expect("inherited sections");
+        let last_superherdr = body.rfind("### Superherdr ").expect("superherdr sections");
+        assert!(
+            last_superherdr < first_inherited,
+            "superherdr sections must come before inherited sections"
+        );
+    }
+
+    #[test]
+    fn full_history_lists_inherited_sections_newest_first() {
+        let body = full_history_body();
+        let expected: Vec<String> = EMBEDDED_CHANGELOG
+            .lines()
+            .filter_map(|line| line.strip_prefix("### Inherited from Herdr "))
+            .map(str::trim)
+            .map(str::to_string)
+            .collect();
+        assert!(!expected.is_empty(), "changelog has inherited sections");
+        let mut last_index = None;
+        for version in &expected {
+            let marker = format!("### Inherited from Herdr {version}");
+            let index = body.find(&marker).unwrap_or_else(|| {
+                panic!("history body is missing the inherited section for {version}")
+            });
+            if let Some(previous) = last_index {
+                assert!(index > previous, "inherited sections must be newest first");
+            }
+            last_index = Some(index);
+        }
     }
 
     #[test]

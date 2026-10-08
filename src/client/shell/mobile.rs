@@ -799,7 +799,13 @@ fn mobile_items(
                     palette.surface0
                 }
             } else if endpoint.endpoint_id == active_endpoint_id && workspace.focused {
-                palette.surface_dim
+                if selected_workspace_id.is_some()
+                    && palette.surface0 == ratatui::style::Color::Reset
+                {
+                    palette.panel_bg
+                } else {
+                    palette.surface_dim
+                }
             } else {
                 palette.panel_bg
             };
@@ -988,6 +994,7 @@ impl ClientShellState {
             {
                 self.mobile_switcher_scroll = 0;
                 self.reveal_mobile_workspace = false;
+                self.pending_workspace_highlight = None;
                 self.mode = ClientShellMode::Navigate;
                 self.navigate_workspace_id = self.focused_navigation_target();
                 outcome.repaint = true;
@@ -1094,13 +1101,12 @@ impl ClientShellState {
                 );
             }
             Some(ClientMobileTarget::Menu(index)) => {
+                // The What's New history view is always available, so every
+                // present menu entry is actionable.
                 let actionable = self.snapshot.as_deref().is_some_and(|snapshot| {
                     super::global_menu::global_menu_items(snapshot)
                         .get(index)
-                        .is_some_and(|(_, action)| {
-                            *action != super::global_menu::ClientGlobalMenuAction::WhatsNew
-                                || snapshot.release_notes.is_some()
-                        })
+                        .is_some()
                 });
                 if actionable {
                     self.mobile_switcher_suspended = true;
