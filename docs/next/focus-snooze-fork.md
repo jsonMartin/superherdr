@@ -20,6 +20,10 @@ Focus narrows one client's view to a project or workspace. Snooze hides a projec
 
 Snoozing individual agents, tabs, or panes is not supported.
 
+## What's New
+
+The global menu's "what's new" entry is always available and opens the full merged release history, rendered from the `CHANGELOG.md` embedded in the binary. Released Superherdr sections come first (newest first, `Unreleased` sections omitted), followed by `Inherited from Herdr <version>` sections that port the upstream release bodies, also newest first. The view needs no network, no filesystem access, and no stored state, so it works the same in a checkout and in an installed build. Closing it sends no request to the server. Startup, product announcements, and update previews behave as before; nothing auto-opens on launch.
+
 ## Known limits
 
 - An open Snooze management dialog does not refresh when another client changes a snooze. Actions on stale rows are rejected safely; close and reopen the dialog to refresh it.

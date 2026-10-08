@@ -464,8 +464,25 @@ fn global_menu_opens_from_sidebar_and_routes_client_actions() {
     assert!(help.actions.is_empty());
     assert!(matches!(state.overlay, Some(ClientShellOverlay::Help(_))));
 
+    // Index 3 is the always-available what's-new entry, which opens the
+    // embedded history view; detach follows it.
     state.overlay = Some(ClientShellOverlay::GlobalMenu(ClientGlobalMenuOverlay {
         highlighted: 3,
+    }));
+    let whats_new = state.handle_input_bytes(b"\r");
+    assert!(whats_new.actions.is_empty());
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::ReleaseNotes(
+            crate::app::state::ReleaseNotesState {
+                from_stored_notes: false,
+                ..
+            }
+        ))
+    ));
+
+    state.overlay = Some(ClientShellOverlay::GlobalMenu(ClientGlobalMenuOverlay {
+        highlighted: 4,
     }));
     let detach = state.handle_input_bytes(b"\r");
     assert!(detach.detach);

@@ -37,16 +37,16 @@ pub(super) fn global_menu_items(
             ClientGlobalMenuAction::Binding(crate::input::KeybindAction::ReloadConfig),
         ),
     ];
-    if snapshot.update_available.is_some() || snapshot.latest_release_notes_available {
-        items.push((
-            if snapshot.update_available.is_some() {
-                "update ready"
-            } else {
-                "what's new"
-            },
-            ClientGlobalMenuAction::WhatsNew,
-        ));
-    }
+    // The history view is embedded in the binary, so the entry is always
+    // available regardless of update-check or stored-notes state.
+    items.push((
+        if snapshot.update_available.is_some() {
+            "update ready"
+        } else {
+            "what's new"
+        },
+        ClientGlobalMenuAction::WhatsNew,
+    ));
     items.push((
         "detach",
         ClientGlobalMenuAction::Binding(crate::input::KeybindAction::Detach),
@@ -117,15 +117,6 @@ impl ClientShellState {
         }) else {
             return;
         };
-        if action == ClientGlobalMenuAction::WhatsNew
-            && self
-                .snapshot
-                .as_deref()
-                .and_then(|snapshot| snapshot.release_notes.as_ref())
-                .is_none()
-        {
-            return;
-        }
         self.overlay = None;
         match action {
             ClientGlobalMenuAction::Binding(binding) => {

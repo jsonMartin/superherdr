@@ -760,6 +760,11 @@ pub struct ReleaseNotesState {
     pub body: String,
     pub scroll: u16,
     pub preview: bool,
+    /// True when the view shows the stored release-notes slot; closing it
+    /// dismisses the server-side notes and later snapshots may replace it.
+    /// The embedded history view sets false: closing sends no endpoint
+    /// request and snapshots never close or replace it.
+    pub from_stored_notes: bool,
 }
 
 #[derive(Debug)]

@@ -61,7 +61,7 @@ herdr --skill
 herdr
 ```
 
-`ctrl+b q` detaches the client. Running the same command reattaches. Focus and Snooze are available in the sidebar and workspace/project context menus.
+`ctrl+b q` detaches the client. Running the same command reattaches. Focus and Snooze are available in the sidebar and workspace/project context menus. The global menu's "what's new" entry always opens the full merged release history — Superherdr releases first, then the inherited Herdr releases — rendered from the changelog embedded in the binary, with no network access.
 
 For SSH, `herdr --remote <host>` uses a compatible `herdr` on the remote host, whether Herdr or Superherdr; Snooze needs Superherdr on the remote. If none is installed, it offers to install your local binary, or the build named by `HERDR_REMOTE_BINARY`, at `~/.local/bin/herdr`. It never downloads release binaries.
 

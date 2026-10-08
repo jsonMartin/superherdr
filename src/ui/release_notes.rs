@@ -324,6 +324,7 @@ mod tests {
             body: "### Added\n- One".into(),
             scroll: 0,
             preview: true,
+            from_stored_notes: true,
         };
 
         let lines = release_notes_display_lines(&notes, "herdr update", &palette);
@@ -366,5 +367,107 @@ mod tests {
         assert_eq!(line_text(&lines[0].1), "▏ first");
         assert_eq!(line_text(&lines[1].1), "▏ ");
         assert_eq!(line_text(&lines[2].1), "▏ second");
+    }
+}
+
+#[cfg(test)]
+mod history_tests {
+    use super::*;
+    use crate::release_notes::{full_history_body, EMBEDDED_CHANGELOG};
+
+    fn line_text(line: &Line<'_>) -> String {
+        line.spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>()
+    }
+
+    fn history_line_texts() -> Vec<String> {
+        let palette = Palette::catppuccin();
+        let body = full_history_body();
+        release_notes_lines(&body, &palette)
+            .iter()
+            .map(|(_, line)| line_text(line))
+            .collect()
+    }
+
+    #[test]
+    fn history_renders_released_superherdr_sections_before_inherited_sections() {
+        let texts = history_line_texts();
+        let first_inherited = texts
+            .iter()
+            .position(|text| text.contains("INHERITED FROM HERDR"))
+            .expect("inherited sections render");
+        let last_superherdr = texts
+            .iter()
+            .rposition(|text| text.contains("SUPERHERDR "))
+            .expect("superherdr sections render");
+        assert!(last_superherdr < first_inherited);
+    }
+
+    #[test]
+    fn history_styles_inherited_sections_as_accented_headings() {
+        let palette = Palette::catppuccin();
+        let newest_inherited = EMBEDDED_CHANGELOG
+            .lines()
+            .filter_map(|line| line.strip_prefix("### Inherited from Herdr "))
+            .next()
+            .expect("changelog has inherited sections")
+            .trim();
+        let body = full_history_body();
+        let lines = release_notes_lines(&body, &palette);
+        let marker = format!(" INHERITED FROM HERDR {newest_inherited}");
+        let (_, line) = lines
+            .iter()
+            .find(|(_, line)| line_text(line) == marker)
+            .unwrap_or_else(|| panic!("missing styled heading {marker}"));
+        assert_eq!(line.spans.len(), 2);
+        assert_eq!(line.spans[1].style.fg, Some(palette.accent));
+        assert!(line.spans[1].style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn history_omits_unreleased_sections() {
+        let unreleased_versions: Vec<String> = EMBEDDED_CHANGELOG
+            .lines()
+            .filter_map(|line| {
+                let rest = line.strip_prefix("## [")?;
+                rest.contains("Unreleased")
+                    .then(|| rest.split(']').next().unwrap_or(rest).trim().to_string())
+            })
+            .collect();
+        assert!(
+            !unreleased_versions.is_empty(),
+            "changelog currently has an unreleased section"
+        );
+        let texts = history_line_texts();
+        for version in unreleased_versions {
+            let marker = format!("SUPERHERDR {version}");
+            assert!(
+                texts.iter().all(|text| !text.contains(&marker)),
+                "unreleased section {version} leaked into the view"
+            );
+        }
+    }
+
+    #[test]
+    fn history_never_renders_unsupported_markdown_markers() {
+        for text in history_line_texts() {
+            for marker in ["####", "## [", "](http", "**"] {
+                assert!(
+                    !text.contains(marker),
+                    "rendered line shows literal markdown {marker:?}: {text:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn history_bullet_lines_render_as_bullets() {
+        let bullets = history_line_texts()
+            .iter()
+            .filter(|text| text.starts_with(" \u{2022} "))
+            .count();
+        assert!(bullets > 10, "expected many bullets, found {bullets}");
     }
 }

@@ -1111,6 +1111,17 @@ pub(super) fn release_notes_state(
         body: notes.body.clone(),
         scroll: 0,
         preview: notes.preview,
+        from_stored_notes: true,
+    }
+}
+
+pub(super) fn full_history_notes_state() -> crate::app::state::ReleaseNotesState {
+    crate::app::state::ReleaseNotesState {
+        version: crate::build_info::superherdr_version(),
+        body: crate::release_notes::full_history_body(),
+        scroll: 0,
+        preview: false,
+        from_stored_notes: false,
     }
 }
 
@@ -2073,21 +2084,25 @@ impl ClientShellState {
             }
         }
         if let Some(ClientShellOverlay::ReleaseNotes(current)) = self.overlay.as_ref() {
-            match snapshot.release_notes.as_ref() {
-                Some(notes)
-                    if current.version != notes.version
-                        || current.body != notes.body
-                        || current.preview != notes.preview =>
-                {
-                    self.overlay =
-                        Some(ClientShellOverlay::ReleaseNotes(release_notes_state(notes)));
-                    self.chrome_drag = None;
+            // The embedded history view is independent of the stored
+            // release-notes slot; snapshots never close or replace it.
+            if current.from_stored_notes {
+                match snapshot.release_notes.as_ref() {
+                    Some(notes)
+                        if current.version != notes.version
+                            || current.body != notes.body
+                            || current.preview != notes.preview =>
+                    {
+                        self.overlay =
+                            Some(ClientShellOverlay::ReleaseNotes(release_notes_state(notes)));
+                        self.chrome_drag = None;
+                    }
+                    None => {
+                        self.overlay = None;
+                        self.chrome_drag = None;
+                    }
+                    Some(_) => {}
                 }
-                None => {
-                    self.overlay = None;
-                    self.chrome_drag = None;
-                }
-                Some(_) => {}
             }
         }
         let previous_focused_workspace_id = self

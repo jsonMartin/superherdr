@@ -1101,13 +1101,12 @@ impl ClientShellState {
                 );
             }
             Some(ClientMobileTarget::Menu(index)) => {
+                // The What's New history view is always available, so every
+                // present menu entry is actionable.
                 let actionable = self.snapshot.as_deref().is_some_and(|snapshot| {
                     super::global_menu::global_menu_items(snapshot)
                         .get(index)
-                        .is_some_and(|(_, action)| {
-                            *action != super::global_menu::ClientGlobalMenuAction::WhatsNew
-                                || snapshot.release_notes.is_some()
-                        })
+                        .is_some()
                 });
                 if actionable {
                     self.mobile_switcher_suspended = true;

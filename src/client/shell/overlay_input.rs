@@ -59,14 +59,9 @@ impl ClientShellState {
     }
 
     pub(super) fn open_release_notes(&mut self) {
-        let Some(notes) = self
-            .snapshot
-            .as_deref()
-            .and_then(|snapshot| snapshot.release_notes.as_ref())
-        else {
-            return;
-        };
-        self.overlay = Some(ClientShellOverlay::ReleaseNotes(release_notes_state(notes)));
+        // The menu action always opens the embedded merged history view,
+        // independent of the stored release-notes slot and update state.
+        self.overlay = Some(ClientShellOverlay::ReleaseNotes(full_history_notes_state()));
         self.chrome_drag = None;
     }
 
@@ -89,15 +84,19 @@ impl ClientShellState {
         } else {
             ClientShellMode::Navigate
         };
-        self.push_endpoint_method_with_kind(
-            crate::api::schema::Method::ReleaseNotesDismiss(
-                crate::api::schema::ReleaseNotesDismissParams {
-                    version: notes.version.clone(),
-                },
-            ),
-            PendingEndpointKind::ReleaseNotesDismiss,
-            outcome,
-        );
+        // Only the stored-notes view dismisses server-side pending notes;
+        // the embedded history view has nothing to dismiss on the server.
+        if notes.from_stored_notes {
+            self.push_endpoint_method_with_kind(
+                crate::api::schema::Method::ReleaseNotesDismiss(
+                    crate::api::schema::ReleaseNotesDismissParams {
+                        version: notes.version.clone(),
+                    },
+                ),
+                PendingEndpointKind::ReleaseNotesDismiss,
+                outcome,
+            );
+        }
         outcome.repaint = true;
     }
 
