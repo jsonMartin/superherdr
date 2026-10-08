@@ -12,10 +12,10 @@ mod retained_graphics_tests;
 mod surface_delta_tests;
 #[path = "surface_interest.rs"]
 mod surface_interest_tests;
-#[path = "workspace_snooze.rs"]
-mod workspace_snooze_tests;
 #[path = "surface_scroll.rs"]
 mod surface_scroll_tests;
+#[path = "workspace_snooze.rs"]
+mod workspace_snooze_tests;
 
 fn client_shell_projection(
     receiver: &std::sync::mpsc::Receiver<Vec<u8>>,
