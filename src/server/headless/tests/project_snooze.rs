@@ -307,7 +307,7 @@ async fn project_snooze_endpoint_hides_future_matching_workspace_and_preserves_u
             writer,
         })
     );
-    let _ = control_rx.recv().expect("initial snapshot");
+    let _ = client_shell_snapshot(&control_rx);
     assert!(!server.handle_server_event(ServerEvent::ClientShellSnoozeSubscribe { client_id }));
     let _ = control_rx.recv().expect("initial snooze state");
 

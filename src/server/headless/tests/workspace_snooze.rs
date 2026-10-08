@@ -30,7 +30,7 @@ async fn snooze_subscribe_and_initial_state() {
             writer,
         })
     );
-    let _ = control_rx.recv().expect("initial snapshot");
+    let _ = client_shell_snapshot(&control_rx);
     assert!(!server.handle_server_event(ServerEvent::ClientShellSnoozeSubscribe { client_id }));
     assert!(server.snooze_subscribers.contains(&client_id));
 
@@ -441,7 +441,7 @@ fn dispatch_focus_actions(
             request: (**request).clone(),
             respond_to,
             response_write_complete: None,
-            },
+        },
     );
     let response = response_rx
         .recv_timeout(std::time::Duration::from_secs(1))
@@ -476,7 +476,7 @@ async fn workspace_snooze_rejects_noncanonical_ids_without_record() {
         surface_active: true,
         writer,
     });
-    let _ = recv_server_message(&control_rx, "snapshot");
+    let _ = client_shell_snapshot(&control_rx);
     let boot_id = server.client_shell_boot_id.clone();
     for (request_id, workspace_id) in [("numeric", "1"), ("missing", "")] {
         let _ = server.handle_server_event(ServerEvent::ClientShellEndpointRequest {
@@ -531,7 +531,7 @@ async fn stale_boot_and_revision_wake_are_rejected() {
             writer,
         })
     );
-    let _ = control_rx.recv().expect("snapshot");
+    let _ = client_shell_snapshot(&control_rx);
     let boot_id = server.client_shell_boot_id.clone();
     let workspace_id = server.app.public_workspace_id(0);
     let request = |id: &str, method| Request {

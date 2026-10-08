@@ -1977,6 +1977,9 @@ mod tests {
         history.workspaces[0].tabs[0]
             .panes
             .insert(saved_id, pane_history);
+        // The remapped layout changes the fingerprint upstream requires before
+        // trusting a history snapshot; restamp it for the mutated pair.
+        history.layout_fingerprint = super::super::snapshot::layout_fingerprint(&snapshot);
         let (events, _events_rx) = mpsc::channel(8);
         let (workspaces, terminals, runtimes) = restore(
             &snapshot,

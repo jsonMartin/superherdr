@@ -6161,6 +6161,67 @@ mod tests {
     }
 
     #[test]
+    fn same_kind_process_replacement_does_not_retain_accepted_session_ref() {
+        let mut terminal = test_terminal();
+        terminal.set_detected_state(Some(Agent::Pi), AgentState::Working);
+        let session_ref =
+            crate::agent_resume::AgentSessionRef::path(test_session_path("pi.jsonl")).unwrap();
+        let startup = terminal.set_agent_session_ref_for_session_start(
+            "herdr:pi".into(),
+            "pi".into(),
+            Some(session_ref.clone()),
+            Some(20),
+            Some("startup".into()),
+        );
+        assert!(
+            startup.is_some(),
+            "startup session report should anchor the accepted session"
+        );
+        let anchored = terminal.set_hook_authority_with_session_ref(
+            "herdr:pi".into(),
+            "pi".into(),
+            AgentState::Working,
+            None,
+            Some(session_ref.clone()),
+            Some(21),
+        );
+        assert!(anchored.is_some(), "accepted session should be anchored");
+        assert_eq!(
+            terminal.current_session_identity_for_persistence(),
+            Some((
+                "herdr:pi".into(),
+                "pi".into(),
+                crate::agent_resume::AgentSessionRefKind::Path,
+                session_ref.value.clone(),
+            ))
+        );
+
+        let now = Instant::now();
+        let release = terminal.set_detected_state_with_screen_signals_at(
+            Some(Agent::Pi),
+            AgentState::Idle,
+            false,
+            false,
+            false,
+            true,
+            now,
+        );
+
+        assert!(release.session_ref_changed);
+        assert!(terminal
+            .current_session_identity_for_persistence()
+            .is_none());
+
+        let replacement =
+            terminal.set_detected_agent_process_at(Agent::Pi, now + Duration::from_millis(1));
+
+        assert!(!replacement.session_ref_changed);
+        assert!(terminal
+            .current_session_identity_for_persistence()
+            .is_none());
+    }
+
+    #[test]
     fn process_exit_preserves_foreign_persisted_session_ref() {
         let mut terminal = test_terminal();
         terminal.set_persisted_agent_session(crate::agent_resume::PersistedAgentSession {
