@@ -1,15 +1,7 @@
 version: 2
 updates:
-  - package-ecosystem: cargo
-    directory: /
-    schedule:
-      interval: monthly
-    open-pull-requests-limit: 1
-    groups:
-      cargo-dependencies:
-        patterns:
-          - "*"
-
+  # Cargo dependencies follow upstream Herdr through sync pull requests; separate
+  # bumps would conflict in Cargo.lock on every sync.
   - package-ecosystem: github-actions
     directory: /
     schedule:
