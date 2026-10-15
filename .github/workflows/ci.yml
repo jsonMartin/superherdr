@@ -62,7 +62,7 @@ jobs:
           components: rustfmt,clippy
 
       - name: Install Rust tools
-        uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
           tool: just,cargo-nextest
 
