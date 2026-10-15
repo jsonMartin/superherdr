@@ -15,6 +15,7 @@ impl ClientContextMenuOverlay {
                 is_git,
                 is_linked_worktree,
                 has_worktree_children,
+                close_group,
                 collapsed,
                 can_clear_focus,
                 workspace_record_revision,
@@ -24,11 +25,10 @@ impl ClientContextMenuOverlay {
                 let mut items = Vec::new();
                 if *is_active_endpoint {
                     items.push(item("Rename", Action::Rename));
-                    if *has_worktree_children {
-                        items.push(item("Close group", Action::Close));
-                    } else {
-                        items.push(item("Close", Action::Close));
-                    }
+                    items.push(item(
+                        if *close_group { "Close group" } else { "Close" },
+                        Action::Close,
+                    ));
                     if *is_git && !*is_linked_worktree {
                         items.push(item("New worktree", Action::NewWorktree));
                         items.push(item("Open worktree...", Action::OpenWorktree));
@@ -370,18 +370,13 @@ impl ClientShellState {
         let worktree = workspace.worktree.as_ref();
         let has_worktree_children = worktree.is_some_and(|worktree| {
             !worktree.is_linked_worktree
-                && snapshot
-                    .workspaces
-                    .iter()
-                    .filter(|candidate| {
-                        candidate
-                            .worktree
-                            .as_ref()
-                            .is_some_and(|candidate| candidate.key == worktree.key)
+                && snapshot.workspaces.iter().any(|candidate| {
+                    candidate.worktree.as_ref().is_some_and(|candidate| {
+                        candidate.key == worktree.key && candidate.is_linked_worktree
                     })
-                    .count()
-                    >= 2
+                })
         });
+        let close_group = super::sidebar::workspace_close_is_group(snapshot, workspace);
         let collapsed = worktree.is_some_and(|worktree| {
             self.group_is_collapsed(&self.active_endpoint_id, &worktree.key)
         });
@@ -428,6 +423,7 @@ impl ClientShellState {
                 is_git: worktree.is_some() || workspace.branch.is_some(),
                 is_linked_worktree: worktree.is_some_and(|worktree| worktree.is_linked_worktree),
                 has_worktree_children,
+                close_group,
                 collapsed,
                 can_clear_focus,
             },
@@ -514,6 +510,7 @@ impl ClientShellState {
                 expected_revision,
                 workspace_record_revision,
                 project_record_revision,
+                close_group,
                 ..
             } => self.activate_workspace_context_action(
                 endpoint_id,
@@ -523,6 +520,7 @@ impl ClientShellState {
                 expected_revision,
                 workspace_record_revision,
                 project_record_revision,
+                close_group,
                 action,
                 outcome,
             ),
@@ -557,6 +555,7 @@ impl ClientShellState {
         expected_revision: u64,
         workspace_record_revision: Option<u64>,
         project_record_revision: Option<u64>,
+        close_group: bool,
         action: ClientContextMenuAction,
         outcome: &mut ClientShellInput,
     ) {
@@ -739,19 +738,7 @@ impl ClientShellState {
                 }
             }
             ClientContextMenuAction::Close => {
-                if self.config.confirm_close {
-                    self.open_confirm_close_overlay(workspace_id);
-                } else {
-                    self.push_endpoint_method(
-                        crate::api::schema::Method::WorkspaceClose(
-                            crate::api::schema::WorkspaceCloseParams {
-                                workspace_id,
-                                close_group: true,
-                            },
-                        ),
-                        outcome,
-                    );
-                }
+                self.request_workspace_close(workspace_id, Some(close_group), outcome);
             }
             ClientContextMenuAction::NewWorktree => {
                 self.begin_worktree_action_for(KeybindAction::NewWorktree, workspace_id, outcome)
@@ -1090,9 +1077,7 @@ impl ClientShellState {
                 }),
                 outcome,
             ),
-            ClientContextMenuAction::ClosePane => {
-                self.push_endpoint_method(Method::PaneClose(PaneTarget { pane_id }), outcome)
-            }
+            ClientContextMenuAction::ClosePane => self.request_pane_close(pane_id, outcome),
             _ => {}
         }
     }

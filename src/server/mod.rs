@@ -19,6 +19,7 @@ pub(crate) mod pane_input;
 mod render_scale_benchmark;
 pub(crate) mod render_stream;
 pub(crate) mod snooze_store;
+pub(crate) mod shutdown;
 pub mod socket_paths;
 pub(crate) mod terminal_attach;
 pub(crate) mod workspace_snooze;
