@@ -68,8 +68,8 @@ use crate::server::pane_input::{
     apply_client_terminal_input_events, apply_terminal_attach_input, apply_terminal_attach_scroll,
     terminal_attach_mouse_position,
 };
-use crate::server::snooze_store;
 use crate::server::shutdown::{ServerStop, ShutdownReason};
+use crate::server::snooze_store;
 use crate::server::socket_paths::{
     client_socket_path, prepare_socket_path, restrict_socket_permissions,
 };

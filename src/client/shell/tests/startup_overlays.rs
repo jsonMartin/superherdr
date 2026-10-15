@@ -774,7 +774,7 @@ fn update_ready_menu_opens_client_owned_release_notes_and_dismisses_by_version()
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(text.contains("v0.9.3.1"));
+    assert!(text.contains("v0.9.5.1"));
     assert!(text.contains("SUPERHERDR 0.9.1.2"));
     assert!(!state.hits.release_notes_scrollbar.is_empty());
     let outer = crate::ui::centered_popup_rect(

@@ -618,14 +618,6 @@ pub(crate) fn workspace_entries_with_filter(
             }
             continue;
         }
-                entries.push(WorkspaceEntry {
-                    index: active,
-                    indented: true,
-                    last_child: true,
-                });
-            }
-            continue;
-        }
         let children = group_members
             .iter()
             .copied()
