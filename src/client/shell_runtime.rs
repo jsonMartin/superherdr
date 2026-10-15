@@ -22,7 +22,14 @@ pub(super) fn dispatch_client_shell_actions(
                 let generation = endpoints.connection(&endpoint_id).and_then(|connection| {
                     (inactive_shared
                         || (endpoints.active_id() == &endpoint_id
-                            && endpoints.active_surface_available()))
+                            && (endpoints.active_surface_available()
+                                // The coherent target is visible before its input fence opens.
+                                // Retain workspace navigation; sending remains gated below.
+                                || (connection.surface_active
+                                    && matches!(
+                                        request.method,
+                                        crate::api::schema::Method::WorkspaceFocus(_)
+                                    )))))
                     .then_some(connection.generation)
                 });
                 if let Some(generation) = generation {
@@ -113,6 +120,9 @@ pub(super) fn sync_client_shell_keyboard_report_all(
     crate::terminal_modes::set_host_kitty_keyboard_report_all(&mut io::stdout(), desired)
         .map_err(ClientError::ConnectionFailed)?;
     state.keyboard_report_all_active = desired;
+    if let Some(shell) = state.shell.as_mut() {
+        shell.set_host_reports_all_keys(desired);
+    }
     Ok(())
 }
 
@@ -128,7 +138,8 @@ pub(super) fn clear_endpoint_host_effects(
     } else {
         state.direct_mouse_capture_preference
     };
-    let sgr_pixels = super::effective_sgr_pixel_mouse(enabled, false, state.pixel_geometry_exact);
+    let sgr_pixels =
+        super::effective_sgr_pixel_mouse(enabled, false, state.pixel_mouse_available());
     if enabled != state.mouse_capture_active
         || sgr_pixels != host_sgr_pixels_active.load(std::sync::atomic::Ordering::Acquire)
     {
@@ -168,10 +179,11 @@ fn install_pending_activation(
     next_surface_serial: &mut u64,
     activation: endpoint::PendingEndpointActivation,
 ) {
-    let retired = activation
-        .source_command_lane()
-        .map(|source| endpoint_commands.retire_lane(source))
-        .unwrap_or_default();
+    // A fresh target epoch must not replay navigation retained by an abandoned handoff.
+    let mut retired = endpoint_commands.retire_lane(activation.target());
+    if let Some(source) = activation.source_command_lane() {
+        retired.extend(endpoint_commands.retire_lane(source));
+    }
     if let Some(shell) = state.shell.as_mut() {
         for request_id in retired {
             shell.cancel_endpoint_request(&request_id);
@@ -229,6 +241,15 @@ pub(super) fn begin_endpoint_activation(
     now: std::time::Instant,
     scheduled_activation: &mut Option<ClientLoopEvent>,
 ) -> Result<(), ClientError> {
+    #[cfg(windows)]
+    if target.as_ref().is_some_and(|target| {
+        !state
+            .shell
+            .as_ref()
+            .is_some_and(|shell| shell.notification_target_is_current(&endpoint_id, target))
+    }) {
+        return Ok(());
+    }
     state.deferred_local_activation = None;
     if endpoint_id.is_local() && !local_activation_metadata_ready(state, endpoints) {
         state.deferred_local_activation = Some(endpoint::EndpointActivationIntent {
@@ -299,7 +320,7 @@ pub(super) fn begin_endpoint_activation(
         state.reported_size.1,
         state.reported_cell_size.0,
         state.reported_cell_size.1,
-        state.pixel_geometry_exact,
+        state.pixel_mouse_available(),
     );
     match endpoint::PendingEndpointActivation::prepare(
         shell,
@@ -642,6 +663,7 @@ pub(super) fn install_client_shell_snapshot(
     let generation = connection.generation;
     let project_snapshot =
         !projection_pending && endpoints.active_id() == endpoint_id && connection.surface_active;
+    let pixel_mouse_available = state.pixel_mouse_available();
     let (composed, resize, graphics_cleanup) = if let Some(shell) = &mut state.shell {
         let waits_for_selected_surface = projection_pending
             || (endpoints.active_id() == endpoint_id
@@ -671,7 +693,7 @@ pub(super) fn install_client_shell_snapshot(
                     state.reported_size.1,
                     state.reported_cell_size.0,
                     state.reported_cell_size.1,
-                    state.pixel_geometry_exact,
+                    pixel_mouse_available,
                 )
             }),
             graphics_cleanup,
@@ -717,7 +739,7 @@ pub(super) fn finish_client_shell_input(
             state.reported_size.1,
             state.reported_cell_size.0,
             state.reported_cell_size.1,
-            state.pixel_geometry_exact,
+            state.pixel_mouse_available(),
         );
         if let Some(activation) = pending_activation.as_mut() {
             if let Err(error) = activation.update_resize(resize, endpoints) {

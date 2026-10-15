@@ -519,13 +519,17 @@ pub(crate) fn workspace_entries_with_filter(
     let grouped = members
         .iter()
         .filter(|(_, indices)| {
-            indices.len() >= 2
-                && indices.iter().any(|index| {
-                    snapshot.workspaces[*index]
-                        .worktree
-                        .as_ref()
-                        .is_some_and(|worktree| !worktree.is_linked_worktree)
-                })
+            indices.iter().any(|index| {
+                snapshot.workspaces[*index]
+                    .worktree
+                    .as_ref()
+                    .is_some_and(|worktree| worktree.is_linked_worktree)
+            }) && indices.iter().any(|index| {
+                snapshot.workspaces[*index]
+                    .worktree
+                    .as_ref()
+                    .is_some_and(|worktree| !worktree.is_linked_worktree)
+            })
         })
         .map(|(key, _)| *key)
         .collect::<HashSet<_>>();
@@ -552,29 +556,40 @@ pub(crate) fn workspace_entries_with_filter(
         let Some(group_members) = members.get(worktree.key.as_str()) else {
             continue;
         };
-        let parent = group_members
+        let parents = group_members
             .iter()
             .copied()
-            .find(|member| {
+            .filter(|member| {
                 snapshot.workspaces[*member]
                     .worktree
                     .as_ref()
                     .is_some_and(|worktree| !worktree.is_linked_worktree)
             })
-            .unwrap_or(index);
-        let parent_visible = filter(&snapshot.workspaces[parent]);
-        if parent_visible {
+            .collect::<Vec<_>>();
+        let visible_parents = parents
+            .iter()
+            .copied()
+            .filter(|parent| filter(&snapshot.workspaces[*parent]))
+            .collect::<Vec<_>>();
+        for parent in visible_parents.iter().copied() {
             entries.push(WorkspaceEntry {
                 index: parent,
                 indented: false,
                 last_child: false,
             });
         }
-        if !parent_visible {
+        if visible_parents.is_empty() {
+            // A hidden repository parent must not erase its visible linked worktrees.
             let children = group_members
                 .iter()
                 .copied()
-                .filter(|member| *member != parent && filter(&snapshot.workspaces[*member]))
+                .filter(|member| {
+                    filter(&snapshot.workspaces[*member])
+                        && snapshot.workspaces[*member]
+                            .worktree
+                            .as_ref()
+                            .is_some_and(|worktree| worktree.is_linked_worktree)
+                })
                 .collect::<Vec<_>>();
             for child in children {
                 entries.push(WorkspaceEntry {
@@ -587,9 +602,13 @@ pub(crate) fn workspace_entries_with_filter(
         }
         if collapsed_groups.contains(&worktree.key) {
             if let Some(active) = group_members.iter().copied().find(|member| {
-                *member != parent
-                    && snapshot.workspaces[*member].focused
-                    && filter(&snapshot.workspaces[*member])
+                let workspace = &snapshot.workspaces[*member];
+                workspace.focused
+                    && filter(workspace)
+                    && workspace
+                        .worktree
+                        .as_ref()
+                        .is_some_and(|worktree| worktree.is_linked_worktree)
             }) {
                 entries.push(WorkspaceEntry {
                     index: active,
@@ -602,7 +621,13 @@ pub(crate) fn workspace_entries_with_filter(
         let children = group_members
             .iter()
             .copied()
-            .filter(|member| *member != parent && filter(&snapshot.workspaces[*member]))
+            .filter(|member| {
+                filter(&snapshot.workspaces[*member])
+                    && snapshot.workspaces[*member]
+                        .worktree
+                        .as_ref()
+                        .is_some_and(|worktree| worktree.is_linked_worktree)
+            })
             .collect::<Vec<_>>();
         for (child_index, child) in children.iter().enumerate() {
             entries.push(WorkspaceEntry {
@@ -628,18 +653,45 @@ pub(super) fn parent_group_key(snapshot: &ClientShellSnapshot, index: usize) -> 
     if worktree.is_linked_worktree {
         return None;
     }
-    (snapshot
+    snapshot
         .workspaces
         .iter()
-        .filter(|candidate| {
-            candidate
-                .worktree
-                .as_ref()
-                .is_some_and(|candidate| candidate.key == worktree.key)
+        .any(|candidate| {
+            candidate.worktree.as_ref().is_some_and(|candidate| {
+                candidate.key == worktree.key && candidate.is_linked_worktree
+            })
         })
-        .count()
-        >= 2)
         .then(|| worktree.key.clone())
+}
+
+pub(in crate::client::shell) fn workspace_close_is_group(
+    snapshot: &ClientShellSnapshot,
+    workspace: &ClientShellWorkspace,
+) -> bool {
+    let Some(worktree) = workspace
+        .worktree
+        .as_ref()
+        .filter(|worktree| !worktree.is_linked_worktree)
+    else {
+        return false;
+    };
+    let mut has_child = false;
+    for member in &snapshot.workspaces {
+        if member.workspace_id == workspace.workspace_id {
+            continue;
+        }
+        if let Some(candidate) = member
+            .worktree
+            .as_ref()
+            .filter(|candidate| candidate.key == worktree.key)
+        {
+            if !candidate.is_linked_worktree {
+                return false;
+            }
+            has_child = true;
+        }
+    }
+    has_child
 }
 
 pub(in crate::client::shell) fn render_parent_group_toggle(
@@ -691,10 +743,11 @@ pub(in crate::client::shell) fn displayed_workspace_status(
         .workspaces
         .iter()
         .filter(|candidate| {
-            candidate
-                .worktree
-                .as_ref()
-                .is_some_and(|candidate| candidate.key == worktree.key)
+            candidate.worktree.as_ref().is_some_and(|member| {
+                member.key == worktree.key
+                    && (member.is_linked_worktree
+                        || candidate.workspace_id == workspace.workspace_id)
+            })
         })
         .map(|candidate| candidate.agent_status)
         .max_by_key(|status| status_priority(*status))
