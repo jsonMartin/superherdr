@@ -1,11 +1,18 @@
 name: Upstream sync
 
 # Checks daily for a new Herdr release and opens a pull request that merges it
-# with scripts/sync_upstream.sh. Set the UPSTREAM_SYNC_TOKEN secret (a
-# fine-grained token with contents and pull-request write access). Without it,
-# the default token can open the PR only if "Allow GitHub Actions to create and
-# approve pull requests" is enabled, and CI does not run on the PR it opens.
-# A sync branch that already exists is skipped; delete it to retry that release.
+# with scripts/sync_upstream.sh. The merge job is unprivileged: it runs the
+# repository's sync script and uploads the sync branch as artifacts. The
+# publish-pr job uses the "release" environment (deployable from main only) to
+# mint the release GitHub App token, push the branch, and open the pull request
+# as the app so CI runs on it; it never checks out or runs repository code, so
+# upstream workflow changes riding a sync branch cannot reach its secrets.
+# A sync branch that differs from main under .github/workflows is refused
+# before anything is pushed: review and sync that release by hand with
+# just sync-upstream.
+# The run skips when a same-repo upstream-sync/* pull request is open, or when
+# the pull request for this tag is open or already merged; close the pull
+# request for a tag to start that tag over.
 on:
   schedule:
     - cron: "17 6 * * *"
@@ -16,25 +23,35 @@ on:
         required: false
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+  pull-requests: read
 
 concurrency:
   group: upstream-sync
   cancel-in-progress: false
 
 jobs:
-  sync:
+  merge:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      branch: ${{ steps.release.outputs.branch }}
+      draft: ${{ steps.merge.outputs.draft }}
+      opened: ${{ steps.merge.outputs.opened }}
     env:
-      GH_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN || github.token }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0
-          token: ${{ secrets.UPSTREAM_SYNC_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # v1
+        with:
+          toolchain: 1.96.1
 
       - name: Find release
         id: release
@@ -45,10 +62,30 @@ jobs:
           branch="upstream-sync/$tag"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
-          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+          # Only pull requests whose head is this repository describe a branch
+          # this workflow can push; cross-repository heads are someone else's.
+          prs="$(gh pr list --state all --limit 500 \
+            --json headRefName,state,isCrossRepository \
+            --jq '.[] | select(.isCrossRepository | not) | "\(.headRefName) \(.state)"')"
+          if printf '%s\n' "$prs" | awk '$1 ~ /^upstream-sync\// && $2 == "OPEN" { found = 1 } END { exit !found }'; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "A sync branch for $tag already exists."
+            echo "An upstream sync pull request is already open."
+            exit 0
           fi
+          state="$(printf '%s\n' "$prs" | awk -v b="$branch" '$1 == b { print $2; exit }')"
+          case "$state" in
+            OPEN)
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "A pull request for $branch is already open."
+              ;;
+            MERGED)
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "A pull request for $branch was already merged."
+              ;;
+            CLOSED)
+              echo "The pull request for $branch was closed without merging; opening a new one."
+              ;;
+          esac
 
       - name: Merge release
         if: steps.release.outputs.skip != 'true'
@@ -56,10 +93,13 @@ jobs:
         env:
           TAG: ${{ steps.release.outputs.tag }}
           BRANCH: ${{ steps.release.outputs.branch }}
+          # the sync script runs cargo; pin the toolchain so an upstream
+          # rust-toolchain.toml cannot redirect it
+          RUSTUP_TOOLCHAIN: 1.96.1
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git switch -c "$BRANCH"
+          git switch -C "$BRANCH"
           status=0
           scripts/sync_upstream.sh "$TAG" --report "$RUNNER_TEMP/report.md" || status=$?
           if [ "$status" -eq 0 ] && [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ]; then
@@ -73,20 +113,100 @@ jobs:
           elif [ "$status" -ne 0 ]; then
             exit "$status"
           fi
-          git push origin "$BRANCH"
+          # The bundle must be self-contained: publish-pr fetches it into an
+          # empty repository, so its objects cannot exclude origin/main.
+          git bundle create sync.bundle "$BRANCH"
           echo "opened=true" >> "$GITHUB_OUTPUT"
 
-      - name: Open pull request
+      - name: Upload sync branch
         if: steps.merge.outputs.opened == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sync-branch
+          path: sync.bundle
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload report
+        if: steps.merge.outputs.opened == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sync-report
+          path: ${{ runner.temp }}/report.md
+          if-no-files-found: error
+          retention-days: 1
+
+  # Privileged half: opens the pull request as the release GitHub App. It has
+  # no checkout on purpose and runs no repository code; its steps come from
+  # this workflow file on main only.
+  publish-pr:
+    needs: merge
+    if: needs.merge.outputs.opened == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    permissions: {}
+    steps:
+      - name: Mint release app token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
+
+      - name: Download sync branch
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sync-branch
+          path: sync
+
+      - name: Download report
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sync-report
+          path: report
+
+      - name: Push branch
         env:
-          TAG: ${{ steps.release.outputs.tag }}
-          BRANCH: ${{ steps.release.outputs.branch }}
-          DRAFT: ${{ steps.merge.outputs.draft }}
+          BRANCH: ${{ needs.merge.outputs.branch }}
+          TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
+          cd sync
+          git init -q
+          # Trusted main straight from GitHub with no credentials: the merge
+          # job ran untrusted upstream code, so its artifacts cannot vouch for
+          # themselves. Explicit SHAs, since every fetch moves FETCH_HEAD.
+          git fetch --quiet "https://github.com/${GITHUB_REPOSITORY}.git" main
+          main="$(git rev-parse FETCH_HEAD)"
+          git fetch sync.bundle "$BRANCH"
+          sync="$(git rev-parse FETCH_HEAD)"
+          if ! git diff --quiet "$main" "$sync" -- .github/workflows; then
+            git diff --name-only "$main" "$sync" -- .github/workflows | while read -r file; do
+              echo "::error::$file: upstream changes .github/workflows; review and sync this release by hand with just sync-upstream"
+            done
+            exit 1
+          fi
+          git push --force "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$sync:refs/heads/$BRANCH"
+
+      - name: Open pull request
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          TAG: ${{ needs.merge.outputs.tag }}
+          BRANCH: ${{ needs.merge.outputs.branch }}
+          DRAFT: ${{ needs.merge.outputs.draft }}
+        run: |
+          cd sync
           {
-            cat "$RUNNER_TEMP/report.md"
+            cat report/report.md
             echo
             echo "Merge this pull request with **Create a merge commit**. Squash or rebase merges drop the upstream ancestry and make the next sync re-conflict."
+            echo
+            echo "Merging publishes the Superherdr version named above after CI passes on main."
+            echo
+            echo "The CHANGELOG date is the sync date; edit it before merging if needed."
             echo
             if [ "$DRAFT" = "true" ]; then
               echo "This branch contains conflict markers. Resolve them on the branch before review."
@@ -94,6 +214,6 @@ jobs:
           } > "$RUNNER_TEMP/body.md"
           draft_flag=()
           if [ "$DRAFT" = "true" ]; then draft_flag=(--draft); fi
-          gh pr create --base main --head "$BRANCH" \
+          gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" \
             --title "chore(upstream): merge herdr $TAG" \
             --body-file "$RUNNER_TEMP/body.md" "${draft_flag[@]}"
