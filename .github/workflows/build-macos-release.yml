@@ -1,8 +1,8 @@
 name: Build macOS release
 
-# Manually builds the macOS aarch64 release archive for a commit.
-# The maintainer verifies the uploaded artifact and attaches it to the GitHub
-# release; this workflow publishes nothing.
+# Builds the macOS aarch64 release archive for a commit.
+# Called by publish-release.yml; dispatch manually to test a build.
+# Publishes nothing.
 on:
   workflow_dispatch:
     inputs:
@@ -10,6 +10,12 @@ on:
         description: Commit, branch, or tag to build
         required: true
         default: main
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit to build
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -69,6 +75,14 @@ jobs:
           cp vendor/portable-pty/LICENSE.md "$stage/licenses/portable-pty-LICENSE.md"
           tar -C "$stage" -czf "$name.tar.gz" herdr LICENSE licenses
           shasum -a 256 "$name.tar.gz" | tee "$name.tar.gz.sha256"
+
+      - name: Smoke test the packaged archive
+        run: |
+          smoke="$(mktemp -d)"
+          tar -xzf "superherdr-$VERSION-macos-aarch64.tar.gz" -C "$smoke"
+          file "$smoke/herdr" | grep -q arm64
+          scripts/release_smoke.sh "$smoke/herdr"
+          rm -rf "$smoke"
 
       - name: Upload archive
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

@@ -1,8 +1,8 @@
 name: Build Linux release
 
-# Manually builds the static Linux x86_64 (musl) release archive for a commit.
-# The maintainer verifies the uploaded artifact and attaches it to the GitHub
-# release; this workflow publishes nothing.
+# Builds the static Linux x86_64 (musl) release archive for a commit.
+# Called by publish-release.yml; dispatch manually to test a build.
+# Publishes nothing.
 on:
   workflow_dispatch:
     inputs:
@@ -10,6 +10,12 @@ on:
         description: Commit, branch, or tag to build
         required: true
         default: main
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit to build
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -68,32 +74,6 @@ jobs:
           grep -q '"channel":"stable"' status.json
           echo "VERSION=$version" >> "$GITHUB_ENV"
 
-      - name: Smoke test server and PTY roundtrip
-        run: |
-          bin="$PWD/target/$TARGET/release/herdr"
-          tmp="$(mktemp -d)"
-          export XDG_CONFIG_HOME="$tmp/config" XDG_RUNTIME_DIR="$tmp/run"
-          mkdir -p "$XDG_CONFIG_HOME/herdr" "$XDG_RUNTIME_DIR"
-          chmod 700 "$XDG_RUNTIME_DIR"
-          echo 'onboarding = false' > "$XDG_CONFIG_HOME/herdr/config.toml"
-          unset HERDR_SOCKET_PATH HERDR_CLIENT_SOCKET_PATH HERDR_ENV
-          "$bin" --session smoke server > "$tmp/server.log" 2>&1 &
-          server_pid=$!
-          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
-          export HERDR_SOCKET_PATH="$XDG_CONFIG_HOME/herdr/sessions/smoke/herdr.sock"
-          for _ in $(seq 100); do [ -S "$HERDR_SOCKET_PATH" ] && break; sleep 0.2; done
-          test -S "$HERDR_SOCKET_PATH" || { cat "$tmp/server.log"; exit 1; }
-          "$bin" workspace create --cwd "$tmp" > "$tmp/created.json"
-          pane="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["result"]["root_pane"]["pane_id"])' "$tmp/created.json")"
-          "$bin" pane run "$pane" "printf 'SMOKE_%s\\n' OK"
-          for _ in $(seq 50); do
-            "$bin" pane read "$pane" --source recent > "$tmp/pane.txt" || true
-            if grep -q SMOKE_OK "$tmp/pane.txt"; then echo "PTY roundtrip ok"; exit 0; fi
-            sleep 0.2
-          done
-          cat "$tmp/pane.txt" "$tmp/server.log"
-          exit 1
-
       - name: Package
         run: |
           name="superherdr-$VERSION-linux-x86_64"
@@ -106,6 +86,13 @@ jobs:
           tar -C "$stage" -czf "$name.tar.gz" herdr LICENSE licenses
           sha256sum "$name.tar.gz" | tee "$name.tar.gz.sha256"
           echo "COMMIT=$(git rev-parse HEAD)" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Smoke test the packaged archive
+        run: |
+          smoke="$(mktemp -d)"
+          tar -xzf "superherdr-$VERSION-linux-x86_64.tar.gz" -C "$smoke"
+          scripts/release_smoke.sh "$smoke/herdr"
+          rm -rf "$smoke"
 
       - name: Upload archive
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
