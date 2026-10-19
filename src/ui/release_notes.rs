@@ -373,7 +373,7 @@ mod tests {
 #[cfg(test)]
 mod history_tests {
     use super::*;
-    use crate::release_notes::{full_history_body, EMBEDDED_CHANGELOG};
+    use crate::release_notes::{full_history_body, full_history_body_from, EMBEDDED_CHANGELOG};
 
     fn line_text(line: &Line<'_>) -> String {
         line.spans
@@ -428,26 +428,22 @@ mod history_tests {
 
     #[test]
     fn history_omits_unreleased_sections() {
-        let unreleased_versions: Vec<String> = EMBEDDED_CHANGELOG
-            .lines()
-            .filter_map(|line| {
-                let rest = line.strip_prefix("## [")?;
-                rest.contains("Unreleased")
-                    .then(|| rest.split(']').next().unwrap_or(rest).trim().to_string())
-            })
-            .collect();
+        let changelog = "## [9.9.9.2] - Unreleased\n\n### Fixed\n- Preview fix\n\n## [9.9.9.1] - 2026-01-01\n\n### Fixed\n- Released fix\n\n### Inherited from Herdr 9.9.9\n\nFixed:\n- Upstream fix\n";
+        let palette = Palette::catppuccin();
+        let texts = release_notes_lines(&full_history_body_from(changelog), &palette)
+            .iter()
+            .map(|(_, line)| line_text(line))
+            .collect::<Vec<_>>();
         assert!(
-            !unreleased_versions.is_empty(),
-            "changelog currently has an unreleased section"
+            texts
+                .iter()
+                .all(|text| !text.contains("SUPERHERDR 9.9.9.2")),
+            "unreleased section leaked into the view: {texts:?}"
         );
-        let texts = history_line_texts();
-        for version in unreleased_versions {
-            let marker = format!("SUPERHERDR {version}");
-            assert!(
-                texts.iter().all(|text| !text.contains(&marker)),
-                "unreleased section {version} leaked into the view"
-            );
-        }
+        assert!(
+            texts.iter().any(|text| text.contains("SUPERHERDR 9.9.9.1")),
+            "released section missing from the view: {texts:?}"
+        );
     }
 
     #[test]

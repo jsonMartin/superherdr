@@ -774,8 +774,15 @@ fn update_ready_menu_opens_client_owned_release_notes_and_dismisses_by_version()
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(text.contains("v0.9.5.1"));
-    assert!(text.contains("SUPERHERDR 0.9.1.2"));
+    assert!(text.contains(&format!("v{}", crate::build_info::superherdr_version())));
+    let history = crate::release_notes::full_history_body();
+    let newest = history
+        .lines()
+        .next()
+        .and_then(|line| line.strip_prefix("### Superherdr "))
+        .expect("history starts at the newest superherdr section")
+        .to_string();
+    assert!(text.contains(&format!("SUPERHERDR {newest}")));
     assert!(!state.hits.release_notes_scrollbar.is_empty());
     let outer = crate::ui::centered_popup_rect(
         Rect::new(0, 0, 106, 30),
@@ -1386,8 +1393,14 @@ fn whats_new_history_opens_without_notes_and_survives_snapshots_without_endpoint
         })
         .collect::<Vec<_>>()
         .join("\n");
+    let history = crate::release_notes::full_history_body();
+    let newest = history
+        .lines()
+        .next()
+        .and_then(|line| line.strip_prefix("### Superherdr "))
+        .expect("history starts at the newest superherdr section");
     assert!(
-        composed_text.contains("SUPERHERDR 0.9.1.2"),
+        composed_text.contains(&format!("SUPERHERDR {newest}")),
         "{composed_text}"
     );
 
