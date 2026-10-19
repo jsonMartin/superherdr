@@ -145,8 +145,49 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: release
-    permissions: {}
+    # actions: read lets the default token download this run's artifacts.
+    permissions:
+      actions: read
     steps:
+      # The artifacts come from a job that ran untrusted upstream code, so they
+      # are data only: no download-artifact (its extractor follows embedded
+      # ../ segments), no git inside them, and no app token until the checks
+      # below have passed. `unzip -p` streams one named entry to stdout and
+      # cannot write anywhere else.
+      - name: Fetch sync artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for name in sync-branch sync-report; do
+            id="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?name=$name" --jq '.artifacts[0].id')"
+            test -n "$id" && test "$id" != null || { echo "::error::artifact $name not found" >&2; exit 1; }
+            gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$id/zip" > "$RUNNER_TEMP/$name.zip"
+          done
+          unzip -p "$RUNNER_TEMP/sync-branch.zip" sync.bundle > "$RUNNER_TEMP/sync.bundle"
+          unzip -p "$RUNNER_TEMP/sync-report.zip" report.md > "$RUNNER_TEMP/report.md"
+
+      - name: Check sync branch
+        id: check
+        env:
+          BRANCH: ${{ needs.merge.outputs.branch }}
+        run: |
+          repo="$RUNNER_TEMP/sync-repo"
+          git init -q "$repo"
+          cd "$repo"
+          # Trusted main straight from GitHub with no credentials. Explicit
+          # SHAs, since every fetch moves FETCH_HEAD.
+          git fetch --quiet "https://github.com/${GITHUB_REPOSITORY}.git" main
+          main="$(git rev-parse FETCH_HEAD)"
+          git fetch "$RUNNER_TEMP/sync.bundle" "$BRANCH"
+          sync="$(git rev-parse FETCH_HEAD)"
+          if ! git diff --quiet "$main" "$sync" -- .github/workflows; then
+            git diff --name-only "$main" "$sync" -- .github/workflows | while read -r file; do
+              echo "::error::$file: upstream changes .github/workflows; review and sync this release by hand with just sync-upstream"
+            done
+            exit 1
+          fi
+          echo "sha=$sync" >> "$GITHUB_OUTPUT"
+
       - name: Mint release app token
         id: app-token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
@@ -157,45 +198,14 @@ jobs:
           permission-pull-requests: write
           permission-workflows: write
 
-      - name: Download sync branch
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: sync-branch
-          path: sync
-
-      - name: Download report
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: sync-report
-          path: report
-
       - name: Push branch
         env:
           BRANCH: ${{ needs.merge.outputs.branch }}
+          SYNC: ${{ steps.check.outputs.sha }}
           TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          # The artifact directory is untrusted data from a job that ran
-          # upstream code: never run git inside it (a planted .git/config could
-          # execute commands), only read the bundle file from a fresh repository.
-          bundle="$GITHUB_WORKSPACE/sync/sync.bundle"
-          test -f "$bundle" && ! test -L "$bundle"
-          repo="$RUNNER_TEMP/sync-repo"
-          git init -q "$repo"
-          cd "$repo"
-          # Trusted main straight from GitHub with no credentials: the merge
-          # job ran untrusted upstream code, so its artifacts cannot vouch for
-          # themselves. Explicit SHAs, since every fetch moves FETCH_HEAD.
-          git fetch --quiet "https://github.com/${GITHUB_REPOSITORY}.git" main
-          main="$(git rev-parse FETCH_HEAD)"
-          git fetch "$bundle" "$BRANCH"
-          sync="$(git rev-parse FETCH_HEAD)"
-          if ! git diff --quiet "$main" "$sync" -- .github/workflows; then
-            git diff --name-only "$main" "$sync" -- .github/workflows | while read -r file; do
-              echo "::error::$file: upstream changes .github/workflows; review and sync this release by hand with just sync-upstream"
-            done
-            exit 1
-          fi
-          git push --force "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$sync:refs/heads/$BRANCH"
+          cd "$RUNNER_TEMP/sync-repo"
+          git push --force "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$SYNC:refs/heads/$BRANCH"
 
       - name: Open pull request
         env:
@@ -204,13 +214,9 @@ jobs:
           BRANCH: ${{ needs.merge.outputs.branch }}
           DRAFT: ${{ needs.merge.outputs.draft }}
         run: |
-          # untrusted artifact: a symlink could point the body at this step's
-          # environment, which holds the app token
-          report="$GITHUB_WORKSPACE/report/report.md"
-          test -f "$report" && ! test -L "$report"
           cd "$RUNNER_TEMP/sync-repo"
           {
-            cat "$report"
+            cat "$RUNNER_TEMP/report.md"
             echo
             echo "Merge this pull request with **Create a merge commit**. Squash or rebase merges drop the upstream ancestry and make the next sync re-conflict."
             echo
