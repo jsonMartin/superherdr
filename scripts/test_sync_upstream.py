@@ -256,6 +256,7 @@ class SyncUpstreamTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         changelog = (self.fork / "CHANGELOG.md").read_text()
+        self.assertIn("Fork changelog intro.", changelog)
         self.assertRegex(changelog, r"## \[1\.1\.0\.1\] - \d{4}-\d{2}-\d{2}")
         self.assertNotIn("Unreleased", changelog)
         self.assertIn("- feature", changelog)

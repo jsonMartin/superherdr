@@ -261,7 +261,7 @@ if git cat-file -e HEAD:Cargo.toml 2>/dev/null; then
                         if [ "$heading_version" != "$old_base.$old_rev" ]; then
                             # The pending section was never released; it becomes
                             # this sync's release, keeping its entries.
-                            { printf '%s\n\n%s\n\n' "$new_heading" "$based"; tail -n +$((first + 1)) CHANGELOG.md; } > "$tmp"
+                            { head -n $((first - 1)) CHANGELOG.md; printf '%s\n\n%s\n\n' "$new_heading" "$based"; tail -n +$((first + 1)) CHANGELOG.md; } > "$tmp"
                         else
                             { head -n $((first - 1)) CHANGELOG.md; printf '%s\n\n%s\n\n' "$new_heading" "$based"; tail -n +"$first" CHANGELOG.md; } > "$tmp"
                         fi
