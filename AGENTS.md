@@ -59,7 +59,7 @@ The client endpoint generation is independent from the private same-install prot
 
 Superherdr merges upstream Herdr releases with `just sync-upstream <tag>`, and a daily workflow opens a sync pull request when Herdr publishes a new release tag. The script applies `.upstream-sync/exclude` (paths removed from the fork on purpose, which must not come back) and `.upstream-sync/ours` (files Superherdr rewrote, whose upstream changes are shown for manual porting). CI runs `scripts/sync_upstream.sh --check` to reject reintroduced exclusions. Resolve genuine conflicts case by case. Merge sync pull requests with a merge commit, never squash or rebase, so the upstream history stays an ancestor and later syncs do not re-conflict. Never push upstream tags to this repository.
 
-Every upstream release is expected to conflict in `Cargo.toml` and `Cargo.lock`, because both sides change the package name and version. Keep Superherdr's `name` and `version`, take upstream's dependency changes, then run `cargo update -p superherdr --offline` to regenerate the lock entry.
+`just sync-upstream` resolves the `Cargo.toml` and `Cargo.lock` conflicts mechanically: it keeps Superherdr's `name`, takes upstream's `version` and dependency changes, regenerates the lock with `cargo update --workspace`, resets `SUPERHERDR_REVISION` to 1, grafts the upstream release notes, and adds the dated `## [<base>.1]` section. Any other conflict leaves a draft pull request.
 
 - Prefer keeping inherited code, even when Superherdr does not use it, so upstream merges stay simple. Guard it rather than deleting it.
 - Keep Superherdr-specific changes in clearly separated modules or small, well-named edits to inherited files.
@@ -114,7 +114,7 @@ When updating libghostty-vt, check every active patch. If the new upstream commi
 
 Superherdr-specific user documentation lives in `README.md` and `docs/next/`. Inherited behavior is documented by [Herdr's documentation](https://herdr.dev/docs/); do not copy it here. Update documentation in the same pull request as a user-facing change. `skills/herdr/SKILL.md` describes the CLI for agents; it is inherited from Herdr; keep it accurate when commands, IDs, or agent lifecycle semantics change.
 
-Add user-facing entries to `CHANGELOG.md` under an Unreleased heading when a change is user-visible. Do not add entries for documentation-only, CI, or repository-maintenance changes.
+Add user-facing entries to `CHANGELOG.md` under `## [<next version>] - Unreleased` when a change is user-visible. Do not add entries for documentation-only, CI, or repository-maintenance changes.
 
 Put local planning notes under `.local/`, which is ignored.
 
