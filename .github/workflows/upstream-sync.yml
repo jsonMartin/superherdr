@@ -174,14 +174,20 @@ jobs:
           BRANCH: ${{ needs.merge.outputs.branch }}
           TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          cd sync
-          git init -q
+          # The artifact directory is untrusted data from a job that ran
+          # upstream code: never run git inside it (a planted .git/config could
+          # execute commands), only read the bundle file from a fresh repository.
+          bundle="$GITHUB_WORKSPACE/sync/sync.bundle"
+          test -f "$bundle" && ! test -L "$bundle"
+          repo="$RUNNER_TEMP/sync-repo"
+          git init -q "$repo"
+          cd "$repo"
           # Trusted main straight from GitHub with no credentials: the merge
           # job ran untrusted upstream code, so its artifacts cannot vouch for
           # themselves. Explicit SHAs, since every fetch moves FETCH_HEAD.
           git fetch --quiet "https://github.com/${GITHUB_REPOSITORY}.git" main
           main="$(git rev-parse FETCH_HEAD)"
-          git fetch sync.bundle "$BRANCH"
+          git fetch "$bundle" "$BRANCH"
           sync="$(git rev-parse FETCH_HEAD)"
           if ! git diff --quiet "$main" "$sync" -- .github/workflows; then
             git diff --name-only "$main" "$sync" -- .github/workflows | while read -r file; do
@@ -198,9 +204,13 @@ jobs:
           BRANCH: ${{ needs.merge.outputs.branch }}
           DRAFT: ${{ needs.merge.outputs.draft }}
         run: |
-          cd sync
+          # untrusted artifact: a symlink could point the body at this step's
+          # environment, which holds the app token
+          report="$GITHUB_WORKSPACE/report/report.md"
+          test -f "$report" && ! test -L "$report"
+          cd "$RUNNER_TEMP/sync-repo"
           {
-            cat report/report.md
+            cat "$report"
             echo
             echo "Merge this pull request with **Create a merge commit**. Squash or rebase merges drop the upstream ancestry and make the next sync re-conflict."
             echo
