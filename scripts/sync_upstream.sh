@@ -10,6 +10,9 @@
 # Exit status: 0 merged, already merged, or check passed; 1 error; 2 conflicts
 # remain (the merge is left in progress for manual resolution).
 #
+# Cargo.toml, Cargo.lock, SUPERHERDR_REVISION, and the CHANGELOG release-notes
+# graft are resolved mechanically; any other conflict stays for a human.
+#
 # Upstream tags are fetched into refs/upstream-tags/, never refs/tags/, so a
 # plain `git push` cannot publish them to this repository.
 set -euo pipefail
@@ -113,6 +116,171 @@ while IFS= read -r path; do
     git add -- "$path"
 done < <(list_entries .upstream-sync/ours)
 
+# Mechanical release bookkeeping: Cargo.toml, Cargo.lock, SUPERHERDR_REVISION,
+# and the CHANGELOG graft. Upstream release tags sit on branches, so the merge
+# base often carries an older version than either side; the version line is
+# normalized to the tag's version in both merge parents before the 3-way merge
+# so the name/version difference never conflicts. Only runs where Superherdr's
+# Cargo.toml exists, so minimal fixtures and --check are unaffected.
+unresolved=()
+resolved=()
+graft_ran=0
+if git cat-file -e HEAD:Cargo.toml 2>/dev/null; then
+    old_base="$(git show HEAD:Cargo.toml | sed -n 's/^version = "\(.*\)"$/\1/p' | head -1 || true)"
+    new_base="$(git show "$upstream_commit:Cargo.toml" 2>/dev/null | sed -n 's/^version = "\(.*\)"$/\1/p' | head -1 || true)"
+    old_rev="$(git show HEAD:src/build_info.rs 2>/dev/null | sed -n 's/^pub const SUPERHERDR_REVISION: u32 = \([0-9]\{1,\}\);$/\1/p' | head -1 || true)"
+    new_version="$new_base.1"
+    if [ "v$new_base" != "$tag" ]; then
+        unresolved+=("upstream Cargo.toml version ${new_base:-<missing>} does not match $tag")
+    fi
+
+    set_version() {
+        awk -v v="$new_base" '!done && /^version = "/ { print "version = \"" v "\""; done = 1; next } { print }'
+    }
+
+    if [ -n "$(git ls-files -u -- Cargo.toml)" ] && [ -n "$base" ] \
+        && git cat-file -e "$base:Cargo.toml" 2>/dev/null \
+        && git cat-file -e "$upstream_commit:Cargo.toml" 2>/dev/null; then
+        tmp="$(mktemp -d)"
+        git show "$base:Cargo.toml" | set_version > "$tmp/base"
+        git show "HEAD:Cargo.toml" | set_version > "$tmp/ours"
+        git show "$upstream_commit:Cargo.toml" > "$tmp/theirs"
+        if git merge-file -p "$tmp/ours" "$tmp/base" "$tmp/theirs" > "$tmp/out"; then
+            cat "$tmp/out" > Cargo.toml
+            git add Cargo.toml
+            resolved+=("Cargo.toml: merged with the version line normalized to $new_base")
+        fi
+        rm -rf "$tmp"
+    fi
+
+    lock_unmerged=0
+    if [ -n "$(git ls-files -u -- Cargo.lock)" ]; then
+        lock_unmerged=1
+        # Upstream's lock has no superherdr entry; take theirs and re-lock the
+        # workspace members, which rewrites the root package entry.
+        git checkout --theirs -- Cargo.lock
+    fi
+    if [ -z "$(git ls-files -u -- Cargo.toml)" ] \
+        && { [ "$new_base" != "$old_base" ] || [ "$lock_unmerged" -eq 1 ]; }; then
+        if cargo update --workspace --quiet; then
+            git add Cargo.lock
+            resolved+=("Cargo.lock: took upstream's and regenerated workspace entries with cargo update --workspace")
+        else
+            unresolved+=("Cargo.lock: cargo update --workspace failed")
+            git checkout -m -- Cargo.lock
+        fi
+    fi
+
+    if [ "$new_base" != "$old_base" ]; then
+        if [ -n "$(git ls-files -u -- src/build_info.rs)" ]; then
+            unresolved+=("reset SUPERHERDR_REVISION to 1 after resolving src/build_info.rs")
+        elif [ -f src/build_info.rs ]; then
+            tmp="$(mktemp)"
+            sed 's/^pub const SUPERHERDR_REVISION: u32 = [0-9]\{1,\};$/pub const SUPERHERDR_REVISION: u32 = 1;/' src/build_info.rs > "$tmp"
+            cat "$tmp" > src/build_info.rs
+            rm -f "$tmp"
+            git add src/build_info.rs
+            resolved+=("SUPERHERDR_REVISION reset to 1")
+        fi
+
+        graft_ran=1
+        found_old_base=0
+        graft_versions=()
+        if git cat-file -e "$upstream_commit:CHANGELOG.md" 2>/dev/null; then
+            while IFS= read -r v; do
+                if [ "$v" = "$old_base" ]; then
+                    found_old_base=1
+                    break
+                fi
+                graft_versions+=("$v")
+            done < <({ git show "$upstream_commit:CHANGELOG.md" || true; } | awk '/^## \[/ && !/Unreleased/ { v = $0; sub(/^## \[/, "", v); sub(/\].*/, "", v); print v }')
+        fi
+        if [ "$found_old_base" -eq 0 ]; then
+            unresolved+=("CHANGELOG.md: graft Herdr notes by hand (upstream CHANGELOG lacks $old_base)")
+        elif [ "${graft_versions[0]:-}" != "$new_base" ]; then
+            unresolved+=("CHANGELOG.md: graft Herdr notes by hand (upstream CHANGELOG lacks $new_base)")
+        else
+            inherited=""
+            grafted_list=""
+            for v in "${graft_versions[@]}"; do
+                grep -qxF "### Inherited from Herdr $v" CHANGELOG.md && continue
+                # git show must survive awk's early exit on the section's end.
+                body="$({ git show "$upstream_commit:CHANGELOG.md" || true; } | awk -v want="$v" '
+                    BEGIN { on = 0; n = 0 }
+                    /^## / {
+                        if (on) { exit }
+                        v = $0
+                        sub(/^## \[/, "", v)
+                        sub(/\].*/, "", v)
+                        if (v == want) { on = 1 }
+                        next
+                    }
+                    on {
+                        if (match($0, /^#+[ \t]+/)) { t = substr($0, RLENGTH + 1); $0 = toupper(substr(t, 1, 1)) tolower(substr(t, 2)) ":" }
+                        gsub(/\*\*/, "")
+                        while (match($0, /\[[^]]*\]\([^)]*\)/)) {
+                            l = substr($0, RSTART, RLENGTH)
+                            sub(/\]\(.*/, "", l)
+                            $0 = substr($0, 1, RSTART - 1) substr(l, 2) substr($0, RSTART + RLENGTH)
+                        }
+                        lines[++n] = $0
+                    }
+                    END {
+                        while (n > 0 && lines[n] == "") n--
+                        started = 0
+                        for (i = 1; i <= n; i++) { if (lines[i] != "" || started) { started = 1; print lines[i] } }
+                    }')"
+                inherited+="### Inherited from Herdr $v"$'\n\n'"$body"$'\n\n'
+                grafted_list="${grafted_list:+$grafted_list, }$v"
+            done
+            if [ -n "$inherited" ]; then
+                tmp="$(mktemp)"
+                line="$(grep -n '^### Inherited from Herdr ' CHANGELOG.md | head -1 | cut -d: -f1 || true)"
+                if [ -n "$line" ]; then
+                    head -n $((line - 1)) CHANGELOG.md > "$tmp"
+                    printf '%s' "$inherited" >> "$tmp"
+                    tail -n +"$line" CHANGELOG.md >> "$tmp"
+                else
+                    cat CHANGELOG.md > "$tmp"
+                    printf '\n%s' "$inherited" >> "$tmp"
+                fi
+                cat "$tmp" > CHANGELOG.md
+                rm -f "$tmp"
+                resolved+=("Herdr release notes grafted from the tagged upstream CHANGELOG: $grafted_list")
+            fi
+
+            based="Based on Herdr $new_base (release notes: https://github.com/herdrdev/herdr/releases/tag/$tag)."
+            new_heading="## [$new_version] - $(date -u +%Y-%m-%d)"
+            tmp="$(mktemp)"
+            first="$(grep -n '^## \[' CHANGELOG.md | head -1 | cut -d: -f1 || true)"
+            if [ -n "$first" ]; then
+                heading_line="$(sed -n "${first}p" CHANGELOG.md)"
+                heading_version="$(printf '%s' "$heading_line" | sed 's/^## \[//; s/\].*//')"
+                case "$heading_line" in
+                    *"Unreleased"*)
+                        if [ "$heading_version" != "$old_base.$old_rev" ]; then
+                            # The pending section was never released; it becomes
+                            # this sync's release, keeping its entries.
+                            { printf '%s\n\n%s\n\n' "$new_heading" "$based"; tail -n +$((first + 1)) CHANGELOG.md; } > "$tmp"
+                        else
+                            { head -n $((first - 1)) CHANGELOG.md; printf '%s\n\n%s\n\n' "$new_heading" "$based"; tail -n +"$first" CHANGELOG.md; } > "$tmp"
+                        fi
+                        ;;
+                    *)
+                        { head -n $((first - 1)) CHANGELOG.md; printf '%s\n\n%s\n\n' "$new_heading" "$based"; tail -n +"$first" CHANGELOG.md; } > "$tmp"
+                        ;;
+                esac
+            else
+                { cat CHANGELOG.md; printf '\n%s\n\n%s\n\n' "$new_heading" "$based"; } > "$tmp"
+            fi
+            cat "$tmp" > CHANGELOG.md
+            rm -f "$tmp"
+            resolved+=("dated Superherdr section $new_heading")
+        fi
+        git add CHANGELOG.md
+    fi
+fi
+
 conflicts="$(git diff --name-only --diff-filter=U)"
 added="$(git diff --cached --name-only --diff-filter=A HEAD || true)"
 
@@ -121,10 +289,24 @@ write_report() {
     echo
     echo "Upstream release: https://github.com/herdrdev/herdr/releases/tag/$tag"
     echo
-    if [ -n "$conflicts" ]; then
+    if [ -n "$conflicts" ] || [ "${#unresolved[@]}" -gt 0 ]; then
         echo "### Conflicts to resolve"
         echo
-        echo "$conflicts" | sed 's/^/- `/; s/$/`/'
+        if [ -n "$conflicts" ]; then
+            echo "$conflicts" | sed 's/^/- `/; s/$/`/'
+            echo
+        fi
+        if [ "${#unresolved[@]}" -gt 0 ]; then
+            printf -- '- %s\n' "${unresolved[@]}"
+            echo
+        fi
+    fi
+    if [ "${#resolved[@]}" -gt 0 ]; then
+        echo "### Resolved automatically"
+        echo
+        printf -- '- %s\n' "${resolved[@]}"
+        echo
+        echo "Superherdr version after merge: $new_version"
         echo
     fi
     if [ "${#dropped[@]}" -gt 0 ]; then
@@ -136,7 +318,13 @@ write_report() {
     if [ "${#ported[@]}" -gt 0 ]; then
         echo "### Upstream changes to Superherdr-owned files (review and port by hand)"
         echo
-        printf -- '- `%s`\n' "${ported[@]}"
+        for path in "${ported[@]}"; do
+            if [ "$path" = "CHANGELOG.md" ] && [ "$graft_ran" -eq 1 ]; then
+                echo "- \`CHANGELOG.md\` (inherited sections grafted automatically)"
+            else
+                printf -- '- `%s`\n' "$path"
+            fi
+        done
         echo
         echo "Inspect with \`git diff $base $upstream_commit -- <file>\`."
         echo
@@ -154,7 +342,7 @@ if [ -n "$report" ]; then
 fi
 write_report
 
-if [ -n "$conflicts" ]; then
+if [ -n "$conflicts" ] || [ "${#unresolved[@]}" -gt 0 ]; then
     echo "Conflicts remain. Resolve them, run 'git add', then 'git commit'." >&2
     exit 2
 fi
