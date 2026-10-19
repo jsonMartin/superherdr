@@ -57,7 +57,7 @@ The client endpoint generation is independent from the private same-install prot
 
 ## Upstream Herdr
 
-Superherdr merges upstream Herdr releases with `just sync-upstream <tag>`, and a daily workflow opens a sync pull request when Herdr publishes a new release tag. The script applies `.upstream-sync/exclude` (paths removed from the fork on purpose, which must not come back) and `.upstream-sync/ours` (files Superherdr rewrote, whose upstream changes are shown for manual porting). CI runs `scripts/sync_upstream.sh --check` to reject reintroduced exclusions. Resolve genuine conflicts case by case. Merge sync pull requests with a merge commit, never squash or rebase, so the upstream history stays an ancestor and later syncs do not re-conflict. Never push upstream tags to this repository.
+Superherdr merges upstream Herdr releases with `just sync-upstream <tag>`, and a daily workflow opens a sync pull request as the release GitHub App when Herdr publishes a new release tag. The script applies `.upstream-sync/exclude` (paths removed from the fork on purpose, which must not come back) and `.upstream-sync/ours` (files Superherdr rewrote, whose upstream changes are shown for manual porting). CI runs `scripts/sync_upstream.sh --check` to reject reintroduced exclusions. Resolve genuine conflicts case by case. Merge sync pull requests with a merge commit, never squash or rebase, so the upstream history stays an ancestor and later syncs do not re-conflict. Never push upstream tags to this repository.
 
 Every upstream release is expected to conflict in `Cargo.toml` and `Cargo.lock`, because both sides change the package name and version. Keep Superherdr's `name` and `version`, take upstream's dependency changes, then run `cargo update -p superherdr --offline` to regenerate the lock entry.
 
@@ -122,7 +122,7 @@ Put local planning notes under `.local/`, which is ignored.
 
 Use lowercase [Conventional Commits](https://www.conventionalcommits.org/) with a scope where useful, no emojis, and no AI co-author trailers. CI validates commit subjects and PR titles. Agents commit or push only when asked.
 
-Releases are published as `superherdr-v<version>` on `jsonMartin/superherdr` with archives for `macos-aarch64` and `linux-x86_64`, `install.sh`, and `SHA256SUMS`, and the Homebrew formula in `jsonmartin/homebrew-tap` is updated to match. Only the maintainer publishes releases.
+Releases are published as `superherdr-v<version>` on `jsonMartin/superherdr` with archives for `macos-aarch64` and `linux-x86_64`, `install.sh`, and `SHA256SUMS`, and the Homebrew formula in `jsonmartin/homebrew-tap` is updated to match. The Publish release workflow publishes the release and then updates the Homebrew formula when CI passes on a `main` commit whose version has no release yet. Merging an upstream sync pull request or a revision bump is the maintainer's approval; never create release tags, releases, or formula commits by hand. To release without a sync, bump `SUPERHERDR_REVISION` and date the matching `## [<version>]` heading in one pull request. To recover from a failed release run, re-run its failed jobs; there is no manual dispatch.
 
 ## Code conventions
 
