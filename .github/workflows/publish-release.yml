@@ -16,6 +16,12 @@ on:
 permissions:
   contents: read
 
+# Explicit bash runs steps with -eo pipefail, so a failing command on the left
+# of a pipe fails the step instead of looking like empty output.
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: publish-release
   cancel-in-progress: false
