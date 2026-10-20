@@ -4,7 +4,9 @@ set -eu
 BIN="herdr"
 # Superherdr 0.1.0 installed `superherdr` plus a `herdr` symlink to it.
 LEGACY_BIN="superherdr"
-DEFAULT_VERSION="0.9.1.2"
+# publish-release.yml replaces this with the release version in the install.sh
+# it attaches to each release.
+DEFAULT_VERSION="0.0.0.0"
 # Fixed to Superherdr's own GitHub releases; tests stub curl rather than
 # re-pointing the installer at another base.
 RELEASE_URL_BASE="https://github.com/jsonMartin/superherdr/releases/download"

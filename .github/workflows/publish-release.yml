@@ -1,0 +1,209 @@
+name: Publish release
+
+# Runs after CI succeeds on a main push. If that commit's Cargo version plus
+# SUPERHERDR_REVISION has no published release yet, this builds both platforms,
+# publishes the GitHub release, and updates the Homebrew formula; otherwise it
+# is a no-op. Merging an upstream sync pull request or a SUPERHERDR_REVISION
+# bump is the maintainer's approval to publish; never create release tags,
+# releases, or formula commits by hand. To recover from a failure, re-run the
+# failed jobs of this run (there is no manual dispatch).
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Explicit bash runs steps with -eo pipefail, so a failing command on the left
+# of a pipe fails the step instead of looking like empty output.
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+
+jobs:
+  decide:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    outputs:
+      sha: ${{ steps.decide.outputs.sha }}
+      base: ${{ steps.decide.outputs.base }}
+      version: ${{ steps.decide.outputs.version }}
+      tag: ${{ steps.decide.outputs.tag }}
+      publish: ${{ steps.decide.outputs.publish }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Checkout the tested commit
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Decide whether to publish
+        id: decide
+        run: |
+          base="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          revision="$(sed -n 's/^pub const SUPERHERDR_REVISION: u32 = \([0-9][0-9]*\);/\1/p' src/build_info.rs)"
+          test -n "$base" && test -n "$revision"
+          version="$base.$revision"
+          tag="superherdr-v$version"
+          {
+            echo "sha=$SHA"
+            echo "base=$base"
+            echo "version=$version"
+            echo "tag=$tag"
+          } >> "$GITHUB_OUTPUT"
+
+          # An auth or network failure must fail the job, never read as
+          # "release absent"; prove the API works before asking about releases.
+          gh api "repos/$GITHUB_REPOSITORY" >/dev/null
+          state="$(gh release view "$tag" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null || true)"
+          if [ "$state" = "false" ]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Superherdr $version is already released; bump SUPERHERDR_REVISION to release this commit."
+            exit 0
+          fi
+
+          # The tag must either not exist or point at exactly this commit.
+          # A published tag is annotated, so compare the peeled commit.
+          sha_remote="$(git ls-remote origin "refs/tags/$tag^{}" | awk 'NR == 1 { print $1 }')"
+          if [ -z "$sha_remote" ]; then
+            sha_remote="$(git ls-remote origin "refs/tags/$tag" | awk 'NR == 1 { print $1 }')"
+          fi
+          if [ -n "$sha_remote" ] && [ "$sha_remote" != "$SHA" ]; then
+            echo "::error::$tag already points at $sha_remote, not $SHA; a release tag is never moved. Delete the tag and its release only to re-release this version from the same commit it was cut from."
+            exit 1
+          fi
+
+          # Squash/rebase guard: the merged Herdr tag must be an ancestor,
+          # which only a merge commit preserves.
+          git fetch --quiet --no-tags https://github.com/herdrdev/herdr "refs/tags/v$base:refs/upstream-tags/v$base"
+          if ! git merge-base --is-ancestor "refs/upstream-tags/v$base" "$SHA"; then
+            echo "::error::Herdr v$base is not an ancestor of $SHA; was a sync pull request squash- or rebase-merged? Revert the merge and merge it again with a merge commit."
+            exit 1
+          fi
+
+          # Releases embed the changelog, so the section must carry its date.
+          grep -Eq "^## \[$version\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md
+
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+
+  linux:
+    needs: decide
+    if: needs.decide.outputs.publish == 'true'
+    uses: ./.github/workflows/build-linux-release.yml
+    with:
+      ref: ${{ needs.decide.outputs.sha }}
+
+  macos:
+    needs: decide
+    if: needs.decide.outputs.publish == 'true'
+    uses: ./.github/workflows/build-macos-release.yml
+    with:
+      ref: ${{ needs.decide.outputs.sha }}
+
+  publish:
+    needs: [decide, linux, macos]
+    if: needs.decide.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SHA: ${{ needs.decide.outputs.sha }}
+      VERSION: ${{ needs.decide.outputs.version }}
+      TAG: ${{ needs.decide.outputs.tag }}
+    steps:
+      - name: Checkout the tested commit
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ needs.decide.outputs.sha }}
+          persist-credentials: false
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: superherdr-*
+          merge-multiple: true
+          path: dist
+
+      - name: Publish release
+        run: |
+          cp distribution/install.sh dist/
+          scripts/release_publish.sh dist "$VERSION"
+          cd dist
+          # a stale draft from an earlier failed run is deleted and recreated;
+          # never --clobber an existing release
+          while id="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              --jq "[.[] | select(.tag_name == \"$TAG\" and .draft)][0].id" 2>/dev/null)" \
+              && [ -n "$id" ] && [ "$id" != "null" ]; do
+            echo "deleting stale draft $id for $TAG"
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"
+          done
+          gh release create "$TAG" superherdr-*.tar.gz install.sh SHA256SUMS \
+            --target "$SHA" --title "Superherdr $VERSION" --notes-file notes.md
+
+  homebrew:
+    needs: [decide, publish]
+    if: ${{ !cancelled() && needs.decide.result == 'success' && (needs.publish.result == 'success' || needs.decide.outputs.publish == 'false') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    steps:
+      - name: Mint release app token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: homebrew-tap
+          permission-contents: write
+
+      - name: Check out this repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ needs.decide.outputs.sha }}
+          persist-credentials: false
+          sparse-checkout: scripts
+
+      - name: Check out the tap
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: jsonmartin/homebrew-tap
+          token: ${{ steps.app-token.outputs.token }}
+          path: tap
+
+      - name: Update the formula
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SLUG: ${{ steps.app-token.outputs.app-slug }}
+          BASE: ${{ needs.decide.outputs.base }}
+          VERSION: ${{ needs.decide.outputs.version }}
+          TAG: ${{ needs.decide.outputs.tag }}
+        run: |
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p SHA256SUMS -O SHA256SUMS
+          hash="$(awk -v name="superherdr-$VERSION-macos-aarch64.tar.gz" '$2 == name { print $1; exit }' SHA256SUMS)"
+          test -n "$hash" || { echo "SHA256SUMS does not list the macOS archive" >&2; exit 1; }
+          scripts/release_homebrew.sh "tap/Formula/superherdr.rb" "$VERSION" "$BASE" "$hash"
+          if git -C tap diff --quiet; then
+            echo "::notice::Homebrew formula already at $VERSION."
+          else
+            git -C tap config user.name "${SLUG}[bot]"
+            git -C tap config user.email "$(gh api "/users/${SLUG}%5Bbot%5D" --jq .id)+${SLUG}[bot]@users.noreply.github.com"
+            git -C tap commit -am "superherdr $VERSION"
+            git -C tap push origin main
+          fi

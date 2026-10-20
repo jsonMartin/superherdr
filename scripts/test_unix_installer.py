@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import os
+import re
 import shutil
 import subprocess
 import tarfile
@@ -18,11 +19,13 @@ REQUIRED_COMMANDS = (
     "awk", "cat", "chmod", "cp", "grep", "gzip", "ln", "mkdir", "mktemp", "mv",
     "readlink", "rm", "tar",
 )
+# fixture version; unrelated to the current release
 VERSION = "0.9.1.2"
 ARCHIVE_NAME = f"superherdr-{VERSION}-linux-x86_64.tar.gz"
 OWNED_URL_BASE = (
     f"https://github.com/jsonMartin/superherdr/releases/download/superherdr-v{VERSION}"
 )
+# fixture version; unrelated to the current release
 NEW_BINARY = b'#!/bin/sh\necho "herdr 0.9.1 (superherdr 0.9.1.2)"\n'
 PREVIOUS_SUPERHERDR = b'#!/bin/sh\necho "herdr 0.9.0 (superherdr 0.9.0.0)"\n'
 LEGACY_BINARY = b'#!/bin/sh\necho "superherdr 0.1.0"\n'
@@ -137,6 +140,7 @@ fi
         self,
         checksum: str,
         extra_env: dict[str, str] | None = None,
+        installer: Path = INSTALLER,
     ) -> subprocess.CompletedProcess[str]:
         sums = self._write_sums(checksum)
         env = {
@@ -150,8 +154,12 @@ fi
             "SUPERHERDR_INSTALL_DIR": str(self.install_dir),
             **(extra_env or {}),
         }
+        # the committed installer is always driven explicitly; a stamped copy
+        # runs bare so the test exercises its DEFAULT_VERSION
+        if installer == INSTALLER:
+            env.setdefault("SUPERHERDR_VERSION", VERSION)
         return subprocess.run(
-            ["/bin/sh", str(INSTALLER)],
+            ["/bin/sh", str(installer)],
             env=env,
             # empty PATH entries scan the working directory
             cwd=self.root,
@@ -187,6 +195,42 @@ fi
         self.assertTrue((self.license_dir / "libghostty-vt-LICENSE").is_file())
         # the fixture curl must have talked only to the owned release base,
         # in order: SHA256SUMS first, then the archive
+        self.assertEqual(
+            self.curl_log.read_text(encoding="utf-8").splitlines(),
+            [f"{OWNED_URL_BASE}/SHA256SUMS", f"{OWNED_URL_BASE}/{ARCHIVE_NAME}"],
+        )
+
+    def test_release_stamp_line_is_unique(self) -> None:
+        # publish-release.yml stamps exactly one DEFAULT_VERSION line into the
+        # attached installer; a second match would corrupt the stamped copy
+        stamps = re.findall(
+            r"^DEFAULT_VERSION=\"[^\"]*\"$",
+            INSTALLER.read_text(encoding="utf-8"),
+            flags=re.MULTILINE,
+        )
+        self.assertEqual(len(stamps), 1)
+
+    def test_stamped_default_version_is_installed(self) -> None:
+        # the installer attached to a release carries no SUPERHERDR_VERSION and
+        # relies on the DEFAULT_VERSION line publish-release.yml stamped in
+        stamped = self.root / "install-stamped.sh"
+        stamped.write_text(
+            re.sub(
+                r"^DEFAULT_VERSION=\"[^\"]*\"$",
+                f'DEFAULT_VERSION="{VERSION}"',
+                INSTALLER.read_text(encoding="utf-8"),
+                flags=re.MULTILINE,
+            ),
+            encoding="utf-8",
+        )
+        self.assertIn(f'DEFAULT_VERSION="{VERSION}"', stamped.read_text(encoding="utf-8"))
+
+        result = self._run_installer(self.expected_sha256, installer=stamped)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self._assert_only_new_herdr_installed()
+        # the fetch went to the stamped version's release, proving
+        # DEFAULT_VERSION chose it
         self.assertEqual(
             self.curl_log.read_text(encoding="utf-8").splitlines(),
             [f"{OWNED_URL_BASE}/SHA256SUMS", f"{OWNED_URL_BASE}/{ARCHIVE_NAME}"],

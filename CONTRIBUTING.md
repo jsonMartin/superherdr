@@ -10,6 +10,8 @@ Most of Superherdr's runtime comes from Herdr, and upstream releases are merged 
 
 Every upstream sync grafts the merged release notes into `CHANGELOG.md` as `### Inherited from Herdr <version>` sections at the end of the file, newest first; `just sync-upstream` does this from upstream's tagged `CHANGELOG.md`. The What's New view renders this file in installed builds, so a skipped graft leaves upgraded installs without the new release's notes. Keep each section free of `##`-level headings, `####` headings, emphasis markers, and markdown links: the release-notes renderer styles only `###` headings and renders everything else literally. The full-history tests fail when the newest inherited section is not the Herdr base version or the current version's heading is undated, which is the reminder for this step.
 
+Review every new or changed `.github/workflows/*` file in a sync pull request before merging; the report's New upstream files section lists them. A sync branch that differs from `main` under `.github/workflows/` never gets a pull request — the automation refuses it before pushing, so sync such a release by hand with `just sync-upstream`.
+
 ## Choose the contribution path
 
 Search existing issues, pull requests, and [specifications](openspec/specs/) first. Link related work instead of opening duplicates.
@@ -117,6 +119,20 @@ env -u HERDR_SOCKET_PATH -u HERDR_CLIENT_SOCKET_PATH cargo run -- <command>
 ```
 
 Agents must never stop, restart, or replace a running production server during testing.
+
+## Release automation
+
+Releases publish automatically: when CI passes on a `main` commit whose `Cargo.toml` version plus `SUPERHERDR_REVISION` has no release yet, the Publish release workflow builds both platforms, publishes the GitHub release, and updates the Homebrew formula. Merging an upstream sync pull request or a revision bump is the maintainer's approval to publish; see "Commits and releases" in [AGENTS.md](AGENTS.md).
+
+### One-time setup
+
+Do steps 1–3 before merging the release-automation change: the first job that references `environment: release` auto-creates the environment without the main-only branch policy.
+
+1. Create a GitHub App (for example `superherdr-release`) on the jsonMartin account: webhook inactive; repository permissions Contents read and write, Pull requests read and write, Workflows read and write, Metadata read-only; no account permissions; "Only on this account".
+2. Install the App on "Only select repositories": `jsonMartin/superherdr` and `jsonmartin/homebrew-tap`. Generate a private key.
+3. In `jsonMartin/superherdr`, create an environment `release` with deployment branches restricted to `main` and no required reviewers; add the environment variable `RELEASE_APP_CLIENT_ID` and the environment secret `RELEASE_APP_PRIVATE_KEY` (the full `.pem` contents).
+4. Leave the Actions defaults as they are: workflow permissions read, and "Allow GitHub Actions to create and approve pull requests" off.
+5. Recommended: disable squash and rebase merging; optionally auto-delete head branches.
 
 ## Contributor checklist
 

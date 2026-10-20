@@ -97,6 +97,11 @@ bench-release-smoke:
     cargo build --release --locked
     scripts/release_perf_smoke.sh "${CARGO_TARGET_DIR:-target}/release/herdr"
 
+# Smoke-test a built binary in isolated XDG dirs (usage: just release-smoke target/debug/herdr)
+[unix]
+release-smoke bin:
+    scripts/release_smoke.sh {{bin}}
+
 # Test bundled agent integration assets
 integration-assets-test:
     bun test src/integration/assets/herdr-agent-state.test.ts
