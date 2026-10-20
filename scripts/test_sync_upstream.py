@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -31,6 +32,8 @@ class SyncUpstreamTests(unittest.TestCase):
         root = Path(self.temp.name)
         self.upstream = root / "upstream"
         self.fork = root / "fork"
+        self.stub_bin = root / "stub-bin"
+        self.cargo_log = root / "cargo.log"
         self.upstream.mkdir()
         git(self.upstream, "init", "-q", "-b", "master")
         self._identity(self.upstream)
@@ -42,6 +45,19 @@ class SyncUpstreamTests(unittest.TestCase):
         git(self.upstream, "commit", "-q", "-m", "base")
         git(self.upstream, "tag", "v1.0.0")
 
+        self._build_fork()
+        self._write_cargo_stub()
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def _identity(self, repo: Path) -> None:
+        git(repo, "config", "user.name", "Test")
+        git(repo, "config", "user.email", "test@example.com")
+        git(repo, "config", "commit.gpgsign", "false")
+
+    def _build_fork(self) -> None:
+        root = Path(self.temp.name)
         git(root, "clone", "-q", str(self.upstream), str(self.fork))
         self._identity(self.fork)
         git(self.fork, "rm", "-q", "SPONSORS.md")
@@ -55,13 +71,41 @@ class SyncUpstreamTests(unittest.TestCase):
         git(self.fork, "commit", "-q", "-m", "fork")
         git(self.fork, "tag", "-d", "v1.0.0")
 
-    def tearDown(self) -> None:
-        self.temp.cleanup()
+    def _with_superherdr_files(self) -> None:
+        """Give both sides packaging files, in the merge base, like the real fork.
 
-    def _identity(self, repo: Path) -> None:
-        git(repo, "config", "user.name", "Test")
-        git(repo, "config", "user.email", "test@example.com")
-        git(repo, "config", "commit.gpgsign", "false")
+        The upstream v1.0.0 commit is amended so Cargo.toml and friends are in
+        the merge base, then the fork is rebuilt with its Superherdr variants.
+        """
+        write(self.upstream, "Cargo.toml", '[package]\nname = "herdr"\nversion = "1.0.0"\nedition = "2021"\n\n[dependencies]\na = "1"\n')
+        write(self.upstream, "Cargo.lock", '[[package]]\nname = "herdr"\nversion = "1.0.0"\n')
+        write(self.upstream, "src/build_info.rs", 'pub const BASE_VERSION: &str = "1.0.0";\n')
+        write(self.upstream, "CHANGELOG.md", "## Unreleased\n\n## [1.0.0] - 2026-01-01\n\n### Fixed\n- base fix\n")
+        git(self.upstream, "add", "-A")
+        git(self.upstream, "commit", "-q", "--amend", "-m", "base")
+        git(self.upstream, "tag", "-f", "v1.0.0")
+
+        shutil.rmtree(self.fork)
+        self._build_fork()
+        write(self.fork, "Cargo.toml", '[package]\nname = "superherdr"\n# Herdr base version; the Superherdr revision lives in src/build_info.rs.\nversion = "1.0.0"\nedition = "2021"\n\n[dependencies]\na = "1"\n')
+        write(self.fork, "Cargo.lock", '[[package]]\nname = "superherdr"\nversion = "1.0.0"\n')
+        write(self.fork, "src/build_info.rs", "pub const SUPERHERDR_REVISION: u32 = 3;\n")
+        write(self.fork, "CHANGELOG.md", "Fork changelog intro.\n\n## [1.0.0.3] - 2026-01-02\n\n### Fixed\n- fork fix\n\n### Inherited from Herdr 1.0.0\n\nFixed:\n- base fix\n")
+        write(self.fork, ".upstream-sync/ours", "README.md\nCHANGELOG.md\n")
+        git(self.fork, "add", "-A")
+        git(self.fork, "commit", "-q", "-m", "fork superherdr files")
+
+    def _write_cargo_stub(self) -> None:
+        """Stub cargo: log its arguments, re-lock the fork's package name."""
+        self.stub_bin.mkdir()
+        stub = self.stub_bin / "cargo"
+        stub.write_text(
+            "#!/bin/sh\n"
+            'printf \'%s\\n\' "$*" >> "$CARGO_STUB_LOG"\n'
+            'sed "s/name = \\"herdr\\"/name = \\"superherdr\\"/" Cargo.lock > Cargo.lock.tmp && mv Cargo.lock.tmp Cargo.lock\n',
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
 
     def _release(self, tag: str, files: dict[str, str]) -> None:
         for rel, text in files.items():
@@ -72,6 +116,9 @@ class SyncUpstreamTests(unittest.TestCase):
 
     def _sync(self, *args: str) -> subprocess.CompletedProcess[str]:
         env = {**os.environ, "SUPERHERDR_UPSTREAM_URL": str(self.upstream)}
+        if self.stub_bin.exists():
+            env["PATH"] = f"{self.stub_bin}:{env['PATH']}"
+            env["CARGO_STUB_LOG"] = str(self.cargo_log)
         return subprocess.run(
             ["scripts/sync_upstream.sh", *args],
             cwd=self.fork,
@@ -143,6 +190,114 @@ class SyncUpstreamTests(unittest.TestCase):
             git(self.upstream, "tag", tag)
 
         self.assertEqual(self._sync("--latest").stdout.strip(), "v1.10.0")
+
+    def _release_superherdr_version(self, tag: str, changelog: str) -> None:
+        self._release(
+            tag,
+            {
+                "Cargo.toml": f'[package]\nname = "herdr"\nversion = "{tag[1:]}"\nedition = "2021"\n\n[dependencies]\na = "1"\nb = "2"\n',
+                "Cargo.lock": f'[[package]]\nname = "herdr"\nversion = "{tag[1:]}"\n',
+                "CHANGELOG.md": changelog,
+            },
+        )
+
+    def test_release_bookkeeping_is_mechanical(self) -> None:
+        self._with_superherdr_files()
+        self._release_superherdr_version(
+            "v1.1.0",
+            "## [1.1.0] - 2026-02-01\n\n### Breaking Changes\n- See the [guide](https://x.test/guide) for details.\n\n**Note.** things changed.\n\n## [1.0.1] - 2026-01-15\n\n### Fixed\n- patch fix\n\n## [1.0.0] - 2026-01-01\n\n### Fixed\n- base fix\n",
+        )
+
+        result = self._sync("v1.1.0")
+
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(git(self.fork, "log", "-1", "--format=%s"), "chore(upstream): merge herdr v1.1.0")
+        toml = (self.fork / "Cargo.toml").read_text()
+        self.assertIn('name = "superherdr"', toml)
+        self.assertIn("# Herdr base version", toml)
+        self.assertIn('version = "1.1.0"', toml)
+        self.assertIn('b = "2"', toml)
+        self.assertNotIn("<<<<<<<", toml)
+        self.assertIn("update --workspace", self.cargo_log.read_text())
+        self.assertIn(
+            "SUPERHERDR_REVISION: u32 = 1",
+            (self.fork / "src/build_info.rs").read_text(),
+        )
+        changelog = (self.fork / "CHANGELOG.md").read_text()
+        self.assertRegex(changelog, r"## \[1\.1\.0\.1\] - \d{4}-\d{2}-\d{2}")
+        self.assertLess(changelog.index("## [1.1.0.1]"), changelog.index("## [1.0.0.3]"))
+        self.assertIn("Based on Herdr 1.1.0", changelog)
+        self.assertLess(
+            changelog.index("### Inherited from Herdr 1.1.0"),
+            changelog.index("### Inherited from Herdr 1.0.1"),
+        )
+        self.assertLess(
+            changelog.index("### Inherited from Herdr 1.0.1"),
+            changelog.index("### Inherited from Herdr 1.0.0"),
+        )
+        section = changelog[changelog.index("### Inherited from Herdr 1.1.0") : changelog.index("### Inherited from Herdr 1.0.1")]
+        self.assertIn("Breaking changes:", section)
+        self.assertIn("guide", section)
+        self.assertNotIn("](", section)
+        self.assertNotIn("**", section)
+        self.assertNotIn("### ", section.split("\n", 1)[1])
+
+    def test_unreleased_section_becomes_the_release(self) -> None:
+        self._with_superherdr_files()
+        write(self.fork, "CHANGELOG.md", "Fork changelog intro.\n\n## [1.0.0.4] - Unreleased\n\n### Added\n- feature\n\n### Inherited from Herdr 1.0.0\n\nFixed:\n- base fix\n")
+        git(self.fork, "add", "-A")
+        git(self.fork, "commit", "-q", "-m", "pending release")
+        self._release_superherdr_version(
+            "v1.1.0",
+            "## [1.1.0] - 2026-02-01\n\n### Fixed\n- new fix\n\n## [1.0.0] - 2026-01-01\n\n### Fixed\n- base fix\n",
+        )
+
+        result = self._sync("v1.1.0")
+
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        changelog = (self.fork / "CHANGELOG.md").read_text()
+        self.assertIn("Fork changelog intro.", changelog)
+        self.assertRegex(changelog, r"## \[1\.1\.0\.1\] - \d{4}-\d{2}-\d{2}")
+        self.assertNotIn("Unreleased", changelog)
+        self.assertIn("- feature", changelog)
+        self.assertLess(
+            changelog.index("- feature"),
+            changelog.index("### Inherited from Herdr 1.1.0"),
+        )
+
+    def test_missing_upstream_notes_leave_a_draft(self) -> None:
+        self._with_superherdr_files()
+        self._release_superherdr_version(
+            "v1.1.0",
+            "## [1.1.0] - 2026-02-01\n\n### Fixed\n- new fix\n",
+        )
+
+        result = self._sync("v1.1.0")
+
+        self.assertEqual(result.returncode, 2, result.stderr + result.stdout)
+        self.assertIn("CHANGELOG.md", result.stdout)
+        self.assertNotIn("<<<<<<<", (self.fork / "Cargo.toml").read_text())
+
+    def test_source_conflict_still_resolves_cargo(self) -> None:
+        self._with_superherdr_files()
+        self._release_superherdr_version(
+            "v1.2.0",
+            "## [1.2.0] - 2026-03-01\n\n### Fixed\n- fix\n\n## [1.0.0] - 2026-01-01\n\n### Fixed\n- base fix\n",
+        )
+        write(self.upstream, "src/shared.rs", "upstream line\n")
+        git(self.upstream, "add", "-A")
+        git(self.upstream, "commit", "-q", "--amend", "-m", "v1.2.0")
+        git(self.upstream, "tag", "-f", "v1.2.0")
+
+        result = self._sync("v1.2.0", "--report", "report.md")
+
+        self.assertEqual(result.returncode, 2, result.stderr + result.stdout)
+        self.assertIn("src/shared.rs", (self.fork / "report.md").read_text())
+        self.assertNotIn("<<<<<<<", (self.fork / "Cargo.toml").read_text())
+
+        self.assertEqual(result.returncode, 2, result.stderr + result.stdout)
+        self.assertIn("src/shared.rs", (self.fork / "report.md").read_text())
+        self.assertNotIn("<<<<<<<", (self.fork / "Cargo.toml").read_text())
 
 
 if __name__ == "__main__":

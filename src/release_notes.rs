@@ -171,11 +171,15 @@ fn extract_version_section(content: &str, version: &str) -> Option<String> {
 /// renderer styles them, and inherited sections keep their `### Inherited
 /// from Herdr <version>` headings.
 pub fn full_history_body() -> String {
+    full_history_body_from(EMBEDDED_CHANGELOG)
+}
+
+pub(crate) fn full_history_body_from(changelog: &str) -> String {
     let mut lines = Vec::new();
     let mut started = false;
     let mut skipping_unreleased = false;
 
-    for line in EMBEDDED_CHANGELOG.lines() {
+    for line in changelog.lines() {
         if let Some(rest) = line.strip_prefix("## [") {
             started = true;
             skipping_unreleased = rest.contains("Unreleased");
@@ -287,6 +291,34 @@ mod tests {
             }
             last_index = Some(index);
         }
+    }
+
+    #[test]
+    fn newest_inherited_section_is_the_herdr_base() {
+        let base = crate::build_info::BASE_VERSION;
+        let newest = EMBEDDED_CHANGELOG
+            .lines()
+            .find_map(|line| line.strip_prefix("### Inherited from Herdr "))
+            .map(str::trim)
+            .expect("changelog has inherited sections");
+        assert_eq!(
+            newest, base,
+            "graft Herdr {base}'s release notes into CHANGELOG.md (see CONTRIBUTING.md)",
+        );
+    }
+
+    #[test]
+    fn changelog_dates_the_current_superherdr_version() {
+        let version = crate::build_info::superherdr_version();
+        let heading = format!("## [{version}] - ");
+        let dated = EMBEDDED_CHANGELOG
+            .lines()
+            .find_map(|line| line.strip_prefix(&heading))
+            .expect("date the `## [<version>]` CHANGELOG heading; releases embed it");
+        assert!(
+            !dated.contains("Unreleased"),
+            "date the `## [{version}]` CHANGELOG heading; releases embed it",
+        );
     }
 
     #[test]

@@ -2,7 +2,13 @@
 
 Superherdr's release history. Superherdr is a fork of [Herdr](https://github.com/herdrdev/herdr); changes inherited from upstream are described in Herdr's releases and ported into the inherited sections at the end of this file.
 
-## [0.9.5.1] - Unreleased
+## [0.9.5.2] - Unreleased
+
+### Fixed
+- The installer attached to a release installs that release by default; 0.9.5.1's installer installed 0.9.1.2.
+- What's New shows the running release's notes; 0.9.3.1 and 0.9.5.1 left out their own.
+
+## [0.9.5.1] - 2026-10-15
 
 Based on Herdr 0.9.5. Upstream's 0.9.4 and 0.9.5 release bodies are ported into the inherited sections at the end of this file.
 
@@ -30,7 +36,7 @@ Based on Herdr 0.9.5. Upstream's 0.9.4 and 0.9.5 release bodies are ported into 
 - Typing appears faster, notably in PowerShell, with lower CPU for busy agents and idle shells and less memory for hidden panes. (#5149, #4506, #5083)
 - macOS `pane run` and `agent start` reject over-long commands during shell startup instead of silently truncating them. (#4950, #4988)
 
-## [0.9.3.1] - Unreleased
+## [0.9.3.1] - 2026-10-08
 
 Based on Herdr 0.9.3. Upstream's 0.9.2 and 0.9.3 release bodies are ported into the inherited sections at the end of this file.
 

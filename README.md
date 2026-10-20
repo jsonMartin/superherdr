@@ -19,10 +19,10 @@ If the original Homebrew `herdr` formula is linked, unlink it first with `brew u
 
 ### Linux x86_64: shell installer
 
-Download the versioned installer, inspect it, then run it:
+Download the installer, inspect it, then run it:
 
 ```sh
-curl -fsSL https://github.com/jsonMartin/superherdr/releases/download/superherdr-v0.9.0.1/install.sh -o install-superherdr.sh
+curl -fsSL https://github.com/jsonMartin/superherdr/releases/latest/download/install.sh -o install-superherdr.sh
 sh install-superherdr.sh
 herdr
 ```
