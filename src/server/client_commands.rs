@@ -56,11 +56,14 @@ const CLIENT_SHELL_METHODS: &[&str] = &[
 ];
 
 const OPTIONAL_CLIENT_SHELL_METHODS: &[&str] = &[
+    "pane.pin",
+    "pin.subscribe",
     "project.snooze",
     "project.wake",
     "snooze.list",
     "snooze.record.wake",
     "snooze.reset",
+    "workspace.pin",
     "workspace.snooze",
     "workspace.snooze.subscribe",
     "workspace.wake",

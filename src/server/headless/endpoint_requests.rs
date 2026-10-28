@@ -68,6 +68,113 @@ impl HeadlessServer {
             );
             return false;
         }
+        if let api::schema::Method::PinSubscribe(_) = &request.method {
+            self.pin_subscribers.insert(client_id);
+            let state = self.pin_state();
+            self.send_to_client(
+                client_id,
+                crate::server::client_commands::success_message_with_result(
+                    boot_id,
+                    request_id,
+                    api::schema::ResponseResult::Pin { state },
+                ),
+            );
+            return false;
+        }
+        if let api::schema::Method::WorkspacePin(params) = &request.method {
+            let Some(canonical_id) = self.app.canonical_workspace_id(&params.workspace_id) else {
+                self.send_to_client(
+                    client_id,
+                    crate::server::client_commands::error_message(
+                        boot_id,
+                        request_id,
+                        "not_found",
+                        "workspace not found",
+                    ),
+                );
+                return false;
+            };
+            match self
+                .commit_pin_change(|manager| manager.set_workspace(&canonical_id, params.pinned))
+            {
+                Ok(changed) => {
+                    let state = self.pin_state();
+                    if changed {
+                        self.broadcast_pin_state();
+                    }
+                    self.send_to_client(
+                        client_id,
+                        crate::server::client_commands::success_message_with_result(
+                            boot_id,
+                            request_id,
+                            api::schema::ResponseResult::Pin { state },
+                        ),
+                    );
+                    return changed;
+                }
+                Err(message) => {
+                    self.send_to_client(
+                        client_id,
+                        crate::server::client_commands::error_message(
+                            boot_id,
+                            request_id,
+                            "persistence_failed",
+                            message,
+                        ),
+                    );
+                    return false;
+                }
+            }
+        }
+        if let api::schema::Method::PanePin(params) = &request.method {
+            let resolved = self
+                .app
+                .parse_pane_id(&params.pane_id)
+                .map(|(ws_idx, pane_id)| {
+                    (ws_idx, pane_id, self.app.public_pane_id(ws_idx, pane_id))
+                });
+            let Some((_, pane_id, Some(_public_id))) = resolved else {
+                self.send_to_client(
+                    client_id,
+                    crate::server::client_commands::error_message(
+                        boot_id,
+                        request_id,
+                        "not_found",
+                        "pane not found",
+                    ),
+                );
+                return false;
+            };
+            match self.commit_pin_change(|manager| manager.set_pane(pane_id, params.pinned)) {
+                Ok(changed) => {
+                    let state = self.pin_state();
+                    if changed {
+                        self.broadcast_pin_state();
+                    }
+                    self.send_to_client(
+                        client_id,
+                        crate::server::client_commands::success_message_with_result(
+                            boot_id,
+                            request_id,
+                            api::schema::ResponseResult::Pin { state },
+                        ),
+                    );
+                    return changed;
+                }
+                Err(message) => {
+                    self.send_to_client(
+                        client_id,
+                        crate::server::client_commands::error_message(
+                            boot_id,
+                            request_id,
+                            "persistence_failed",
+                            message,
+                        ),
+                    );
+                    return false;
+                }
+            }
+        }
         if let api::schema::Method::SnoozeList(_) = &request.method {
             let state = self.snooze_state();
             self.send_to_client(

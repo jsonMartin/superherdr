@@ -524,6 +524,8 @@ pub(crate) enum ServerEvent {
     ClientShellPresentationSync { client_id: u64, token: String },
     /// A client-owned shell subscribed to workspace snooze state broadcasts.
     ClientShellSnoozeSubscribe { client_id: u64 },
+    /// A client-owned shell subscribed to pin state broadcasts.
+    ClientShellPinSubscribe { client_id: u64 },
     /// A client-owned shell invoked one endpoint operation through this connection.
     ClientShellEndpointRequest {
         client_id: u64,
@@ -1349,6 +1351,9 @@ fn client_read_loop_with_endpoint_controls(
             }
             ClientMessage::EndpointControl { kind, .. } if kind == "workspace_snooze.subscribe" => {
                 ServerEvent::ClientShellSnoozeSubscribe { client_id }
+            }
+            ClientMessage::EndpointControl { kind, .. } if kind == "pin.subscribe" => {
+                ServerEvent::ClientShellPinSubscribe { client_id }
             }
             ClientMessage::EndpointControl { kind, data } => {
                 let Some(response) = crate::server::client_endpoint_control::response(&kind, data)

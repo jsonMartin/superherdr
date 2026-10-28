@@ -4,6 +4,8 @@ mod event_fairness;
 mod native_graphics;
 #[path = "pane_move.rs"]
 mod pane_move_tests;
+#[path = "pins.rs"]
+mod pin_tests;
 #[path = "project_snooze.rs"]
 mod project_snooze_tests;
 #[path = "pane_graphics.rs"]
@@ -127,6 +129,9 @@ fn test_headless_server_with_event_hub(event_hub: api::EventHub) -> HeadlessServ
         snooze_notice: None,
         snooze_retry_deadline: None,
         snooze_subscribers: HashSet::new(),
+        pins: crate::server::pins::PinManager::new(),
+        pin_store: None,
+        pin_subscribers: HashSet::new(),
         client_shell_boot_id: "test-boot".into(),
         sent_window_title: None,
         api_window_title: None,

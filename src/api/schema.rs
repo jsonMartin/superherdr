@@ -93,6 +93,8 @@ pub enum Method {
     WorkspaceReportMetadata(WorkspaceReportMetadataParams),
     #[serde(rename = "workspace.close")]
     WorkspaceClose(WorkspaceCloseParams),
+    #[serde(rename = "workspace.pin")]
+    WorkspacePin(WorkspacePinParams),
     #[serde(rename = "workspace.snooze")]
     WorkspaceSnooze(WorkspaceSnoozeParams),
     #[serde(rename = "workspace.wake")]
@@ -229,6 +231,10 @@ pub enum Method {
     PaneReleaseAgent(PaneReleaseAgentParams),
     #[serde(rename = "pane.close")]
     PaneClose(PaneTarget),
+    #[serde(rename = "pane.pin")]
+    PanePin(PanePinParams),
+    #[serde(rename = "pin.subscribe")]
+    PinSubscribe(EmptyParams),
     #[serde(rename = "popup.close")]
     PopupClose(EmptyParams),
     #[serde(rename = "events.subscribe")]
