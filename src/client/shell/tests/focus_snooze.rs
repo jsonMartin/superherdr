@@ -767,6 +767,7 @@ fn filtered_worktree_parent_emits_children_as_standalone_rows_when_collapsed() {
     let entries = crate::client::shell::sidebar::workspace_entries_with_filter(
         &snapshot,
         &collapsed,
+        &std::collections::HashSet::new(),
         |workspace| workspace.workspace_id != "ws_1",
     );
     let entry_ids = entries

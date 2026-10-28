@@ -242,6 +242,27 @@ fn status_color(
     }
 }
 
+/// Dots draw the pin in place of the status dot. Symbols keep the status
+/// symbol and return a style for a pin drawn before it. `style` is the status
+/// color (callers pass the dim style for stale rows).
+fn status_indicator(
+    pinned: bool,
+    status: crate::api::schema::AgentStatus,
+    indicators: crate::config::StatusIndicatorStyle,
+    style: ratatui::style::Style,
+) -> (
+    (&'static str, ratatui::style::Style),
+    Option<ratatui::style::Style>,
+) {
+    if pinned && indicators == crate::config::StatusIndicatorStyle::Dots {
+        return ((crate::ui::PIN_GLYPH, style), None);
+    }
+    let icon = (status_icon(status, indicators), style);
+    let prefix =
+        (pinned && indicators == crate::config::StatusIndicatorStyle::Symbols).then_some(style);
+    (icon, prefix)
+}
+
 fn panel_contrast_fg(palette: &Palette) -> ratatui::style::Color {
     match palette.panel_bg {
         ratatui::style::Color::Reset => palette.surface_dim,

@@ -12,6 +12,7 @@ pub(crate) enum EndpointControlMessage {
     AgentCompletions(crate::protocol::endpoint::EndpointAgentCompletions),
     Snapshot(Box<crate::protocol::ClientShellSnapshot>),
     WorkspaceSnoozeState(Box<crate::api::schema::WorkspaceSnoozeState>),
+    PinState(Box<crate::api::schema::PinState>),
     OptionalFeatureError { feature: String, error: String },
     Ignored,
 }
@@ -68,6 +69,15 @@ pub(crate) fn decode_endpoint_control(
             Err(error) => Ok(EndpointControlMessage::OptionalFeatureError {
                 feature: "workspace_snooze.state".into(),
                 error: format!("invalid endpoint workspace snooze state: {error}"),
+            }),
+        };
+    }
+    if kind == "pin.state" {
+        return match serde_json::from_str(data) {
+            Ok(state) => Ok(EndpointControlMessage::PinState(Box::new(state))),
+            Err(error) => Ok(EndpointControlMessage::OptionalFeatureError {
+                feature: "pin.state".into(),
+                error: format!("invalid endpoint pin state: {error}"),
             }),
         };
     }
@@ -211,6 +221,34 @@ mod tests {
                 assert_eq!(state.records[0].workspace_id, "ws_1");
             }
             _ => panic!("expected WorkspaceSnoozeState"),
+        }
+    }
+
+    #[test]
+    fn malformed_optional_pin_state_returns_optional_feature_error_without_protocol_failure() {
+        let message = decode_endpoint_control("pin.state", "{not json}").unwrap();
+        match message {
+            EndpointControlMessage::OptionalFeatureError { feature, error } => {
+                assert_eq!(feature, "pin.state");
+                assert!(error.contains("invalid endpoint pin state"));
+            }
+            _ => panic!("expected OptionalFeatureError"),
+        }
+    }
+
+    #[test]
+    fn decodes_pin_state() {
+        let json =
+            r#"{"boot_id":"boot-1","revision":3,"workspace_ids":["ws_1"],"pane_ids":["ws_1:p2"]}"#;
+        let message = decode_endpoint_control("pin.state", json).unwrap();
+        match message {
+            EndpointControlMessage::PinState(state) => {
+                assert_eq!(state.boot_id, "boot-1");
+                assert_eq!(state.revision, 3);
+                assert_eq!(state.workspace_ids, vec!["ws_1".to_owned()]);
+                assert_eq!(state.pane_ids, vec!["ws_1:p2".to_owned()]);
+            }
+            _ => panic!("expected PinState"),
         }
     }
 

@@ -62,6 +62,8 @@ pub(crate) fn render_collapsed_sidebar(
     selected_workspace_id: Option<&str>,
     focus_scope: Option<&ClientFocusScope>,
     snooze_state: Option<&crate::api::schema::WorkspaceSnoozeState>,
+    pinned_workspaces: &HashSet<String>,
+    pinned_panes: &HashSet<String>,
     hits: &mut ShellHitMap,
 ) {
     let palette = &config.palette;
@@ -76,13 +78,17 @@ pub(crate) fn render_collapsed_sidebar(
         Some(snapshot.boot_id.as_str()),
         &snapshot.workspaces,
     );
-    for (index, workspace) in snapshot
-        .workspaces
+    let entries = pinned_flat_entries(snapshot, pinned_workspaces, |workspace| {
+        visible_workspaces.contains(&workspace.workspace_id)
+    });
+    for (index, entry) in entries
         .iter()
-        .filter(|workspace| visible_workspaces.contains(&workspace.workspace_id))
         .take(workspace_area.height as usize)
         .enumerate()
     {
+        let Some(workspace) = snapshot.workspaces.get(entry.index) else {
+            continue;
+        };
         let rect = Rect::new(
             workspace_area.x,
             workspace_area.y + index as u16,
@@ -113,13 +119,33 @@ pub(crate) fn render_collapsed_sidebar(
             number_style,
         );
         let status = workspace.agent_status;
+        let status_style = Style::default().fg(status_color(status, palette));
+        let (icon, pin_prefix) = status_indicator(
+            pinned_workspaces.contains(&workspace.workspace_id),
+            status,
+            config.status_indicators,
+            status_style,
+        );
+        let mut status_x = rect.x.saturating_add(2);
+        if pin_prefix.is_some() {
+            let width = rect.right().saturating_sub(status_x);
+            put_text(
+                buffer,
+                status_x,
+                rect.y,
+                width,
+                crate::ui::PIN_GLYPH,
+                status_style,
+            );
+            status_x = status_x.saturating_add(display_width(crate::ui::PIN_GLYPH).min(width));
+        }
         put_text(
             buffer,
-            rect.x.saturating_add(2),
+            status_x,
             rect.y,
-            rect.width.saturating_sub(2),
-            status_icon(status, config.status_indicators),
-            Style::default().fg(status_color(status, palette)),
+            rect.right().saturating_sub(status_x),
+            icon.0,
+            icon.1,
         );
         hits.workspaces.push(WorkspaceHit {
             rect,
@@ -150,13 +176,15 @@ pub(crate) fn render_collapsed_sidebar(
     );
     // The » toggle row is already excluded by collapsed_sidebar_sections.
     let detail_content = detail_area;
-    for (index, pane_id) in
-        super::ordered_agent_pane_ids_with_filter(snapshot, config.agent_panel_sort, |agent| {
-            agent_workspaces.contains(&agent.workspace_id)
-        })
-        .into_iter()
-        .take(detail_content.height as usize)
-        .enumerate()
+    for (index, pane_id) in super::ordered_agent_pane_ids_with_filter(
+        snapshot,
+        config.agent_panel_sort,
+        pinned_panes,
+        |agent| agent_workspaces.contains(&agent.workspace_id),
+    )
+    .into_iter()
+    .take(detail_content.height as usize)
+    .enumerate()
     {
         let Some(agent) = snapshot
             .agents
@@ -186,13 +214,33 @@ pub(crate) fn render_collapsed_sidebar(
                 palette.overlay0
             }),
         );
+        let status_style = Style::default().fg(status_color(agent.agent_status, palette));
+        let (icon, pin_prefix) = status_indicator(
+            pinned_panes.contains(&agent.pane_id),
+            agent.agent_status,
+            config.status_indicators,
+            status_style,
+        );
+        let mut status_x = rect.x.saturating_add(2);
+        if pin_prefix.is_some() {
+            let width = rect.right().saturating_sub(status_x);
+            put_text(
+                buffer,
+                status_x,
+                rect.y,
+                width,
+                crate::ui::PIN_GLYPH,
+                status_style,
+            );
+            status_x = status_x.saturating_add(display_width(crate::ui::PIN_GLYPH).min(width));
+        }
         put_text(
             buffer,
-            rect.x.saturating_add(2),
+            status_x,
             rect.y,
-            rect.width.saturating_sub(2),
-            status_icon(agent.agent_status, config.status_indicators),
-            Style::default().fg(status_color(agent.agent_status, palette)),
+            rect.right().saturating_sub(status_x),
+            icon.0,
+            icon.1,
         );
         hits.agents.push((rect, pane_id));
     }
@@ -260,9 +308,13 @@ pub(crate) fn render_sidebar(
         Some(snapshot.boot_id.as_str()),
         &snapshot.workspaces,
     );
-    let entries = workspace_entries_with_filter(snapshot, state.collapsed_groups, |workspace| {
-        visible_workspaces.contains(&workspace.workspace_id)
-    });
+    let (pinned_workspaces, pinned_panes) = active_pin_sets(state);
+    let entries = workspace_entries_with_filter(
+        snapshot,
+        state.collapsed_groups,
+        &pinned_workspaces,
+        |workspace| visible_workspaces.contains(&workspace.workspace_id),
+    );
     let body = Rect::new(
         workspace_area.x,
         workspace_area.y.saturating_add(WORKSPACE_HEADER_ROWS),
@@ -362,6 +414,7 @@ pub(crate) fn render_sidebar(
             rect,
             status,
             config.status_indicators,
+            pinned_workspaces.contains(&workspace.workspace_id),
             entry,
             rows,
             workspace.focused,
@@ -480,6 +533,7 @@ pub(crate) fn render_sidebar(
         config,
         state.agent_scroll,
         hits,
+        &pinned_panes,
         |agent| agent_workspaces.contains(&agent.workspace_id),
     );
 
@@ -505,9 +559,16 @@ pub(crate) fn render_sidebar(
     );
 }
 
+/// Sidebar ordering works on blocks: a parent workspace with its linked
+/// worktree children, a standalone workspace, or an orphan worktree. A block is
+/// pinned when its top workspace is pinned; a pinned linked worktree under an
+/// unpinned parent escapes its group — even a collapsed one — and forms its own
+/// unindented pinned block. Pinned blocks come first in their existing relative
+/// order, followed by unpinned blocks in their existing order.
 pub(crate) fn workspace_entries_with_filter(
     snapshot: &ClientShellSnapshot,
     collapsed_groups: &HashSet<String>,
+    pinned: &HashSet<String>,
     filter: impl Fn(&crate::protocol::ClientShellWorkspace) -> bool,
 ) -> Vec<WorkspaceEntry> {
     let mut members = HashMap::<&str, Vec<usize>>::new();
@@ -534,7 +595,14 @@ pub(crate) fn workspace_entries_with_filter(
         .map(|(key, _)| *key)
         .collect::<HashSet<_>>();
     let mut emitted = HashSet::<&str>::new();
-    let mut entries = Vec::new();
+    // Each block is (pinned, entries); partitioned at the end, preserving the
+    // existing relative order within both sections.
+    let mut blocks: Vec<(bool, Vec<WorkspaceEntry>)> = Vec::new();
+    let mut push_block = |pinned_block: bool, entries: Vec<WorkspaceEntry>| {
+        if !entries.is_empty() {
+            blocks.push((pinned_block, entries));
+        }
+    };
     for (index, workspace) in snapshot.workspaces.iter().enumerate() {
         let Some(worktree) = workspace
             .worktree
@@ -542,11 +610,15 @@ pub(crate) fn workspace_entries_with_filter(
             .filter(|worktree| grouped.contains(worktree.key.as_str()))
         else {
             if filter(workspace) {
-                entries.push(WorkspaceEntry {
-                    index,
-                    indented: false,
-                    last_child: false,
-                });
+                let pinned_block = pinned.contains(&workspace.workspace_id);
+                push_block(
+                    pinned_block,
+                    vec![WorkspaceEntry {
+                        index,
+                        indented: false,
+                        last_child: false,
+                    }],
+                );
             }
             continue;
         };
@@ -571,12 +643,40 @@ pub(crate) fn workspace_entries_with_filter(
             .copied()
             .filter(|parent| filter(&snapshot.workspaces[*parent]))
             .collect::<Vec<_>>();
+        // The block is pinned when its top workspace is pinned.
+        let block_pinned = visible_parents
+            .first()
+            .is_some_and(|parent| pinned.contains(&snapshot.workspaces[*parent].workspace_id));
+        // A pinned linked worktree under an unpinned parent leaves the group
+        // and renders unindented in the pinned section.
+        let escapes = |member: &usize| {
+            !block_pinned
+                && pinned.contains(&snapshot.workspaces[*member].workspace_id)
+                && filter(&snapshot.workspaces[*member])
+        };
+        let mut escaped_children = Vec::new();
+        for member in group_members.iter().copied() {
+            let is_linked = snapshot.workspaces[member]
+                .worktree
+                .as_ref()
+                .is_some_and(|worktree| worktree.is_linked_worktree);
+            if is_linked && escapes(&member) {
+                escaped_children.push(WorkspaceEntry {
+                    index: member,
+                    indented: false,
+                    last_child: false,
+                });
+            }
+        }
         for parent in visible_parents.iter().copied() {
-            entries.push(WorkspaceEntry {
-                index: parent,
-                indented: false,
-                last_child: false,
-            });
+            push_block(
+                block_pinned,
+                vec![WorkspaceEntry {
+                    index: parent,
+                    indented: false,
+                    last_child: false,
+                }],
+            );
         }
         if visible_parents.is_empty() {
             // A hidden repository parent must not erase its visible linked worktrees.
@@ -590,17 +690,19 @@ pub(crate) fn workspace_entries_with_filter(
                             .as_ref()
                             .is_some_and(|worktree| worktree.is_linked_worktree)
                 })
+                .filter(|member| !escapes(member))
                 .collect::<Vec<_>>();
             for child in children {
-                entries.push(WorkspaceEntry {
-                    index: child,
-                    indented: false,
-                    last_child: false,
-                });
+                push_block(
+                    false,
+                    vec![WorkspaceEntry {
+                        index: child,
+                        indented: false,
+                        last_child: false,
+                    }],
+                );
             }
-            continue;
-        }
-        if collapsed_groups.contains(&worktree.key) {
+        } else if collapsed_groups.contains(&worktree.key) {
             if let Some(active) = group_members.iter().copied().find(|member| {
                 let workspace = &snapshot.workspaces[*member];
                 workspace.focused
@@ -609,33 +711,50 @@ pub(crate) fn workspace_entries_with_filter(
                         .worktree
                         .as_ref()
                         .is_some_and(|worktree| worktree.is_linked_worktree)
+                    && !escapes(member)
             }) {
-                entries.push(WorkspaceEntry {
-                    index: active,
+                push_block(
+                    block_pinned,
+                    vec![WorkspaceEntry {
+                        index: active,
+                        indented: true,
+                        last_child: true,
+                    }],
+                );
+            }
+        } else {
+            let children = group_members
+                .iter()
+                .copied()
+                .filter(|member| {
+                    filter(&snapshot.workspaces[*member])
+                        && snapshot.workspaces[*member]
+                            .worktree
+                            .as_ref()
+                            .is_some_and(|worktree| worktree.is_linked_worktree)
+                })
+                .filter(|member| !escapes(member))
+                .collect::<Vec<_>>();
+            let mut block = Vec::new();
+            for (child_index, child) in children.iter().enumerate() {
+                block.push(WorkspaceEntry {
+                    index: *child,
                     indented: true,
-                    last_child: true,
+                    last_child: child_index + 1 == children.len(),
                 });
             }
-            continue;
+            push_block(block_pinned, block);
         }
-        let children = group_members
-            .iter()
-            .copied()
-            .filter(|member| {
-                filter(&snapshot.workspaces[*member])
-                    && snapshot.workspaces[*member]
-                        .worktree
-                        .as_ref()
-                        .is_some_and(|worktree| worktree.is_linked_worktree)
-            })
-            .collect::<Vec<_>>();
-        for (child_index, child) in children.iter().enumerate() {
-            entries.push(WorkspaceEntry {
-                index: *child,
-                indented: true,
-                last_child: child_index + 1 == children.len(),
-            });
+        if !escaped_children.is_empty() {
+            push_block(true, escaped_children);
         }
+    }
+    let mut entries = Vec::with_capacity(blocks.iter().map(|(_, block)| block.len()).sum());
+    for (_, block) in blocks.iter().filter(|(pinned, _)| *pinned) {
+        entries.extend(block.iter().copied());
+    }
+    for (_, block) in blocks.iter().filter(|(pinned, _)| !*pinned) {
+        entries.extend(block.iter().copied());
     }
     entries
 }
@@ -643,8 +762,54 @@ pub(crate) fn workspace_entries_with_filter(
 pub(crate) fn workspace_entries(
     snapshot: &ClientShellSnapshot,
     collapsed_groups: &HashSet<String>,
+    pinned: &HashSet<String>,
 ) -> Vec<WorkspaceEntry> {
-    workspace_entries_with_filter(snapshot, collapsed_groups, |_| true)
+    workspace_entries_with_filter(snapshot, collapsed_groups, pinned, |_| true)
+}
+
+/// Compact strips keep snapshot order until a visible workspace is pinned.
+/// Existing navigation tests require that ungrouped snapshot order, including
+/// collapsed-group children. A visible pin switches the strip onto the same
+/// block order as the expanded sidebar, with children still shown.
+pub(crate) fn pinned_flat_entries(
+    snapshot: &ClientShellSnapshot,
+    pinned: &HashSet<String>,
+    filter: impl Fn(&crate::protocol::ClientShellWorkspace) -> bool,
+) -> Vec<WorkspaceEntry> {
+    let any_pinned = snapshot
+        .workspaces
+        .iter()
+        .any(|workspace| filter(workspace) && pinned.contains(&workspace.workspace_id));
+    if any_pinned {
+        workspace_entries_with_filter(snapshot, &HashSet::new(), pinned, filter)
+    } else {
+        snapshot
+            .workspaces
+            .iter()
+            .enumerate()
+            .filter(|(_, workspace)| filter(workspace))
+            .map(|(index, _)| WorkspaceEntry {
+                index,
+                indented: false,
+                last_child: false,
+            })
+            .collect()
+    }
+}
+
+fn active_pin_sets(state: &ShellRenderState<'_>) -> (HashSet<String>, HashSet<String>) {
+    let pin = state
+        .endpoints
+        .iter()
+        .find(|endpoint| &endpoint.endpoint_id == state.active_endpoint_id)
+        .and_then(|endpoint| endpoint.pin_state.as_ref());
+    let workspaces = pin
+        .map(|pin| pin.workspace_ids.iter().cloned().collect())
+        .unwrap_or_default();
+    let panes = pin
+        .map(|pin| pin.pane_ids.iter().cloned().collect())
+        .unwrap_or_default();
+    (workspaces, panes)
 }
 
 pub(super) fn parent_group_key(snapshot: &ClientShellSnapshot, index: usize) -> Option<String> {
@@ -783,11 +948,15 @@ pub(in crate::client::shell) fn workspace_rows(
     )
 }
 
+// `pinned` is one paint flag on top of the existing row inputs. A struct would
+// only exist to satisfy the argument limit.
+#[allow(clippy::too_many_arguments)]
 pub(in crate::client::shell) fn render_workspace_rows(
     buffer: &mut Buffer,
     area: Rect,
     status: crate::api::schema::AgentStatus,
     indicators: crate::config::StatusIndicatorStyle,
+    pinned: bool,
     entry: &WorkspaceEntry,
     rows: Vec<Vec<crate::ui::ResolvedToken>>,
     focused: bool,
@@ -844,13 +1013,13 @@ pub(in crate::client::shell) fn render_workspace_rows(
         } else {
             palette.overlay0
         });
+        let status_style = Style::default().fg(status_color(status, palette));
+        let (icon, pin_prefix) = status_indicator(pinned, status, indicators, status_style);
         let spans = crate::ui::resolved_token_spans(
             row,
-            (
-                status_icon(status, indicators),
-                Style::default().fg(status_color(status, palette)),
-            ),
-            Style::default().fg(status_color(status, palette)),
+            icon,
+            pin_prefix,
+            status_style,
             workspace_style,
             secondary_style,
             Style::default().fg(palette.overlay1),

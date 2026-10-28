@@ -103,9 +103,14 @@ pub(crate) fn agent_panel_entries_from(
     entries
 }
 
+/// Extra pin glyph rendered before the status icon (symbols indicator style);
+/// with the `dots` style callers substitute the icon itself instead.
+pub(crate) const PIN_GLYPH: &str = "⚲";
+
 pub(crate) fn resolved_token_spans(
     resolved: &[ResolvedToken],
     state_icon: (&str, Style),
+    pin: Option<Style>,
     state_text_style: Style,
     workspace_style: Style,
     secondary_style: Style,
@@ -113,10 +118,11 @@ pub(crate) fn resolved_token_spans(
     palette: &Palette,
     max_width: usize,
 ) -> Vec<Span<'static>> {
+    let pin_width = usize::from(pin.is_some()) * display_width(PIN_GLYPH);
     let fixed_widths = resolved
         .iter()
         .map(|token| match &token.kind {
-            ResolvedTokenKind::StateIcon => display_width(state_icon.0),
+            ResolvedTokenKind::StateIcon => display_width(state_icon.0) + pin_width,
             ResolvedTokenKind::GitStatus { ahead, behind } => {
                 usize::from(*ahead > 0) * display_width(&format!("↑{ahead}"))
                     + usize::from(*behind > 0) * display_width(&format!("↓{behind}"))
@@ -223,10 +229,18 @@ pub(crate) fn resolved_token_spans(
             ));
         }
         match &token.kind {
-            ResolvedTokenKind::StateIcon => spans.push(Span::styled(
-                state_icon.0.to_string(),
-                apply_token_style(state_icon.1, token.style),
-            )),
+            ResolvedTokenKind::StateIcon => {
+                if let Some(pin_style) = pin {
+                    spans.push(Span::styled(
+                        PIN_GLYPH,
+                        apply_token_style(pin_style, token.style),
+                    ));
+                }
+                spans.push(Span::styled(
+                    state_icon.0.to_string(),
+                    apply_token_style(state_icon.1, token.style),
+                ));
+            }
             ResolvedTokenKind::StateText(text) => spans.push(Span::styled(
                 truncate_end(text, budgets[index]),
                 apply_token_style(state_text_style, token.style),

@@ -18,7 +18,7 @@ pub(super) fn dispatch_client_shell_actions(
                 request,
             } => {
                 let inactive_shared = !endpoint_id.eq(endpoints.active_id())
-                    && endpoint_commands::is_shared_snooze_method(&request.method);
+                    && endpoint_commands::is_shared_state_method(&request.method);
                 let generation = endpoints.connection(&endpoint_id).and_then(|connection| {
                     (inactive_shared
                         || (endpoints.active_id() == &endpoint_id

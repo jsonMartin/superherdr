@@ -12,7 +12,9 @@ use super::shell::ClientShellEndpointError;
 const ENDPOINT_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_RETIRED_REQUESTS_PER_ENDPOINT: usize = 128;
 
-pub(crate) fn is_shared_snooze_method(method: &crate::api::schema::Method) -> bool {
+/// Methods whose result is server-shared state, so they may run against a
+/// non-active endpoint and their failures surface on that endpoint's notice.
+pub(crate) fn is_shared_state_method(method: &crate::api::schema::Method) -> bool {
     matches!(
         method,
         crate::api::schema::Method::WorkspaceSnooze(_)
@@ -23,6 +25,8 @@ pub(crate) fn is_shared_snooze_method(method: &crate::api::schema::Method) -> bo
             | crate::api::schema::Method::SnoozeRecordWake(_)
             | crate::api::schema::Method::WorkspaceSnoozeSubscribe(_)
             | crate::api::schema::Method::SnoozeList(_)
+            | crate::api::schema::Method::WorkspacePin(_)
+            | crate::api::schema::Method::PanePin(_)
     )
 }
 
@@ -121,7 +125,7 @@ impl EndpointCommands {
                 cancelled.push(request_id);
                 continue;
             }
-            if !endpoint_is_active && !is_shared_snooze_method(&queued.request.method) {
+            if !endpoint_is_active && !is_shared_state_method(&queued.request.method) {
                 cancelled.push(request_id);
                 continue;
             }

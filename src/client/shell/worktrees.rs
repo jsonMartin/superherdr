@@ -542,7 +542,8 @@ impl ClientShellState {
                 | PendingEndpointKind::CopyMotion { .. }
                 | PendingEndpointKind::CopySearch { .. }
                 | PendingEndpointKind::SnoozeReset { .. }
-                | PendingEndpointKind::SnoozeManagementWake { .. },
+                | PendingEndpointKind::SnoozeManagementWake { .. }
+                | PendingEndpointKind::Pin { .. },
                 Err(_),
             ) => true,
         }

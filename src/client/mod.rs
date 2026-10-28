@@ -664,6 +664,15 @@ async fn run_client_loop(
                     data: String::new(),
                 });
             }
+            if registry
+                .connection(&endpoint::ClientEndpointId::Local)
+                .is_some_and(|connection| connection.negotiation.supports_method("pin.subscribe"))
+            {
+                registry.send(&ClientMessage::EndpointControl {
+                    kind: "pin.subscribe".into(),
+                    data: String::new(),
+                });
+            }
         }
         registry
     } else {
@@ -1426,6 +1435,21 @@ async fn run_client_loop(
                             &endpoint_id,
                             &ClientMessage::EndpointControl {
                                 kind: "workspace_snooze.subscribe".into(),
+                                data: String::new(),
+                            },
+                        );
+                    }
+                    if state.shell.is_some()
+                        && write_stream
+                            .connection(&endpoint_id)
+                            .is_some_and(|connection| {
+                                connection.negotiation.supports_method("pin.subscribe")
+                            })
+                    {
+                        write_stream.send_to(
+                            &endpoint_id,
+                            &ClientMessage::EndpointControl {
+                                kind: "pin.subscribe".into(),
                                 data: String::new(),
                             },
                         );
@@ -2265,6 +2289,17 @@ async fn run_client_loop(
                                 }
                                 continue;
                             }
+                            Ok(endpoint::EndpointControlMessage::PinState(pin_state)) => {
+                                if let Some(shell) = state.shell.as_mut() {
+                                    shell.set_endpoint_pin_state(&endpoint_id, *pin_state);
+                                    if let Some(frame) =
+                                        shell.compose(state.reported_size.0, state.reported_size.1)
+                                    {
+                                        state.present_frame(frame);
+                                    }
+                                }
+                                continue;
+                            }
                             Ok(endpoint::EndpointControlMessage::OptionalFeatureError {
                                 feature,
                                 error,
@@ -2296,6 +2331,9 @@ async fn run_client_loop(
                                     );
                                 }
                                 if let Some(shell) = state.shell.as_mut() {
+                                    if feature == "pin.state" {
+                                        shell.clear_endpoint_pin_state(&endpoint_id);
+                                    }
                                     let _ =
                                         shell.receive_endpoint_error(format!("{feature}: {error}"));
                                     if let Some(frame) =

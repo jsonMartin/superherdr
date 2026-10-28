@@ -294,6 +294,17 @@ pub(super) fn render_shell(
                 );
             }
         } else if state.sidebar_collapsed {
+            let pin = state
+                .endpoints
+                .iter()
+                .find(|endpoint| &endpoint.endpoint_id == state.active_endpoint_id)
+                .and_then(|endpoint| endpoint.pin_state.as_ref());
+            let pinned_workspaces = pin
+                .map(|pin| pin.workspace_ids.iter().cloned().collect())
+                .unwrap_or_default();
+            let pinned_panes = pin
+                .map(|pin| pin.pane_ids.iter().cloned().collect())
+                .unwrap_or_default();
             render_collapsed_sidebar(
                 buffer,
                 layout.sidebar,
@@ -304,6 +315,8 @@ pub(super) fn render_shell(
                     .map(|target| target.workspace_id.as_str()),
                 state.focus_scope,
                 state.snooze_state,
+                &pinned_workspaces,
+                &pinned_panes,
                 &mut hits,
             );
         } else {

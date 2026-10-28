@@ -720,33 +720,46 @@ fn mobile_items(
             } else {
                 Modifier::empty()
             };
+            let agent_pinned = endpoint.pin_state.as_ref().is_some_and(|state| {
+                state
+                    .pane_ids
+                    .iter()
+                    .any(|pane_id| pane_id == &agent.pane_id)
+            });
+            let agent_status_style = Style::default()
+                .fg(if endpoint.stale() {
+                    palette.overlay0
+                } else {
+                    status_color(agent.agent_status, palette)
+                })
+                .bg(background)
+                .add_modifier(dim);
+            let (agent_icon, agent_pin) = status_indicator(
+                agent_pinned,
+                agent.agent_status,
+                config.status_indicators,
+                agent_status_style,
+            );
+            let mut agent_spans = vec![Span::styled("  ", Style::default().bg(background))];
+            if agent_pin.is_some() {
+                agent_spans.push(Span::styled(crate::ui::PIN_GLYPH, agent_status_style));
+            }
+            agent_spans.push(Span::styled(agent_icon.0, agent_status_style));
+            agent_spans.push(Span::styled(" ", Style::default().bg(background)));
+            let agent_prefix_width = 3 + u16::from(agent_pin.is_some());
+            agent_spans.push(Span::styled(
+                crate::ui::truncate_end(
+                    &format!("{} · {primary}", endpoint.label),
+                    usize::from(content_width.saturating_sub(agent_prefix_width)),
+                ),
+                Style::default()
+                    .fg(foreground)
+                    .bg(background)
+                    .add_modifier(Modifier::BOLD | dim),
+            ));
             items.push(MobileItem {
                 lines: vec![
-                    Line::from(vec![
-                        Span::styled("  ", Style::default().bg(background)),
-                        Span::styled(
-                            status_icon(agent.agent_status, config.status_indicators),
-                            Style::default()
-                                .fg(if endpoint.stale() {
-                                    palette.overlay0
-                                } else {
-                                    status_color(agent.agent_status, palette)
-                                })
-                                .bg(background)
-                                .add_modifier(dim),
-                        ),
-                        Span::styled(" ", Style::default().bg(background)),
-                        Span::styled(
-                            crate::ui::truncate_end(
-                                &format!("{} · {primary}", endpoint.label),
-                                usize::from(content_width.saturating_sub(5)),
-                            ),
-                            Style::default()
-                                .fg(foreground)
-                                .bg(background)
-                                .add_modifier(Modifier::BOLD | dim),
-                        ),
-                    ]),
+                    Line::from(agent_spans),
                     Line::from(Span::styled(
                         crate::ui::truncate_end(
                             &format!("  {}", detail.join(" · ")),
@@ -781,9 +794,14 @@ fn mobile_items(
             Some(endpoint.snapshot.boot_id.as_str()),
             &endpoint.snapshot.workspaces,
         );
+        let pinned = endpoint
+            .pin_state
+            .map(|state| state.workspace_ids.iter().cloned().collect::<HashSet<_>>())
+            .unwrap_or_default();
         for entry in super::render::workspace_entries_with_filter(
             endpoint.snapshot,
             &HashSet::new(),
+            &pinned,
             |workspace| visible_workspaces.contains(&workspace.workspace_id),
         ) {
             let Some(workspace) = endpoint.snapshot.workspaces.get(entry.index) else {
@@ -847,11 +865,20 @@ fn mobile_items(
             } else {
                 palette.text
             };
+            let workspace_pinned = pinned.contains(&workspace.workspace_id);
             let status = if endpoint.stale() {
                 palette.overlay0
             } else {
                 status_color(workspace.agent_status, palette)
             };
+            let workspace_status_style =
+                Style::default().fg(status).bg(background).add_modifier(dim);
+            let (workspace_icon, workspace_pin) = status_indicator(
+                workspace_pinned,
+                workspace.agent_status,
+                config.status_indicators,
+                workspace_status_style,
+            );
             let stale_detail = if endpoint.stale() {
                 format!(" · {}", mobile_endpoint_state(endpoint.status))
             } else {
@@ -868,18 +895,21 @@ fn mobile_items(
                                 .add_modifier(dim),
                         ),
                         Span::styled(
-                            status_icon(workspace.agent_status, config.status_indicators),
-                            Style::default().fg(status).bg(background).add_modifier(dim),
+                            if workspace_pin.is_some() {
+                                format!("{}{}", crate::ui::PIN_GLYPH, workspace_icon.0)
+                            } else {
+                                workspace_icon.0.to_owned()
+                            },
+                            workspace_status_style,
                         ),
                         Span::styled(" ", Style::default().bg(background)),
                         Span::styled(
                             crate::ui::truncate_end(
                                 &format!("{} · {name}", endpoint.label),
-                                usize::from(content_width.saturating_sub(if entry.indented {
-                                    8
-                                } else {
-                                    5
-                                })),
+                                usize::from(content_width.saturating_sub(
+                                    if entry.indented { 8 } else { 5 }
+                                        + u16::from(workspace_pin.is_some()),
+                                )),
                             ),
                             Style::default()
                                 .fg(foreground)

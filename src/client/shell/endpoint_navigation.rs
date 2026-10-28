@@ -143,9 +143,17 @@ impl ClientShellState {
                                 Some(snapshot.boot_id.as_str()),
                                 &snapshot.workspaces,
                             );
+                            let pinned = endpoint
+                                .pin_state
+                                .as_ref()
+                                .map(|state| {
+                                    state.workspace_ids.iter().cloned().collect::<HashSet<_>>()
+                                })
+                                .unwrap_or_default();
                             render::workspace_entries_with_filter(
                                 snapshot,
                                 &HashSet::new(),
+                                &pinned,
                                 |workspace| visible_workspaces.contains(&workspace.workspace_id),
                             )
                             .into_iter()

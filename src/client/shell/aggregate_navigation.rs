@@ -12,6 +12,7 @@ pub(super) struct CachedEndpointSnapshot<'a> {
     pub(super) snapshot: &'a ClientShellSnapshot,
     pub(super) agent_recency: &'a HashMap<String, u64>,
     pub(super) snooze_state: Option<&'a crate::api::schema::WorkspaceSnoozeState>,
+    pub(super) pin_state: Option<&'a crate::api::schema::PinState>,
     pub(super) focus_scope: Option<&'a ClientFocusScope>,
     pub(super) agent_presentation: &'a super::endpoint_agent_state::EndpointAgentPresentation,
 }
@@ -40,6 +41,7 @@ pub(super) fn cached_endpoint_snapshots(
                     snapshot,
                     agent_recency: &endpoint.agent_recency,
                     snooze_state: endpoint.snooze_state.as_ref(),
+                    pin_state: endpoint.pin_state.as_ref(),
                     focus_scope: endpoint.focus_scope.as_ref(),
                     agent_presentation: &endpoint.agent_presentation,
                 })
@@ -128,10 +130,17 @@ pub(super) fn aggregate_agent_rows<'a>(
                         &view.sort,
                     )
                 });
+                // A view with its own sort uses one leading pinned block, ordered
+                // by machine and then that sort, even when the panel sort is spaces.
+                apply_aggregate_pin_order(&mut rows, true);
                 return rows;
             }
         }
         sort_aggregate_rows(&mut rows, sort);
+        apply_aggregate_pin_order(
+            &mut rows,
+            sort == crate::config::AgentPanelSortConfig::Priority,
+        );
         return rows;
     }
 
@@ -144,9 +153,14 @@ pub(super) fn aggregate_agent_rows<'a>(
             endpoint.endpoint_id,
             top_level_agents,
         );
+        let pinned = endpoint
+            .pin_state
+            .map(|state| state.pane_ids.iter().cloned().collect::<HashSet<_>>())
+            .unwrap_or_default();
         for pane_id in super::agent_sidebar::ordered_agent_pane_ids_with_filter(
             endpoint.snapshot,
             sort,
+            &pinned,
             |agent| visible_workspaces.contains(&agent.workspace_id),
         ) {
             let Some(agent) = endpoint
@@ -169,7 +183,45 @@ pub(super) fn aggregate_agent_rows<'a>(
         }
     }
     sort_aggregate_rows(&mut rows, sort);
+    apply_aggregate_pin_order(
+        &mut rows,
+        sort == crate::config::AgentPanelSortConfig::Priority,
+    );
     rows
+}
+
+fn pane_pinned(row: &AggregateAgentRow<'_>) -> bool {
+    row.endpoint.pin_state.as_ref().is_some_and(|state| {
+        state
+            .pane_ids
+            .iter()
+            .any(|pane_id| pane_id == &row.agent.pane_id)
+    })
+}
+
+/// `leading_block` is priority sort and any agent view that defines its own
+/// sort: pinned rows form one block ordered by machine, then the sort already
+/// applied. Spaces keeps pins inside each machine's contiguous run.
+fn apply_aggregate_pin_order(rows: &mut [AggregateAgentRow<'_>], leading_block: bool) {
+    if rows.is_empty() {
+        return;
+    }
+    if !leading_block {
+        let mut start = 0;
+        while start < rows.len() {
+            let machine = rows[start].endpoint.endpoint_index;
+            let mut end = start + 1;
+            while end < rows.len() && rows[end].endpoint.endpoint_index == machine {
+                end += 1;
+            }
+            rows[start..end].sort_by_key(|row| u8::from(!pane_pinned(row)));
+            start = end;
+        }
+        return;
+    }
+    rows.sort_by_key(|row| u8::from(!pane_pinned(row)));
+    let pinned_count = rows.iter().take_while(|row| pane_pinned(row)).count();
+    rows[..pinned_count].sort_by_key(|row| row.endpoint.endpoint_index);
 }
 
 fn sort_aggregate_rows(
