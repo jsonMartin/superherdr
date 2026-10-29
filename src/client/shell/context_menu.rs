@@ -602,9 +602,10 @@ impl ClientShellState {
             ),
             ClientContextMenuTarget::Agent {
                 endpoint_id,
+                boot_id,
                 pane_id,
                 ..
-            } => self.activate_agent_pin(endpoint_id, pane_id, action, outcome),
+            } => self.activate_agent_pin(endpoint_id, boot_id, pane_id, action, outcome),
         }
         outcome.repaint = true;
     }
@@ -1191,21 +1192,23 @@ impl ClientShellState {
         if !self.endpoint_advertises_pins(&endpoint_id) {
             return;
         }
-        let is_agent = self
+        let boot_id = self
             .endpoints
             .iter()
             .find(|endpoint| endpoint.endpoint_id == endpoint_id)
             .and_then(|endpoint| endpoint.snapshot.as_deref())
-            .is_some_and(|snapshot| snapshot.agents.iter().any(|agent| agent.pane_id == pane_id));
-        if !is_agent {
+            .filter(|snapshot| snapshot.agents.iter().any(|agent| agent.pane_id == pane_id))
+            .map(|snapshot| snapshot.boot_id.clone());
+        let Some(boot_id) = boot_id else {
             return;
-        }
+        };
         let pinned = self
             .pin_state_for(&endpoint_id)
             .is_some_and(|state| state.pane_ids.iter().any(|id| id == &pane_id));
         self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
             target: ClientContextMenuTarget::Agent {
                 endpoint_id,
+                boot_id,
                 pane_id,
                 pinned,
             },
@@ -1218,6 +1221,7 @@ impl ClientShellState {
     fn activate_agent_pin(
         &mut self,
         endpoint_id: ClientEndpointId,
+        boot_id: String,
         pane_id: String,
         action: ClientContextMenuAction,
         outcome: &mut ClientShellInput,
@@ -1229,9 +1233,19 @@ impl ClientShellState {
         if !self.endpoint_is_online(&endpoint_id) {
             return;
         }
-        let Some(boot_id) = self.endpoint_boot_id(&endpoint_id).map(str::to_owned) else {
+        let pane_still_here = self
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+            .and_then(|endpoint| endpoint.snapshot.as_deref())
+            .is_some_and(|snapshot| {
+                snapshot.boot_id == boot_id
+                    && (snapshot.agents.iter().any(|agent| agent.pane_id == pane_id)
+                        || snapshot.panes.iter().any(|pane| pane.pane_id == pane_id))
+            });
+        if !pane_still_here {
             return;
-        };
+        }
         self.push_endpoint_method_for(
             &endpoint_id,
             boot_id,

@@ -796,7 +796,13 @@ fn mobile_items(
         );
         let pinned = endpoint
             .pin_state
-            .map(|state| state.workspace_ids.iter().cloned().collect::<HashSet<_>>())
+            .map(|state| {
+                state
+                    .workspace_ids
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<HashSet<_>>()
+            })
             .unwrap_or_default();
         for entry in super::render::workspace_entries_with_filter(
             endpoint.snapshot,
@@ -865,7 +871,7 @@ fn mobile_items(
             } else {
                 palette.text
             };
-            let workspace_pinned = pinned.contains(&workspace.workspace_id);
+            let workspace_pinned = pinned.contains(workspace.workspace_id.as_str());
             let status = if endpoint.stale() {
                 palette.overlay0
             } else {

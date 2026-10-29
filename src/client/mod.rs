@@ -2305,21 +2305,34 @@ async fn run_client_loop(
                                 error,
                             }) => {
                                 let resize = state.shell.as_mut().and_then(|shell| {
-                                    let previous_size = shell
-                                        .surface_size(state.reported_size.0, state.reported_size.1);
-                                    let _ = shell.clear_endpoint_snooze_state(&endpoint_id);
-                                    let next_size = shell
-                                        .surface_size(state.reported_size.0, state.reported_size.1);
-                                    (previous_size != next_size).then(|| {
-                                        shell.invalidate_pane_surface();
-                                        client_shell_resize_message(
-                                            shell,
+                                    // A pin failure must not resize. Only clearing snooze
+                                    // can change the pane surface, and its returned actions
+                                    // stay discarded here.
+                                    let previous_size =
+                                        (feature == "workspace_snooze.state").then(|| {
+                                            shell.surface_size(
+                                                state.reported_size.0,
+                                                state.reported_size.1,
+                                            )
+                                        });
+                                    let _ =
+                                        shell.apply_optional_feature_error(&endpoint_id, &feature);
+                                    previous_size.and_then(|previous_size| {
+                                        let next_size = shell.surface_size(
                                             state.reported_size.0,
                                             state.reported_size.1,
-                                            state.reported_cell_size.0,
-                                            state.reported_cell_size.1,
-                                            state.pixel_geometry_exact,
-                                        )
+                                        );
+                                        (previous_size != next_size).then(|| {
+                                            shell.invalidate_pane_surface();
+                                            client_shell_resize_message(
+                                                shell,
+                                                state.reported_size.0,
+                                                state.reported_size.1,
+                                                state.reported_cell_size.0,
+                                                state.reported_cell_size.1,
+                                                state.pixel_geometry_exact,
+                                            )
+                                        })
                                     })
                                 });
                                 if let Some(resize) = resize {
@@ -2331,9 +2344,6 @@ async fn run_client_loop(
                                     );
                                 }
                                 if let Some(shell) = state.shell.as_mut() {
-                                    if feature == "pin.state" {
-                                        shell.clear_endpoint_pin_state(&endpoint_id);
-                                    }
                                     let _ =
                                         shell.receive_endpoint_error(format!("{feature}: {error}"));
                                     if let Some(frame) =

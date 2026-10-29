@@ -25,7 +25,7 @@ pub(super) struct AgentRow {
 pub(super) fn ordered_agent_pane_ids(
     snapshot: &ClientShellSnapshot,
     sort: crate::config::AgentPanelSortConfig,
-    pinned: &HashSet<String>,
+    pinned: &HashSet<&str>,
 ) -> Vec<String> {
     ordered_agent_pane_ids_with_filter(snapshot, sort, pinned, |_| true)
 }
@@ -35,7 +35,7 @@ pub(super) fn ordered_agent_pane_ids(
 pub(super) fn ordered_agent_pane_ids_with_filter(
     snapshot: &ClientShellSnapshot,
     sort: crate::config::AgentPanelSortConfig,
-    pinned: &HashSet<String>,
+    pinned: &HashSet<&str>,
     filter: impl Fn(&ClientShellAgent) -> bool,
 ) -> Vec<String> {
     let pinned_first = |agents: Vec<&ClientShellAgent>| {
@@ -44,12 +44,12 @@ pub(super) fn ordered_agent_pane_ids_with_filter(
             agents
                 .iter()
                 .copied()
-                .filter(|agent| pinned.contains(&agent.pane_id)),
+                .filter(|agent| pinned.contains(agent.pane_id.as_str())),
         );
         ordered.extend(
             agents
                 .iter()
-                .filter(|agent| !pinned.contains(&agent.pane_id)),
+                .filter(|agent| !pinned.contains(agent.pane_id.as_str())),
         );
         ordered
             .into_iter()
@@ -123,7 +123,7 @@ pub(super) fn render_agent_panel_with_filter(
     config: &ClientShellConfig,
     agent_scroll: &mut usize,
     hits: &mut ShellHitMap,
-    pinned: &HashSet<String>,
+    pinned: &HashSet<&str>,
     filter: impl Fn(&ClientShellAgent) -> bool,
 ) {
     if !render_agent_panel_header(
@@ -329,7 +329,7 @@ pub(super) fn agent_rows(
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
     machine: Option<&str>,
-    pinned: &HashSet<String>,
+    pinned: &HashSet<&str>,
 ) -> Vec<AgentRow> {
     agent_rows_with_filter(snapshot, config, machine, pinned, |_| true)
 }
@@ -338,7 +338,7 @@ pub(super) fn agent_rows_with_filter(
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
     machine: Option<&str>,
-    pinned: &HashSet<String>,
+    pinned: &HashSet<&str>,
     filter: impl Fn(&ClientShellAgent) -> bool,
 ) -> Vec<AgentRow> {
     ordered_agent_pane_ids_with_filter(snapshot, config.agent_panel_sort, pinned, filter)
@@ -349,7 +349,7 @@ pub(super) fn agent_rows_with_filter(
                 &pane_id,
                 config,
                 machine,
-                pinned.contains(&pane_id),
+                pinned.contains(pane_id.as_str()),
             )
         })
         .collect()

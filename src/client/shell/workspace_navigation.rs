@@ -111,7 +111,13 @@ impl ClientShellState {
             let pinned = endpoint
                 .pin_state
                 .as_ref()
-                .map(|state| state.workspace_ids.iter().cloned().collect::<HashSet<_>>())
+                .map(|state| {
+                    state
+                        .workspace_ids
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<HashSet<_>>()
+                })
                 .unwrap_or_default();
             let entries = if self.sidebar_collapsed && !mobile && surface_available {
                 let visible = super::focus_snooze::visible_workspace_ids(
@@ -123,7 +129,7 @@ impl ClientShellState {
                 );
                 let any_visible_pin = snapshot.workspaces.iter().any(|workspace| {
                     visible.contains(&workspace.workspace_id)
-                        && pinned.contains(&workspace.workspace_id)
+                        && pinned.contains(workspace.workspace_id.as_str())
                 });
                 if any_visible_pin {
                     super::sidebar::pinned_flat_entries(snapshot, &pinned, |workspace| {

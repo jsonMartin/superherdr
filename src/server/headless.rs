@@ -237,6 +237,10 @@ pub struct HeadlessServer {
     pub(crate) pin_store: Option<crate::server::pin_store::PinStore>,
     /// Participating client connections subscribed to pin state.
     pub(crate) pin_subscribers: HashSet<u64>,
+    /// Public ids from the last pin state this server published. A move can
+    /// change these without changing which internal ids are pinned.
+    published_pin_workspace_ids: Vec<String>,
+    published_pin_pane_ids: Vec<String>,
     /// Outer window title last pushed, paired with the client that received it.
     /// Keying on the client means a newly attached terminal is written to even
     /// when the title itself has not changed, without every code path that
@@ -333,6 +337,14 @@ fn spawn_windows_client_accept_thread(
     })
 }
 
+fn same_public_ids(left: &[String], right: &[String]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    let right: HashSet<&str> = right.iter().map(String::as_str).collect();
+    left.iter().all(|id| right.contains(id.as_str()))
+}
+
 impl HeadlessServer {
     /// Creates and starts the headless server.
     ///
@@ -410,7 +422,7 @@ impl HeadlessServer {
         if let Some(notice) = pin_notice {
             warn!(notice = %notice, "pin state could not be restored");
         }
-        Ok(Self {
+        let mut server = Self {
             app,
             #[cfg(unix)]
             api_tx,
@@ -436,6 +448,8 @@ impl HeadlessServer {
             pins,
             pin_store,
             pin_subscribers: HashSet::new(),
+            published_pin_workspace_ids: Vec::new(),
+            published_pin_pane_ids: Vec::new(),
             client_shell_boot_id,
             sent_window_title: None,
             api_window_title: None,
@@ -460,7 +474,9 @@ impl HeadlessServer {
             server_stop,
             server_event_rx,
             server_event_tx,
-        })
+        };
+        server.remember_published_pins();
+        Ok(server)
     }
 
     /// Runs the headless server event loop until shutdown.
@@ -2388,9 +2404,23 @@ impl HeadlessServer {
         any_sent
     }
 
+    fn published_pin_identity_changed(&self) -> bool {
+        let state = self.pin_state();
+        !same_public_ids(&state.workspace_ids, &self.published_pin_workspace_ids)
+            || !same_public_ids(&state.pane_ids, &self.published_pin_pane_ids)
+    }
+
+    fn remember_published_pins(&mut self) {
+        let state = self.pin_state();
+        self.published_pin_workspace_ids = state.workspace_ids;
+        self.published_pin_pane_ids = state.pane_ids;
+    }
+
     /// Applies a pin change, checkpointing the session before every pin save.
-    /// Returns whether pins changed; `Err` carries a persistence error message
-    /// and leaves the in-memory pins untouched.
+    /// A failed checkpoint or `pins.json` write keeps the updated in-memory
+    /// pins and still returns `Ok(true)` so callers broadcast the new state.
+    /// `Ok(false)` is an idempotent request and must not broadcast. Not-found
+    /// is rejected before this runs.
     fn commit_pin_change<F>(&mut self, change: F) -> Result<bool, String>
     where
         F: FnOnce(&mut crate::server::pins::PinManager) -> bool,
@@ -2399,62 +2429,76 @@ impl HeadlessServer {
         if !change(&mut manager) {
             return Ok(false);
         }
+        self.pins = manager;
+        self.remember_published_pins();
         let Some(store) = self.pin_store.clone() else {
-            self.pins = manager;
             return Ok(true);
         };
-        let staged = store
-            .staged(&manager, &self.app.state.workspaces)
-            .map_err(|error| {
-                warn!(error = %error, "pin state could not be staged");
-                error
-            })?;
-        self.app.checkpoint_session_for_snooze().map_err(|err| {
-            warn!(err = %err, "failed to checkpoint session before pin save");
-            format!("failed to checkpoint session: {err}")
-        })?;
+        let staged = match store.staged(&self.pins, &self.app.state.workspaces) {
+            Ok(staged) => staged,
+            Err(error) => {
+                warn!(error = %error, "pin state could not be staged; keeping in-memory pins");
+                return Ok(true);
+            }
+        };
+        if let Err(err) = self.app.checkpoint_session_for_snooze() {
+            warn!(err = %err, "failed to checkpoint session before pin save; keeping in-memory pins");
+            return Ok(true);
+        }
         if let Err(err) = staged.save() {
             warn!(err = %err, "failed to save pin state; keeping in-memory pins");
-            return Err(err.to_string());
+            return Ok(true);
         }
-        self.pins = manager;
         self.pin_store = Some(staged);
         Ok(true)
     }
 
-    /// Prunes pins whose workspace or pane is gone and re-persists the store
-    /// when a structural change (close, move) made the persisted document stale.
+    /// Prunes pins whose workspace or pane is gone, and publishes a new
+    /// revision when a move changed a pinned item's public id. One structural
+    /// reconcile bumps the revision at most once. Persistence failure still
+    /// broadcasts the in-memory state.
     pub(crate) fn sync_pins_for_structural_change(&mut self) {
         let pruned = self.pins.retain_live(&self.app.state.workspaces);
-        let Some(store) = self.pin_store.clone() else {
-            if pruned {
-                self.broadcast_pin_state();
+        let identity_changed = self.published_pin_identity_changed();
+        if !pruned && !identity_changed {
+            let Some(store) = self.pin_store.clone() else {
+                return;
+            };
+            let Ok(staged) = store.staged(&self.pins, &self.app.state.workspaces) else {
+                return;
+            };
+            if store.same_document(&staged) {
+                return;
             }
-            return;
-        };
-        let Ok(staged) = store.staged(&self.pins, &self.app.state.workspaces) else {
-            if pruned {
-                self.broadcast_pin_state();
-            }
-            return;
-        };
-        if !pruned && store.same_document(&staged) {
-            return;
-        }
-        if let Err(err) = self.app.checkpoint_session_for_snooze() {
-            warn!(err = %err, "failed to checkpoint session before pin prune save");
+            self.persist_staged_pins(staged);
             self.broadcast_pin_state();
             return;
         }
-        match staged.save() {
-            Ok(()) => {
-                self.pin_store = Some(staged);
-            }
-            Err(err) => {
-                warn!(err = %err, "failed to save pruned pin state; keeping previous document");
+        if identity_changed && !pruned {
+            self.pins.note_public_identity_changed();
+        }
+        if let Some(store) = self.pin_store.clone() {
+            if let Ok(staged) = store.staged(&self.pins, &self.app.state.workspaces) {
+                if pruned || identity_changed || !store.same_document(&staged) {
+                    self.persist_staged_pins(staged);
+                }
             }
         }
+        self.remember_published_pins();
         self.broadcast_pin_state();
+    }
+
+    fn persist_staged_pins(&mut self, staged: crate::server::pin_store::PinStore) {
+        if let Err(err) = self.app.checkpoint_session_for_snooze() {
+            warn!(err = %err, "failed to checkpoint session before pin save; keeping in-memory pins");
+            return;
+        }
+        match staged.save() {
+            Ok(()) => self.pin_store = Some(staged),
+            Err(err) => {
+                warn!(err = %err, "failed to save pin state; keeping previous document");
+            }
+        }
     }
 
     fn shutdown_terminal_stream_clients(&mut self, terminal_id: &str, reason: String) {
@@ -4455,10 +4499,15 @@ impl HeadlessServer {
             let structural_change = matches!(
                 &msg.request.method,
                 api::schema::Method::WorkspaceClose(_)
+                    | api::schema::Method::WorkspaceMove(_)
+                    | api::schema::Method::WorkspaceMoveBlock(_)
                     | api::schema::Method::PaneClose(_)
-                    | api::schema::Method::TabClose(_)
                     | api::schema::Method::PaneMove(_)
+                    | api::schema::Method::PaneSwap(_)
+                    | api::schema::Method::TabClose(_)
+                    | api::schema::Method::TabMove(_)
                     | api::schema::Method::LayoutApply(_)
+                    | api::schema::Method::PluginPaneClose(_)
             );
             let response = self
                 .app

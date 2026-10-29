@@ -83,6 +83,13 @@ impl PinManager {
         changed
     }
 
+    /// A move kept the pin but published a different public id. Membership
+    /// changes bump through `set_*` and `retain_live`; this covers the case
+    /// where the same internal id is now a different public id.
+    pub(crate) fn note_public_identity_changed(&mut self) {
+        self.revision = self.revision.saturating_add(1);
+    }
+
     /// Drops pins whose workspace or pane no longer exists; returns whether
     /// anything changed.
     pub(crate) fn retain_live(&mut self, workspaces: &[Workspace]) -> bool {
@@ -134,6 +141,9 @@ mod tests {
         assert_eq!(manager.revision(), 3);
         assert!(manager.set_pane(pane_id, false));
         assert_eq!(manager.revision(), 4);
+
+        manager.note_public_identity_changed();
+        assert_eq!(manager.revision(), 5);
     }
 
     #[test]

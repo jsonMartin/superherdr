@@ -471,7 +471,7 @@ fn pinned_linked_worktree_escapes_its_unpinned_parent_even_when_collapsed() {
 }
 
 #[test]
-fn unpinned_compact_sidebar_keeps_snapshot_order() {
+fn unpinned_compact_keyboard_navigation_hides_collapsed_children() {
     let mut parent = linked(workspace("ws_1", 1), "repo", false);
     parent.focused = true;
     let standalone = workspace("ws_2", 2);
@@ -486,7 +486,16 @@ fn unpinned_compact_sidebar_keeps_snapshot_order() {
             .into_iter()
             .map(|(id, _)| id)
             .collect::<Vec<_>>(),
-        ["ws_1", "ws_2", "ws_3"]
+        ["ws_1", "ws_2"],
+        "compact keyboard navigation hides a collapsed child when nothing is pinned"
+    );
+    assert_eq!(
+        compose_hits(&mut state, true)
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect::<Vec<_>>(),
+        ["ws_1", "ws_2", "ws_3"],
+        "the compact strip stays in snapshot order when nothing is pinned"
     );
     state.sidebar_collapsed = false;
     assert_eq!(
@@ -1061,4 +1070,195 @@ fn failed_pin_response_shows_the_existing_notice_and_keeps_pins() {
     assert_eq!(applied.revision, 5);
     assert_eq!(applied.workspace_ids, ["ws_9"]);
     assert_eq!(applied.pane_ids, ["pane_9"]);
+}
+
+fn local_workspace_hits(state: &ClientShellState) -> Vec<String> {
+    state
+        .hits
+        .workspaces
+        .iter()
+        .filter(|hit| hit.endpoint_id.is_local())
+        .map(|hit| hit.workspace_id.clone())
+        .collect()
+}
+
+fn snooze_fixture() -> WorkspaceSnoozeState {
+    WorkspaceSnoozeState {
+        boot_id: "boot-1".into(),
+        revision: 1,
+        records: vec![WorkspaceSnoozeRecord {
+            workspace_id: "ws_1".into(),
+            boot_id: "boot-1".into(),
+            deadline_unix_ms: i64::MAX,
+            revision: 1,
+        }],
+        project_records: Vec::new(),
+        persistence: None,
+    }
+}
+
+#[test]
+fn optional_feature_error_clears_only_the_failed_feature() {
+    let mut state = shell(super::snapshot());
+    state.set_endpoint_pin_state(
+        &ClientEndpointId::Local,
+        pins("boot-1", 2, &["ws_1"], &["pane_1"]),
+    );
+    state.set_endpoint_snooze_state(&ClientEndpointId::Local, snooze_fixture());
+    assert!(state.pin_state.is_some() && state.endpoints[0].pin_state.is_some());
+    assert!(state.snooze_state.is_some() && state.endpoints[0].snooze_state.is_some());
+
+    let actions = state.apply_optional_feature_error(&ClientEndpointId::Local, "pin.state");
+    assert!(actions.is_empty());
+    assert!(state.pin_state.is_none() && state.endpoints[0].pin_state.is_none());
+    assert!(state.snooze_state.is_some() && state.endpoints[0].snooze_state.is_some());
+
+    state.set_endpoint_pin_state(
+        &ClientEndpointId::Local,
+        pins("boot-1", 2, &["ws_1"], &["pane_1"]),
+    );
+    let _ = state.apply_optional_feature_error(&ClientEndpointId::Local, "workspace_snooze.state");
+    assert!(state.snooze_state.is_none() && state.endpoints[0].snooze_state.is_none());
+    assert_eq!(state.pin_state.as_ref().expect("pins stay").revision, 2);
+    assert!(state.endpoints[0].pin_state.is_some());
+
+    state.set_endpoint_snooze_state(&ClientEndpointId::Local, snooze_fixture());
+    let actions = state.apply_optional_feature_error(&ClientEndpointId::Local, "session.snapshot");
+    assert!(actions.is_empty());
+    assert!(state.pin_state.is_some() && state.snooze_state.is_some());
+    assert!(state.endpoints[0].pin_state.is_some() && state.endpoints[0].snooze_state.is_some());
+}
+
+#[test]
+fn agent_menu_pins_only_while_the_captured_boot_still_matches() {
+    let mut snapshot = super::snapshot();
+    snapshot.agents = vec![agent("pane_1", "ws_1", "agent", AgentStatus::Idle, 1)];
+    let mut state = shell(snapshot);
+    advertise_pins(&mut state);
+    state.open_agent_context_menu(ClientEndpointId::Local, "pane_1".into(), 1, 1);
+    let pin_index = menu_labels(&state)
+        .iter()
+        .position(|label| label == "Pin agent")
+        .expect("pin agent");
+
+    state.endpoints[0]
+        .snapshot
+        .as_mut()
+        .expect("endpoint snapshot")
+        .boot_id = "boot-2".into();
+    state.snapshot.as_mut().expect("active snapshot").boot_id = "boot-2".into();
+    let mut outcome = ClientShellInput::default();
+    state.activate_context_menu_item(pin_index, &mut outcome);
+    assert!(outcome.actions.is_empty());
+    assert!(state.pending_requests.is_empty());
+
+    state.endpoints[0]
+        .snapshot
+        .as_mut()
+        .expect("endpoint snapshot")
+        .boot_id = "boot-1".into();
+    state.snapshot.as_mut().expect("active snapshot").boot_id = "boot-1".into();
+    state.open_agent_context_menu(ClientEndpointId::Local, "pane_1".into(), 1, 1);
+    let pin_index = menu_labels(&state)
+        .iter()
+        .position(|label| label == "Pin agent")
+        .expect("pin agent after the boot matches again");
+    let mut outcome = ClientShellInput::default();
+    state.activate_context_menu_item(pin_index, &mut outcome);
+    assert!(matches!(
+        outcome.actions.as_slice(),
+        [ClientShellAction::Endpoint { boot_id, request, .. }]
+            if boot_id == "boot-1"
+                && matches!(
+                    &request.method,
+                    Method::PanePin(PanePinParams { pane_id, pinned: true }) if pane_id == "pane_1"
+                )
+    ));
+    assert!(state.pending_requests.values().any(|pending| {
+        pending.boot_id == "boot-1"
+            && matches!(
+                &pending.kind,
+                PendingEndpointKind::Pin { endpoint_id } if endpoint_id == &ClientEndpointId::Local
+            )
+    }));
+}
+
+#[test]
+fn compact_keyboard_navigation_hides_collapsed_children_when_nothing_is_pinned() {
+    let mut parent = linked(workspace("P", 1), "repo", false);
+    parent.focused = true;
+    let standalone = workspace("B", 2);
+    let child = linked(workspace("P1", 3), "repo", true);
+    let mut state = shell(snapshot_of(vec![parent, standalone, child]));
+    state.collapsed_groups.insert("repo".into());
+    state.sidebar_collapsed = true;
+    state.sidebar_collapsed_manual = true;
+
+    assert_eq!(
+        nav_rows(&state),
+        [("P".to_owned(), false), ("B".to_owned(), false)]
+    );
+    assert!(nav_rows(&state).iter().all(|(id, _)| id != "P1"));
+    assert_eq!(shortcut_workspace(&mut state, 2), None);
+
+    pin_local(&mut state, 1, &["B"], &[]);
+    let pinned_rows = nav_rows(&state);
+    assert_eq!(pinned_rows.first().map(|(id, _)| id.as_str()), Some("B"));
+    assert!(
+        pinned_rows.iter().any(|(id, _)| id == "P1"),
+        "a visible pin keeps compact keyboard navigation on the pinned block, children included"
+    );
+}
+
+#[test]
+fn expanded_endpoint_navigation_skips_a_collapsed_unpinned_child() {
+    let mut parent = linked(workspace("P", 1), "repo", false);
+    parent.focused = true;
+    let sibling = linked(workspace("P1", 2), "repo", true);
+    let pinned_child = linked(workspace("P2", 3), "repo", true);
+    let mut state = shell(snapshot_of(vec![parent, sibling, pinned_child]));
+    let mut remote_snapshot = super::snapshot();
+    remote_snapshot.boot_id = "remote-boot".into();
+    let remote = attach_remote(&mut state, remote_snapshot);
+    state.set_endpoint_status(&remote, ClientEndpointStatus::Reconnecting);
+    pin_local(&mut state, 1, &["P2"], &[]);
+    state.collapsed_groups.insert("repo".into());
+
+    let _ = compose_hits(&mut state, false);
+    assert_eq!(local_workspace_hits(&state), ["P2", "P"]);
+    let mut outcome = ClientShellInput::default();
+    assert!(state.handle_endpoint_navigation(KeybindAction::NextWorkspace, &mut outcome));
+    assert!(matches!(
+        outcome.actions.as_slice(),
+        [ClientShellAction::ActivateEndpoint {
+            target: Some(ClientEndpointFocusTarget::Workspace(workspace_id)),
+            ..
+        }] if workspace_id == "P2"
+    ));
+}
+
+#[test]
+fn compact_endpoint_navigation_without_pins_follows_snapshot_order() {
+    let mut parent = linked(workspace("P", 1), "repo", false);
+    parent.focused = true;
+    let standalone = workspace("B", 2);
+    let child = linked(workspace("P1", 3), "repo", true);
+    let mut state = shell(snapshot_of(vec![parent, standalone, child]));
+    let mut remote_snapshot = super::snapshot();
+    remote_snapshot.boot_id = "remote-boot".into();
+    let remote = attach_remote(&mut state, remote_snapshot);
+    state.set_endpoint_status(&remote, ClientEndpointStatus::Reconnecting);
+    state.collapsed_groups.insert("repo".into());
+
+    let _ = compose_hits(&mut state, true);
+    assert_eq!(local_workspace_hits(&state), ["P", "B", "P1"]);
+    let mut outcome = ClientShellInput::default();
+    assert!(state.handle_endpoint_navigation(KeybindAction::NextWorkspace, &mut outcome));
+    assert!(matches!(
+        outcome.actions.as_slice(),
+        [ClientShellAction::ActivateEndpoint {
+            target: Some(ClientEndpointFocusTarget::Workspace(workspace_id)),
+            ..
+        }] if workspace_id == "B"
+    ));
 }

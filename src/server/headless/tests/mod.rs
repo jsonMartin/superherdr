@@ -132,6 +132,8 @@ fn test_headless_server_with_event_hub(event_hub: api::EventHub) -> HeadlessServ
         pins: crate::server::pins::PinManager::new(),
         pin_store: None,
         pin_subscribers: HashSet::new(),
+        published_pin_workspace_ids: Vec::new(),
+        published_pin_pane_ids: Vec::new(),
         client_shell_boot_id: "test-boot".into(),
         sent_window_title: None,
         api_window_title: None,

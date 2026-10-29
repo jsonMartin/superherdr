@@ -155,7 +155,13 @@ pub(super) fn aggregate_agent_rows<'a>(
         );
         let pinned = endpoint
             .pin_state
-            .map(|state| state.pane_ids.iter().cloned().collect::<HashSet<_>>())
+            .map(|state| {
+                state
+                    .pane_ids
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<HashSet<_>>()
+            })
             .unwrap_or_default();
         for pane_id in super::agent_sidebar::ordered_agent_pane_ids_with_filter(
             endpoint.snapshot,
@@ -190,13 +196,17 @@ pub(super) fn aggregate_agent_rows<'a>(
     rows
 }
 
-fn pane_pinned(row: &AggregateAgentRow<'_>) -> bool {
-    row.endpoint.pin_state.as_ref().is_some_and(|state| {
-        state
-            .pane_ids
-            .iter()
-            .any(|pane_id| pane_id == &row.agent.pane_id)
-    })
+fn pinned_sets_by_endpoint(rows: &[AggregateAgentRow<'_>]) -> HashMap<usize, HashSet<String>> {
+    let mut sets = HashMap::new();
+    for row in rows {
+        sets.entry(row.endpoint.endpoint_index).or_insert_with(|| {
+            row.endpoint
+                .pin_state
+                .map(|state| state.pane_ids.iter().cloned().collect())
+                .unwrap_or_default()
+        });
+    }
+    sets
 }
 
 /// `leading_block` is priority sort and any agent view that defines its own
@@ -206,6 +216,12 @@ fn apply_aggregate_pin_order(rows: &mut [AggregateAgentRow<'_>], leading_block: 
     if rows.is_empty() {
         return;
     }
+    let pinned = pinned_sets_by_endpoint(rows);
+    let is_pinned = |row: &AggregateAgentRow<'_>| {
+        pinned
+            .get(&row.endpoint.endpoint_index)
+            .is_some_and(|pane_ids| pane_ids.contains(&row.agent.pane_id))
+    };
     if !leading_block {
         let mut start = 0;
         while start < rows.len() {
@@ -214,13 +230,13 @@ fn apply_aggregate_pin_order(rows: &mut [AggregateAgentRow<'_>], leading_block: 
             while end < rows.len() && rows[end].endpoint.endpoint_index == machine {
                 end += 1;
             }
-            rows[start..end].sort_by_key(|row| u8::from(!pane_pinned(row)));
+            rows[start..end].sort_by_key(|row| u8::from(!is_pinned(row)));
             start = end;
         }
         return;
     }
-    rows.sort_by_key(|row| u8::from(!pane_pinned(row)));
-    let pinned_count = rows.iter().take_while(|row| pane_pinned(row)).count();
+    rows.sort_by_key(|row| u8::from(!is_pinned(row)));
+    let pinned_count = rows.iter().take_while(|row| is_pinned(row)).count();
     rows[..pinned_count].sort_by_key(|row| row.endpoint.endpoint_index);
 }
 

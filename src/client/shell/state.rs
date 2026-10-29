@@ -595,6 +595,7 @@ pub(super) enum ClientContextMenuTarget {
     },
     Agent {
         endpoint_id: ClientEndpointId,
+        boot_id: String,
         pane_id: String,
         pinned: bool,
     },
@@ -1372,10 +1373,13 @@ impl ClientShellState {
     ) -> Vec<WorkspaceEntry> {
         let pinned = self.pinned_workspace_ids_for(&self.active_endpoint_id);
         let visible = |workspace: &ClientShellWorkspace| self.is_workspace_visible(workspace);
-        // The collapsed strip lists every visible workspace, including children
-        // of a collapsed worktree group. Numbered and next/previous shortcuts
-        // follow that strip. Expanded and mobile keep grouped entries.
-        if self.sidebar_collapsed && !self.mobile_layout_active() {
+        let any_visible_pin = snapshot.workspaces.iter().any(|workspace| {
+            visible(workspace) && pinned.contains(workspace.workspace_id.as_str())
+        });
+        // A visible pin makes the compact strip show pinned blocks, children
+        // included. With nothing pinned, compact keyboard navigation stays on
+        // the grouped order from before pins, so a collapsed child stays hidden.
+        if self.sidebar_collapsed && !self.mobile_layout_active() && any_visible_pin {
             return render::sidebar::pinned_flat_entries(snapshot, &pinned, visible);
         }
         let empty_collapsed_groups = HashSet::new();
@@ -1723,6 +1727,23 @@ impl ClientShellState {
         }
     }
 
+    /// Clears only the feature that failed to decode. A bad pin broadcast must
+    /// not reveal snoozed workspaces, and a bad snooze broadcast must not drop pins.
+    pub(crate) fn apply_optional_feature_error(
+        &mut self,
+        endpoint_id: &ClientEndpointId,
+        feature: &str,
+    ) -> Vec<ClientShellAction> {
+        match feature {
+            "workspace_snooze.state" => self.clear_endpoint_snooze_state(endpoint_id),
+            "pin.state" => {
+                self.clear_endpoint_pin_state(endpoint_id);
+                Vec::new()
+            }
+            _ => Vec::new(),
+        }
+    }
+
     pub(crate) fn clear_endpoint_pin_state(&mut self, endpoint_id: &ClientEndpointId) {
         if let Some(endpoint) = self
             .endpoints
@@ -1749,18 +1770,21 @@ impl ClientShellState {
             .and_then(|endpoint| endpoint.pin_state.as_ref())
     }
 
-    pub(crate) fn pinned_workspace_ids_for(
-        &self,
+    pub(crate) fn pinned_workspace_ids_for<'a>(
+        &'a self,
         endpoint_id: &ClientEndpointId,
-    ) -> HashSet<String> {
+    ) -> HashSet<&'a str> {
         self.pin_state_for(endpoint_id)
-            .map(|state| state.workspace_ids.iter().cloned().collect())
+            .map(|state| state.workspace_ids.iter().map(String::as_str).collect())
             .unwrap_or_default()
     }
 
-    pub(crate) fn pinned_pane_ids_for(&self, endpoint_id: &ClientEndpointId) -> HashSet<String> {
+    pub(crate) fn pinned_pane_ids_for<'a>(
+        &'a self,
+        endpoint_id: &ClientEndpointId,
+    ) -> HashSet<&'a str> {
         self.pin_state_for(endpoint_id)
-            .map(|state| state.pane_ids.iter().cloned().collect())
+            .map(|state| state.pane_ids.iter().map(String::as_str).collect())
             .unwrap_or_default()
     }
 

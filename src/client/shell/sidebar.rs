@@ -62,8 +62,8 @@ pub(crate) fn render_collapsed_sidebar(
     selected_workspace_id: Option<&str>,
     focus_scope: Option<&ClientFocusScope>,
     snooze_state: Option<&crate::api::schema::WorkspaceSnoozeState>,
-    pinned_workspaces: &HashSet<String>,
-    pinned_panes: &HashSet<String>,
+    pinned_workspaces: &HashSet<&str>,
+    pinned_panes: &HashSet<&str>,
     hits: &mut ShellHitMap,
 ) {
     let palette = &config.palette;
@@ -121,7 +121,7 @@ pub(crate) fn render_collapsed_sidebar(
         let status = workspace.agent_status;
         let status_style = Style::default().fg(status_color(status, palette));
         let (icon, pin_prefix) = status_indicator(
-            pinned_workspaces.contains(&workspace.workspace_id),
+            pinned_workspaces.contains(workspace.workspace_id.as_str()),
             status,
             config.status_indicators,
             status_style,
@@ -216,7 +216,7 @@ pub(crate) fn render_collapsed_sidebar(
         );
         let status_style = Style::default().fg(status_color(agent.agent_status, palette));
         let (icon, pin_prefix) = status_indicator(
-            pinned_panes.contains(&agent.pane_id),
+            pinned_panes.contains(agent.pane_id.as_str()),
             agent.agent_status,
             config.status_indicators,
             status_style,
@@ -308,7 +308,8 @@ pub(crate) fn render_sidebar(
         Some(snapshot.boot_id.as_str()),
         &snapshot.workspaces,
     );
-    let (pinned_workspaces, pinned_panes) = active_pin_sets(state);
+    let (pinned_workspaces, pinned_panes) =
+        active_pin_sets(state.endpoints, state.active_endpoint_id);
     let entries = workspace_entries_with_filter(
         snapshot,
         state.collapsed_groups,
@@ -414,7 +415,7 @@ pub(crate) fn render_sidebar(
             rect,
             status,
             config.status_indicators,
-            pinned_workspaces.contains(&workspace.workspace_id),
+            pinned_workspaces.contains(workspace.workspace_id.as_str()),
             entry,
             rows,
             workspace.focused,
@@ -568,7 +569,7 @@ pub(crate) fn render_sidebar(
 pub(crate) fn workspace_entries_with_filter(
     snapshot: &ClientShellSnapshot,
     collapsed_groups: &HashSet<String>,
-    pinned: &HashSet<String>,
+    pinned: &HashSet<&str>,
     filter: impl Fn(&crate::protocol::ClientShellWorkspace) -> bool,
 ) -> Vec<WorkspaceEntry> {
     let mut members = HashMap::<&str, Vec<usize>>::new();
@@ -595,14 +596,25 @@ pub(crate) fn workspace_entries_with_filter(
         .map(|(key, _)| *key)
         .collect::<HashSet<_>>();
     let mut emitted = HashSet::<&str>::new();
-    // Each block is (pinned, entries); partitioned at the end, preserving the
-    // existing relative order within both sections.
-    let mut blocks: Vec<(bool, Vec<WorkspaceEntry>)> = Vec::new();
-    let mut push_block = |pinned_block: bool, entries: Vec<WorkspaceEntry>| {
-        if !entries.is_empty() {
-            blocks.push((pinned_block, entries));
+    // Pinned blocks stay ahead of unpinned blocks, each in encounter order.
+    // Appending into two vectors avoids a block list and a second partition pass.
+    let mut pinned_entries = Vec::new();
+    let mut unpinned_entries = Vec::new();
+    fn push_block(
+        pinned_entries: &mut Vec<WorkspaceEntry>,
+        unpinned_entries: &mut Vec<WorkspaceEntry>,
+        pinned_block: bool,
+        entries: Vec<WorkspaceEntry>,
+    ) {
+        if entries.is_empty() {
+            return;
         }
-    };
+        if pinned_block {
+            pinned_entries.extend(entries);
+        } else {
+            unpinned_entries.extend(entries);
+        }
+    }
     for (index, workspace) in snapshot.workspaces.iter().enumerate() {
         let Some(worktree) = workspace
             .worktree
@@ -610,8 +622,10 @@ pub(crate) fn workspace_entries_with_filter(
             .filter(|worktree| grouped.contains(worktree.key.as_str()))
         else {
             if filter(workspace) {
-                let pinned_block = pinned.contains(&workspace.workspace_id);
+                let pinned_block = pinned.contains(workspace.workspace_id.as_str());
                 push_block(
+                    &mut pinned_entries,
+                    &mut unpinned_entries,
                     pinned_block,
                     vec![WorkspaceEntry {
                         index,
@@ -644,14 +658,14 @@ pub(crate) fn workspace_entries_with_filter(
             .filter(|parent| filter(&snapshot.workspaces[*parent]))
             .collect::<Vec<_>>();
         // The block is pinned when its top workspace is pinned.
-        let block_pinned = visible_parents
-            .first()
-            .is_some_and(|parent| pinned.contains(&snapshot.workspaces[*parent].workspace_id));
+        let block_pinned = visible_parents.first().is_some_and(|parent| {
+            pinned.contains(snapshot.workspaces[*parent].workspace_id.as_str())
+        });
         // A pinned linked worktree under an unpinned parent leaves the group
         // and renders unindented in the pinned section.
         let escapes = |member: &usize| {
             !block_pinned
-                && pinned.contains(&snapshot.workspaces[*member].workspace_id)
+                && pinned.contains(snapshot.workspaces[*member].workspace_id.as_str())
                 && filter(&snapshot.workspaces[*member])
         };
         let mut escaped_children = Vec::new();
@@ -670,6 +684,8 @@ pub(crate) fn workspace_entries_with_filter(
         }
         for parent in visible_parents.iter().copied() {
             push_block(
+                &mut pinned_entries,
+                &mut unpinned_entries,
                 block_pinned,
                 vec![WorkspaceEntry {
                     index: parent,
@@ -694,6 +710,8 @@ pub(crate) fn workspace_entries_with_filter(
                 .collect::<Vec<_>>();
             for child in children {
                 push_block(
+                    &mut pinned_entries,
+                    &mut unpinned_entries,
                     false,
                     vec![WorkspaceEntry {
                         index: child,
@@ -714,6 +732,8 @@ pub(crate) fn workspace_entries_with_filter(
                     && !escapes(member)
             }) {
                 push_block(
+                    &mut pinned_entries,
+                    &mut unpinned_entries,
                     block_pinned,
                     vec![WorkspaceEntry {
                         index: active,
@@ -743,26 +763,30 @@ pub(crate) fn workspace_entries_with_filter(
                     last_child: child_index + 1 == children.len(),
                 });
             }
-            push_block(block_pinned, block);
+            push_block(
+                &mut pinned_entries,
+                &mut unpinned_entries,
+                block_pinned,
+                block,
+            );
         }
         if !escaped_children.is_empty() {
-            push_block(true, escaped_children);
+            push_block(
+                &mut pinned_entries,
+                &mut unpinned_entries,
+                true,
+                escaped_children,
+            );
         }
     }
-    let mut entries = Vec::with_capacity(blocks.iter().map(|(_, block)| block.len()).sum());
-    for (_, block) in blocks.iter().filter(|(pinned, _)| *pinned) {
-        entries.extend(block.iter().copied());
-    }
-    for (_, block) in blocks.iter().filter(|(pinned, _)| !*pinned) {
-        entries.extend(block.iter().copied());
-    }
-    entries
+    pinned_entries.append(&mut unpinned_entries);
+    pinned_entries
 }
 
 pub(crate) fn workspace_entries(
     snapshot: &ClientShellSnapshot,
     collapsed_groups: &HashSet<String>,
-    pinned: &HashSet<String>,
+    pinned: &HashSet<&str>,
 ) -> Vec<WorkspaceEntry> {
     workspace_entries_with_filter(snapshot, collapsed_groups, pinned, |_| true)
 }
@@ -773,13 +797,13 @@ pub(crate) fn workspace_entries(
 /// block order as the expanded sidebar, with children still shown.
 pub(crate) fn pinned_flat_entries(
     snapshot: &ClientShellSnapshot,
-    pinned: &HashSet<String>,
+    pinned: &HashSet<&str>,
     filter: impl Fn(&crate::protocol::ClientShellWorkspace) -> bool,
 ) -> Vec<WorkspaceEntry> {
     let any_pinned = snapshot
         .workspaces
         .iter()
-        .any(|workspace| filter(workspace) && pinned.contains(&workspace.workspace_id));
+        .any(|workspace| filter(workspace) && pinned.contains(workspace.workspace_id.as_str()));
     if any_pinned {
         workspace_entries_with_filter(snapshot, &HashSet::new(), pinned, filter)
     } else {
@@ -797,17 +821,39 @@ pub(crate) fn pinned_flat_entries(
     }
 }
 
-fn active_pin_sets(state: &ShellRenderState<'_>) -> (HashSet<String>, HashSet<String>) {
-    let pin = state
-        .endpoints
+/// The order a sidebar actually draws for one endpoint.
+///
+/// Compact strips use snapshot order until a visible workspace is pinned, then
+/// the pinned block order with children kept visible. Expanded sidebars use
+/// the real collapsed-group set. Navigation across machines uses this same
+/// builder so next/previous cannot walk a row the sidebar hid.
+pub(crate) fn rendered_workspace_entries(
+    snapshot: &ClientShellSnapshot,
+    collapsed_groups: &HashSet<String>,
+    pinned: &HashSet<&str>,
+    sidebar_collapsed: bool,
+    filter: impl Fn(&crate::protocol::ClientShellWorkspace) -> bool,
+) -> Vec<WorkspaceEntry> {
+    if sidebar_collapsed {
+        pinned_flat_entries(snapshot, pinned, filter)
+    } else {
+        workspace_entries_with_filter(snapshot, collapsed_groups, pinned, filter)
+    }
+}
+
+pub(super) fn active_pin_sets<'a>(
+    endpoints: &'a [ClientShellEndpoint],
+    active_endpoint_id: &ClientEndpointId,
+) -> (HashSet<&'a str>, HashSet<&'a str>) {
+    let pin = endpoints
         .iter()
-        .find(|endpoint| &endpoint.endpoint_id == state.active_endpoint_id)
+        .find(|endpoint| &endpoint.endpoint_id == active_endpoint_id)
         .and_then(|endpoint| endpoint.pin_state.as_ref());
     let workspaces = pin
-        .map(|pin| pin.workspace_ids.iter().cloned().collect())
+        .map(|pin| pin.workspace_ids.iter().map(String::as_str).collect())
         .unwrap_or_default();
     let panes = pin
-        .map(|pin| pin.pane_ids.iter().cloned().collect())
+        .map(|pin| pin.pane_ids.iter().map(String::as_str).collect())
         .unwrap_or_default();
     (workspaces, panes)
 }

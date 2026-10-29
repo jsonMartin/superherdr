@@ -356,6 +356,7 @@ fn enable_pin_persistence(server: &mut HeadlessServer, pin_path: std::path::Path
     assert!(notice.is_none());
     server.pins = pins;
     server.pin_store = Some(store);
+    server.remember_published_pins();
 }
 
 fn read_pin_document(pin_path: &std::path::Path) -> serde_json::Value {
@@ -420,6 +421,9 @@ fn pinned_pane_moves_update_persistence_and_survive_restore() {
         let state = server.pin_state();
         let moved_pane_id = public_pane(&server, destination_ws_idx, pane_id);
         assert_eq!(state.pane_ids, vec![moved_pane_id]);
+        // Two pins then one reconcile: membership loss must not bump again
+        // when the public id also changed.
+        assert_eq!(state.revision, 3);
         if source_removed {
             assert!(state.workspace_ids.is_empty());
         } else {
@@ -511,51 +515,409 @@ fn pinned_pane_moves_update_persistence_and_survive_restore() {
 }
 
 #[test]
-fn split_pin_and_restore_do_not_wait_for_the_session_save_debounce() {
+fn split_pin_restores_from_the_checkpointed_session() {
     let _persist_lock = PERSIST_TEST_LOCK.lock().expect("persist test lock");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("restore runtime");
+    let _runtime_guard = runtime.enter();
     let temp_home = TempConfigHome::new("split");
     let pin_path = temp_home.data_dir().join("pins.json");
     let mut server = pin_server();
-    // Split without the API so no PTY is spawned; the pin path under test is
-    // durability timing, not splitting.
+    // Split without the API so the server under test does not spawn a PTY.
+    // The checkpoint inside the pin response is what makes the split durable.
     let split_pane =
         server.app.state.workspaces[0].test_split(ratatui::layout::Direction::Horizontal);
     server.app.state.ensure_test_terminals();
     enable_pin_persistence(&mut server, pin_path.clone());
 
+    let lifetime_id = server.app.state.workspaces[0].lifetime_id.clone();
     let split_pane_id = public_pane(&server, 0, split_pane);
     let state = api_pin(&mut server, "pin-pane", pane_pin(&split_pane_id, true)).expect("pane pin");
     assert_eq!(state.revision, 1);
 
-    // The pin save is synchronous: pins.json already holds the split pane's
-    // public number, even though the session save stays debounced.
     let document = read_pin_document(&pin_path);
     let agents = document["agents"].as_array().expect("agents array");
     assert_eq!(agents.len(), 1);
     assert_eq!(agents[0]["pane_number"], 2);
     assert_eq!(
         agents[0]["workspace_lifetime_id"].as_str(),
-        Some(server.app.state.workspaces[0].lifetime_id.as_str())
+        Some(lifetime_id.as_str())
     );
 
-    // Restore into a fresh manager with remapped pane ids, without waiting
-    // for the debounced session save.
-    let lifetime_id = server.app.state.workspaces[0].lifetime_id.clone();
-    let mut restored = crate::workspace::Workspace::test_new("restored");
-    restored.lifetime_id = lifetime_id;
-    restored.test_split(ratatui::layout::Direction::Horizontal);
-    let mut restored_manager = crate::server::pins::PinManager::new();
-    let (_, notice) = crate::server::pin_store::PinStore::load(
-        pin_path,
-        std::slice::from_ref(&restored),
-        &mut restored_manager,
+    let snapshot = crate::persist::load().expect("checkpointed session.json");
+    let (events_tx, _events_rx) = tokio::sync::mpsc::channel(8);
+    #[cfg(windows)]
+    let shell = r"C:\Windows\System32\whoami.exe";
+    #[cfg(not(windows))]
+    let shell = "/bin/sh";
+    let (workspaces, _terminals, runtimes) = crate::persist::restore(
+        &snapshot,
+        None,
+        24,
+        80,
+        1_048_576,
+        shell,
+        crate::config::ShellModeConfig::NonLogin,
+        false,
+        events_tx,
+        std::sync::Arc::new(tokio::sync::Notify::new()),
+        std::sync::Arc::new(crate::render_signal::RenderSignal::new()),
     );
-    assert!(notice.is_none());
-    let restored_pane = restored
+    let restored_workspace = workspaces
+        .iter()
+        .find(|workspace| workspace.lifetime_id == lifetime_id)
+        .expect("restored workspace");
+    let restored_pane = restored_workspace
         .public_pane_numbers
         .iter()
         .find_map(|(pane_id, number)| (*number == 2).then_some(*pane_id))
-        .expect("restored split pane");
+        .expect("restored pane number 2");
+    let mut restored_manager = crate::server::pins::PinManager::new();
+    let (_, notice) =
+        crate::server::pin_store::PinStore::load(pin_path, &workspaces, &mut restored_manager);
+    assert!(notice.is_none());
     assert!(restored_manager.is_pane_pinned(restored_pane));
+    for (_, runtime) in runtimes {
+        runtime.shutdown();
+    }
+    shutdown_test_runtimes(&mut server);
+}
+
+fn subscribe_pin_client(
+    server: &mut HeadlessServer,
+    client_id: u64,
+) -> std::sync::mpsc::Receiver<Vec<u8>> {
+    let (writer, control_rx, _render_rx) = test_client_writer();
+    assert!(
+        server.handle_server_event(ServerEvent::ClientShellConnected {
+            surface_reuse: false,
+            surface_delta: false,
+            surface_scroll: false,
+            client_id,
+            surface_cols: 80,
+            surface_rows: 24,
+            cell_width_px: 0,
+            cell_height_px: 0,
+            pixel_mouse: false,
+            direct_graphics: false,
+            endpoint_keybindings: false,
+            mouse_capture: false,
+            surface_active: true,
+            writer,
+        })
+    );
+    let _ = client_shell_snapshot(&control_rx);
+    assert!(!server.handle_server_event(ServerEvent::ClientShellPinSubscribe { client_id }));
+    let _ = recv_pin_state(&control_rx, "subscribe");
+    control_rx
+}
+
+#[test]
+fn failed_pin_save_keeps_the_change_and_still_broadcasts() {
+    let _persist_lock = PERSIST_TEST_LOCK.lock().expect("persist test lock");
+    let temp_home = TempConfigHome::new("save-fail");
+    let pin_path = temp_home.data_dir().join("pins.json");
+    let mut server = pin_server();
+    enable_pin_persistence(&mut server, pin_path.clone());
+    let control_rx = subscribe_pin_client(&mut server, 10);
+    let workspace_id = server.app.public_workspace_id(0);
+
+    endpoint_pin(
+        &mut server,
+        10,
+        "missing",
+        workspace_pin("missing-workspace", true),
+    );
+    let error = endpoint_pin_response(&control_rx, "missing workspace").expect_err("not found");
+    assert_eq!(error.error.code, "not_found");
+    assert_eq!(server.pin_state().revision, 0);
+    assert!(
+        control_rx
+            .recv_timeout(std::time::Duration::from_millis(50))
+            .is_err(),
+        "not found does not broadcast"
+    );
+
+    // A directory at the pin path makes the write fail after the change is kept.
+    std::fs::create_dir_all(&pin_path).expect("pins.json directory");
+    endpoint_pin(
+        &mut server,
+        10,
+        "pin-ws",
+        workspace_pin(&workspace_id, true),
+    );
+    let broadcast = recv_pin_state(&control_rx, "failed-save broadcast");
+    let state = endpoint_pin_response(&control_rx, "failed-save response").expect("kept pin");
+    assert_eq!(state.revision, 1);
+    assert_eq!(state.workspace_ids, vec![workspace_id.clone()]);
+    assert_eq!(broadcast, state);
+    assert_eq!(server.pin_state(), state);
+    assert!(
+        std::fs::metadata(&pin_path).expect("pin path").is_dir(),
+        "failed save leaves the previous path untouched"
+    );
+
+    endpoint_pin(
+        &mut server,
+        10,
+        "pin-ws-again",
+        workspace_pin(&workspace_id, true),
+    );
+    let again = endpoint_pin_response(&control_rx, "idempotent").expect("idempotent");
+    assert_eq!(again.revision, 1);
+    assert!(
+        control_rx
+            .recv_timeout(std::time::Duration::from_millis(50))
+            .is_err(),
+        "idempotent pin does not broadcast"
+    );
+    shutdown_test_runtimes(&mut server);
+}
+
+#[test]
+fn failed_pin_checkpoint_keeps_the_change() {
+    let _persist_lock = PERSIST_TEST_LOCK.lock().expect("persist test lock");
+    let temp_home = TempConfigHome::new("checkpoint-fail");
+    let pin_path = temp_home.data_dir().join("pins.json");
+    let session_path = temp_home.data_dir().join("session.json");
+    std::fs::create_dir_all(&session_path).expect("session.json directory");
+    let mut server = pin_server();
+    enable_pin_persistence(&mut server, pin_path.clone());
+    let control_rx = subscribe_pin_client(&mut server, 11);
+    let workspace_id = server.app.public_workspace_id(0);
+
+    endpoint_pin(
+        &mut server,
+        11,
+        "pin-ws",
+        workspace_pin(&workspace_id, true),
+    );
+    let broadcast = recv_pin_state(&control_rx, "checkpoint-fail broadcast");
+    let state = endpoint_pin_response(&control_rx, "checkpoint-fail response").expect("kept pin");
+    assert_eq!(state.revision, 1);
+    assert_eq!(state.workspace_ids, vec![workspace_id]);
+    assert_eq!(broadcast, state);
+    assert!(
+        session_path.is_dir(),
+        "checkpoint did not replace the directory"
+    );
+    assert!(
+        std::fs::symlink_metadata(&pin_path).is_err(),
+        "pin file is not written when the checkpoint fails"
+    );
+    shutdown_test_runtimes(&mut server);
+}
+
+#[test]
+fn unpinned_pane_move_does_not_bump_or_broadcast() {
+    let mut server = pin_server();
+    let extra = server.app.state.workspaces[0].test_split(ratatui::layout::Direction::Horizontal);
+    server.app.state.ensure_test_terminals();
+    let control_rx = subscribe_pin_client(&mut server, 12);
+    let workspace_id = server.app.public_workspace_id(0);
+    api_pin(&mut server, "pin-ws", workspace_pin(&workspace_id, true)).expect("workspace pin");
+    let broadcast = recv_pin_state(&control_rx, "workspace pin broadcast");
+    assert_eq!(broadcast.revision, 1);
+
+    let pane_public_id = public_pane(&server, 0, extra);
+    let destination = server.app.public_workspace_id(1);
+    let moved = api_request_raw(
+        &mut server,
+        "move-unpinned",
+        Method::PaneMove(crate::api::schema::PaneMoveParams {
+            pane_id: pane_public_id,
+            destination: crate::api::schema::PaneMoveDestination::NewTab {
+                workspace_id: Some(destination),
+                label: None,
+            },
+            focus: false,
+        }),
+    );
+    assert!(!moved.contains("\"error\""), "{moved}");
+    let state = server.pin_state();
+    assert_eq!(state.revision, 1);
+    assert_eq!(state.workspace_ids, vec![workspace_id]);
+    assert!(state.pane_ids.is_empty());
+    assert!(
+        control_rx
+            .recv_timeout(std::time::Duration::from_millis(50))
+            .is_err(),
+        "unpinned pane move does not broadcast"
+    );
+    shutdown_test_runtimes(&mut server);
+}
+
+#[test]
+fn pinned_pane_move_bumps_revision_without_persistence() {
+    let mut server = pin_server();
+    let extra = server.app.state.workspaces[0].test_split(ratatui::layout::Direction::Horizontal);
+    server.app.state.ensure_test_terminals();
+    let control_rx = subscribe_pin_client(&mut server, 13);
+    let pane_public_id = public_pane(&server, 0, extra);
+    let destination = server.app.public_workspace_id(1);
+    api_pin(&mut server, "pin-pane", pane_pin(&pane_public_id, true)).expect("pane pin");
+    let _ = recv_pin_state(&control_rx, "pin broadcast");
+    assert_eq!(server.pin_state().revision, 1);
+
+    let moved = api_request_raw(
+        &mut server,
+        "move-pinned",
+        Method::PaneMove(crate::api::schema::PaneMoveParams {
+            pane_id: pane_public_id,
+            destination: crate::api::schema::PaneMoveDestination::NewTab {
+                workspace_id: Some(destination.clone()),
+                label: None,
+            },
+            focus: false,
+        }),
+    );
+    assert!(!moved.contains("\"error\""), "{moved}");
+    let destination_idx = server
+        .app
+        .state
+        .workspaces
+        .iter()
+        .position(|workspace| workspace.id == destination)
+        .expect("destination");
+    let state = server.pin_state();
+    assert_eq!(state.revision, 2);
+    assert_eq!(
+        state.pane_ids,
+        vec![public_pane(&server, destination_idx, extra)]
+    );
+    let broadcast = recv_pin_state(&control_rx, "move broadcast");
+    assert_eq!(broadcast, state);
+    shutdown_test_runtimes(&mut server);
+}
+
+#[test]
+fn pane_death_prunes_pins_but_agent_release_keeps_them() {
+    let mut server = pin_server();
+    let extra = server.app.state.workspaces[0].test_split(ratatui::layout::Direction::Horizontal);
+    server.app.state.ensure_test_terminals();
+    let control_rx = subscribe_pin_client(&mut server, 14);
+    let pane_public_id = public_pane(&server, 0, extra);
+    api_pin(&mut server, "pin-pane", pane_pin(&pane_public_id, true)).expect("pane pin");
+    let _ = recv_pin_state(&control_rx, "pin broadcast");
+    assert_eq!(server.pin_state().revision, 1);
+
+    assert!(
+        server.handle_internal_event_with_forwarding(AppEvent::HookAgentReleased {
+            pane_id: extra,
+            source: "test".into(),
+            agent_label: "claude".into(),
+            known_agent: None,
+            seq: None,
+        })
+    );
+    assert!(server.app.find_pane(extra).is_some());
+    assert_eq!(server.pin_state().revision, 1);
+    assert_eq!(server.pin_state().pane_ids, vec![pane_public_id]);
+    assert!(
+        control_rx
+            .recv_timeout(std::time::Duration::from_millis(50))
+            .is_err(),
+        "agent release keeps the pin and does not broadcast"
+    );
+
+    assert!(
+        server.handle_internal_event_with_forwarding(AppEvent::PaneDied {
+            pane_id: extra,
+            exit_reason: crate::platform::ChildExitReason::Exited,
+        })
+    );
+    assert!(server.app.find_pane(extra).is_none());
+    let state = server.pin_state();
+    assert_eq!(state.revision, 2);
+    assert!(state.pane_ids.is_empty());
+    let broadcast = recv_pin_state(&control_rx, "pane died broadcast");
+    assert_eq!(broadcast, state);
+    shutdown_test_runtimes(&mut server);
+}
+
+#[test]
+fn worktree_remove_and_plugin_pane_close_prune_pins() {
+    let mut server = pin_server();
+    let checkout = std::path::PathBuf::from("/repo/herdr-issue");
+    server.app.state.workspaces[1].worktree_space =
+        Some(crate::workspace::WorktreeSpaceMembership {
+            key: "repo-key".into(),
+            label: "herdr".into(),
+            repo_root: "/repo/herdr".into(),
+            checkout_path: checkout.clone(),
+            is_linked_worktree: true,
+        });
+    let extra = server.app.state.workspaces[0].test_split(ratatui::layout::Direction::Horizontal);
+    server.app.state.ensure_test_terminals();
+    let linked_id = server.app.public_workspace_id(1);
+    let linked_pane = server.app.state.workspaces[1]
+        .focused_pane_id()
+        .expect("linked pane");
+    api_pin(&mut server, "pin-linked", workspace_pin(&linked_id, true)).expect("linked pin");
+    let extra_public = public_pane(&server, 0, extra);
+    api_pin(&mut server, "pin-plugin", pane_pin(&extra_public, true)).expect("plugin pin");
+    assert_eq!(server.pin_state().revision, 2);
+
+    let checkout_key = crate::worktree::canonical_or_original(&checkout);
+    server
+        .app
+        .pending_api_worktree_removes
+        .insert(linked_id.clone(), 7);
+    server
+        .app
+        .pending_api_worktree_remove_paths
+        .insert(checkout_key.clone(), 7);
+    let (respond_to, _response_rx) = std::sync::mpsc::channel();
+    assert!(
+        server.handle_internal_event_with_forwarding(AppEvent::WorktreeRemoveFinished(Box::new(
+            crate::events::WorktreeRemoveResult {
+                workspace_id: linked_id.clone(),
+                path: checkout,
+                workspace: None,
+                worktree: None,
+                forced: true,
+                api_request: Some(crate::events::ApiWorktreeRemoveRequest {
+                    id: "req".into(),
+                    operation_id: 7,
+                    checkout_key,
+                    shutdown_panes: vec![linked_pane],
+                    respond_to,
+                }),
+                result: Ok(()),
+            }
+        )))
+    );
+    assert!(server
+        .app
+        .state
+        .workspaces
+        .iter()
+        .all(|workspace| workspace.id != linked_id));
+    let state = server.pin_state();
+    assert_eq!(state.revision, 3);
+    assert!(state.workspace_ids.is_empty());
+    assert_eq!(state.pane_ids, vec![extra_public.clone()]);
+
+    server.app.state.plugin_panes.insert(
+        extra,
+        crate::app::state::PluginPaneRecord {
+            plugin_id: "pins".into(),
+            entrypoint: "main".into(),
+        },
+    );
+    let closed = api_request_raw(
+        &mut server,
+        "close-plugin",
+        Method::PluginPaneClose(crate::api::schema::PluginPaneCloseParams {
+            pane_id: extra_public,
+        }),
+    );
+    assert!(!closed.contains("\"error\""), "{closed}");
+    let state = server.pin_state();
+    assert_eq!(state.revision, 4);
+    assert!(state.pane_ids.is_empty());
+    assert!(server.app.find_pane(extra).is_none());
     shutdown_test_runtimes(&mut server);
 }

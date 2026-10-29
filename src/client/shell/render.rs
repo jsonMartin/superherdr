@@ -13,7 +13,8 @@ pub(super) use super::agent_sidebar::{
 pub(super) use super::aggregate_navigation::navigator_rows as client_navigator_rows;
 pub(super) use overlays::{render_client_overlay, render_context_menu, render_global_menu};
 pub(super) use sidebar::{
-    render_collapsed_sidebar, render_sidebar, workspace_entries, workspace_entries_with_filter,
+    render_collapsed_sidebar, render_sidebar, rendered_workspace_entries, workspace_entries,
+    workspace_entries_with_filter,
 };
 pub(super) use tabs::{render_tab_bar, tab_bar_status_width};
 
@@ -294,17 +295,8 @@ pub(super) fn render_shell(
                 );
             }
         } else if state.sidebar_collapsed {
-            let pin = state
-                .endpoints
-                .iter()
-                .find(|endpoint| &endpoint.endpoint_id == state.active_endpoint_id)
-                .and_then(|endpoint| endpoint.pin_state.as_ref());
-            let pinned_workspaces = pin
-                .map(|pin| pin.workspace_ids.iter().cloned().collect())
-                .unwrap_or_default();
-            let pinned_panes = pin
-                .map(|pin| pin.pane_ids.iter().cloned().collect())
-                .unwrap_or_default();
+            let (pinned_workspaces, pinned_panes) =
+                sidebar::active_pin_sets(state.endpoints, state.active_endpoint_id);
             render_collapsed_sidebar(
                 buffer,
                 layout.sidebar,

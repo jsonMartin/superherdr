@@ -147,13 +147,22 @@ impl ClientShellState {
                                 .pin_state
                                 .as_ref()
                                 .map(|state| {
-                                    state.workspace_ids.iter().cloned().collect::<HashSet<_>>()
+                                    state
+                                        .workspace_ids
+                                        .iter()
+                                        .map(String::as_str)
+                                        .collect::<HashSet<_>>()
                                 })
                                 .unwrap_or_default();
-                            render::workspace_entries_with_filter(
+                            let empty_collapsed_groups = HashSet::new();
+                            let collapsed_groups = self
+                                .collapsed_groups_for_endpoint(&endpoint.endpoint_id)
+                                .unwrap_or(&empty_collapsed_groups);
+                            render::rendered_workspace_entries(
                                 snapshot,
-                                &HashSet::new(),
+                                collapsed_groups,
                                 &pinned,
+                                self.sidebar_collapsed && !self.mobile_layout_active(),
                                 |workspace| visible_workspaces.contains(&workspace.workspace_id),
                             )
                             .into_iter()

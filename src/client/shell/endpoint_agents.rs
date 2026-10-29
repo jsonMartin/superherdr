@@ -143,7 +143,13 @@ fn agent_rows(
                 let pinned = endpoint
                     .pin_state
                     .as_ref()
-                    .map(|state| state.pane_ids.iter().cloned().collect::<HashSet<_>>())
+                    .map(|state| {
+                        state
+                            .pane_ids
+                            .iter()
+                            .map(String::as_str)
+                            .collect::<HashSet<_>>()
+                    })
                     .unwrap_or_default();
                 snapshot
                     .agents
@@ -154,7 +160,7 @@ fn agent_rows(
                             &agent.pane_id,
                             config,
                             Some(&endpoint.label),
-                            pinned.contains(&agent.pane_id),
+                            pinned.contains(agent.pane_id.as_str()),
                         )
                     })
                     .map(|agent| ((endpoint.endpoint_id.clone(), agent.pane_id.clone()), agent))

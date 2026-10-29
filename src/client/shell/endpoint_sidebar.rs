@@ -18,10 +18,17 @@ fn compact_pinned_entries(
     let pinned = endpoint
         .pin_state
         .as_ref()
-        .map(|state| state.workspace_ids.iter().cloned().collect::<HashSet<_>>())
+        .map(|state| {
+            state
+                .workspace_ids
+                .iter()
+                .map(String::as_str)
+                .collect::<HashSet<_>>()
+        })
         .unwrap_or_default();
     let any_pinned = snapshot.workspaces.iter().any(|workspace| {
-        visible.contains(&workspace.workspace_id) && pinned.contains(&workspace.workspace_id)
+        visible.contains(&workspace.workspace_id)
+            && pinned.contains(workspace.workspace_id.as_str())
     });
     any_pinned.then(|| {
         super::sidebar::pinned_flat_entries(snapshot, &pinned, |workspace| {
@@ -188,6 +195,16 @@ pub(super) fn render_collapsed(
             Some(snapshot.boot_id.as_str()),
             &snapshot.workspaces,
         );
+        let pinned_ids = endpoint
+            .pin_state
+            .as_ref()
+            .map(|pin| {
+                pin.workspace_ids
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<HashSet<_>>()
+            })
+            .unwrap_or_default();
         let pinned_entries = compact_pinned_entries(endpoint, snapshot, state.focus_scope);
         let visible_indices = pinned_entries
             .as_ref()
@@ -265,12 +282,7 @@ pub(super) fn render_collapsed(
                     status_color(workspace.agent_status, palette)
                 })
                 .add_modifier(dim);
-            let pinned = endpoint.pin_state.as_ref().is_some_and(|state| {
-                state
-                    .workspace_ids
-                    .iter()
-                    .any(|workspace_id| workspace_id == &workspace.workspace_id)
-            });
+            let pinned = pinned_ids.contains(workspace.workspace_id.as_str());
             let (icon, pin_prefix) = status_indicator(
                 pinned,
                 workspace.agent_status,
@@ -414,7 +426,13 @@ pub(super) fn render_expanded(
             let pinned = endpoint
                 .pin_state
                 .as_ref()
-                .map(|state| state.workspace_ids.iter().cloned().collect::<HashSet<_>>())
+                .map(|state| {
+                    state
+                        .workspace_ids
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<HashSet<_>>()
+                })
                 .unwrap_or_default();
             rows.extend(
                 super::sidebar::workspace_entries_with_filter(
@@ -536,6 +554,22 @@ pub(super) fn render_expanded(
         .saturating_sub(metrics.offset_from_bottom);
     let show_scrollbar = metrics.max_offset_from_bottom > 0 && body.width > 1;
     let content_width = body.width.saturating_sub(u16::from(show_scrollbar));
+    let pinned_workspaces = state
+        .endpoints
+        .iter()
+        .map(|endpoint| {
+            endpoint
+                .pin_state
+                .as_ref()
+                .map(|pin| {
+                    pin.workspace_ids
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<HashSet<_>>()
+                })
+                .unwrap_or_default()
+        })
+        .collect::<Vec<_>>();
     let mut y = body.y;
     for (row_index, row) in rows.iter().enumerate().skip(*state.workspace_scroll) {
         match row {
@@ -571,14 +605,20 @@ pub(super) fn render_expanded(
                     .saturating_add(1)
                     .saturating_add(gaps.get(row_index).copied().unwrap_or(0));
             }
-            Row::Workspace { endpoint, entry } => {
-                let endpoint = &state.endpoints[*endpoint];
+            Row::Workspace {
+                endpoint: endpoint_index,
+                entry,
+            } => {
+                let endpoint = &state.endpoints[*endpoint_index];
                 let Some(snapshot) = endpoint.snapshot.as_deref() else {
                     continue;
                 };
                 let Some(workspace) = snapshot.workspaces.get(entry.index) else {
                     continue;
                 };
+                let pinned = pinned_workspaces
+                    .get(*endpoint_index)
+                    .is_some_and(|pinned| pinned.contains(workspace.workspace_id.as_str()));
                 let collapsed_groups = collapsed_groups_for_endpoint(state, &endpoint.endpoint_id)
                     .unwrap_or(&empty_collapsed_groups);
                 let status = super::sidebar::displayed_workspace_status(
@@ -606,12 +646,6 @@ pub(super) fn render_expanded(
                 let endpoint_active = &endpoint.endpoint_id == state.active_endpoint_id;
                 let selected = state.selected_workspace_id.is_some_and(|target| {
                     target.matches(&endpoint.endpoint_id, &workspace.workspace_id)
-                });
-                let pinned = endpoint.pin_state.as_ref().is_some_and(|state| {
-                    state
-                        .workspace_ids
-                        .iter()
-                        .any(|workspace_id| workspace_id == &workspace.workspace_id)
                 });
                 super::sidebar::render_workspace_rows(
                     buffer,

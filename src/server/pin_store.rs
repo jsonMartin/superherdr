@@ -60,30 +60,39 @@ impl PinStore {
         workspaces: &[Workspace],
         manager: &mut PinManager,
     ) -> (Self, Option<String>) {
+        // A missing file is an empty store. Any other read or parse problem
+        // starts empty too, and leaves the original path untouched: the next
+        // successful pin change overwrites it. A startup read error must not
+        // stick as `write_blocked`, or that next change could never land.
         let mut store = Self::empty(path.clone());
         let content = match std::fs::read(&path) {
             Ok(content) => content,
             Err(err) if err.kind() == io::ErrorKind::NotFound => return (store, None),
             Err(err) => {
-                store.write_blocked = true;
                 return (store, Some(format!("failed to read pin state: {err}")));
             }
         };
         if content.len() > MAX_STORE_BYTES {
-            return store.quarantine("pin state exceeds the storage limit".into());
+            return (
+                store,
+                Some("pin state exceeds the storage limit".to_string()),
+            );
         }
         let document = match serde_json::from_slice::<StoreDocument>(&content) {
             Ok(document) if document.version == STORE_VERSION => document,
             Ok(document) => {
-                return store.quarantine(format!(
-                    "unsupported pin state version {}",
-                    document.version
-                ))
+                return (
+                    store,
+                    Some(format!(
+                        "unsupported pin state version {}",
+                        document.version
+                    )),
+                );
             }
-            Err(err) => return store.quarantine(format!("invalid pin state: {err}")),
+            Err(err) => return (store, Some(format!("invalid pin state: {err}"))),
         };
         if let Err(error) = validate_document(&document) {
-            return store.quarantine(error);
+            return (store, Some(error));
         }
 
         let by_lifetime: HashMap<&str, &Workspace> = workspaces
@@ -111,34 +120,6 @@ impl PinStore {
         // the live pins actually diverge from it.
         store.document = document;
         (store, None)
-    }
-
-    /// Preserves the unreadable file for inspection instead of overwriting it;
-    /// the on-disk content stays untouched until the next successful pin save.
-    fn quarantine(mut self, notice: String) -> (Self, Option<String>) {
-        let name = self
-            .path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("pins.json");
-        let quarantine = self
-            .path
-            .with_file_name(format!("{name}.corrupt-{}", uuid::Uuid::new_v4()));
-        match crate::platform::replace_file(&self.path, &quarantine) {
-            Ok(()) => (
-                self,
-                Some(format!("{notice}; preserved unreadable pin state")),
-            ),
-            Err(err) => {
-                self.write_blocked = true;
-                (
-                    self,
-                    Some(format!(
-                        "{notice}; could not preserve unreadable pin state: {err}"
-                    )),
-                )
-            }
-        }
     }
 
     /// Builds the store the current pins would persist to, dropping entries
@@ -189,7 +170,9 @@ impl PinStore {
                 workspaces: stored_workspaces,
                 agents,
             },
-            write_blocked: self.write_blocked,
+            // A blocked flag from a failed load must not poison the next save.
+            // `save` re-checks the path when the change is actually written.
+            write_blocked: false,
         })
     }
 
@@ -412,42 +395,38 @@ mod tests {
         let notice = notice.expect("malformed notice");
         assert!(notice.contains("invalid pin state"), "{notice}");
         assert_eq!(manager.revision(), 0);
-        // The unreadable content is preserved under a quarantine name and the
-        // pin path stays untouched until the next successful pin change.
-        let corrupted_prefix = format!(
-            "{}.corrupt-",
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .expect("temp file name")
-        );
-        let quarantine_path = std::fs::read_dir(path.parent().expect("temp dir"))
-            .expect("list temp dir")
-            .flatten()
-            .map(|entry| entry.path())
-            .find(|candidate| {
-                candidate
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| name.starts_with(&corrupted_prefix))
-            })
-            .expect("quarantined pin state");
+        assert!(!store.is_write_blocked());
+        // The original path keeps the unreadable bytes until a successful save.
         assert_eq!(
-            std::fs::read(&quarantine_path).expect("preserved garbage"),
-            b"{not json".as_slice()
+            std::fs::read(&path).expect("original pins.json"),
+            b"{not json"
         );
-        assert!(std::fs::symlink_metadata(&path).is_err());
+        assert!(
+            !std::fs::read_dir(path.parent().expect("temp dir"))
+                .expect("list temp dir")
+                .flatten()
+                .any(|entry| { entry.file_name().to_string_lossy().contains(".corrupt-") }),
+            "malformed pins.json is not renamed"
+        );
 
-        // A pin change stages an empty document and rewrites the file.
-        let staged = store.staged(&manager, &workspaces).expect("stage empty");
+        // A pin change overwrites that same path.
+        let mut blocked = store.clone();
+        blocked.write_blocked = true;
+        let staged = blocked.staged(&manager, &workspaces).expect("stage empty");
+        assert!(!staged.is_write_blocked());
         staged.save().expect("save after change");
-        let (reloaded, notice) = PinStore::load(path, &workspaces, &mut manager);
+        assert_ne!(
+            std::fs::read(&path).expect("rewritten pins.json"),
+            b"{not json"
+        );
+        let (reloaded, notice) = PinStore::load(path.clone(), &workspaces, &mut manager);
         assert!(notice.is_none());
         assert!(reloaded.document().workspaces.is_empty());
-        let _ = std::fs::remove_file(quarantine_path);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
-    fn oversized_files_are_quarantined() {
+    fn oversized_files_stay_until_a_successful_save() {
         let path = temp_path();
         let blob = "x".repeat(MAX_STORE_BYTES + 1);
         std::fs::write(&path, blob.as_bytes()).expect("write oversized");
@@ -457,31 +436,50 @@ mod tests {
         let notice = notice.expect("size notice");
         assert!(notice.contains("storage limit"), "{notice}");
         assert_eq!(manager.revision(), 0);
-        // Quarantine moved the unreadable content aside, so saving is allowed.
         assert!(!store.is_write_blocked());
-        let corrupted = std::fs::read_dir(path.parent().expect("temp dir"))
-            .expect("list temp dir")
-            .flatten()
-            .filter(|entry| {
-                entry
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with("herdr-pins-")
-                    && entry.file_name().to_string_lossy().contains(".corrupt-")
-            })
-            .count();
-        assert!(corrupted >= 1, "unreadable pins.json is preserved");
-        let prefix = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .expect("temp file name")
-            .to_owned();
-        for entry in std::fs::read_dir(path.parent().expect("temp dir")).expect("list temp dir") {
-            let entry = entry.expect("temp entry");
-            if entry.file_name().to_string_lossy().starts_with(&prefix) {
-                let _ = std::fs::remove_file(entry.path());
-            }
-        }
+        assert_eq!(
+            std::fs::read(&path).expect("original oversized file"),
+            blob.as_bytes()
+        );
+        manager.set_workspace(&workspaces[0].id, true);
+        let staged = store.staged(&manager, &workspaces).expect("stage");
+        staged.save().expect("overwrite oversized file");
+        let rewritten = std::fs::read(&path).expect("rewritten pins.json");
+        assert!(rewritten.len() <= MAX_STORE_BYTES);
+        assert_ne!(rewritten, blob.as_bytes());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn startup_read_error_does_not_block_a_later_save() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path = temp_path();
+        std::fs::write(&path, b"{\"version\":1}").expect("write unreadable");
+        let mut blocked = std::fs::metadata(&path).expect("metadata").permissions();
+        blocked.set_mode(0o000);
+        std::fs::set_permissions(&path, blocked).expect("deny reads");
+        let mut manager = PinManager::new();
+        let workspaces = vec![Workspace::test_new("alpha")];
+        let (store, notice) = PinStore::load(path.clone(), &workspaces, &mut manager);
+        let notice = notice.expect("read error notice");
+        assert!(notice.contains("failed to read pin state"), "{notice}");
+        assert!(!store.is_write_blocked());
+        assert_eq!(manager.revision(), 0);
+
+        let mut readable = std::fs::metadata(&path).expect("metadata").permissions();
+        readable.set_mode(0o600);
+        std::fs::set_permissions(&path, readable).expect("restore reads");
+        assert!(manager.set_workspace(&workspaces[0].id, true));
+        let staged = store
+            .staged(&manager, &workspaces)
+            .expect("stage after read error");
+        assert!(!staged.is_write_blocked());
+        staged.save().expect("save after the path is writable");
+        let saved = std::fs::read_to_string(&path).expect("saved pins.json");
+        assert!(saved.contains(&workspaces[0].lifetime_id));
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
