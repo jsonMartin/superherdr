@@ -1,8 +1,8 @@
 use super::*;
 
 use crate::api::schema::{
-    ErrorResponse, Method, PanePinParams, PaneTarget, PinState, Request, ResponseResult,
-    SuccessResponse, WorkspaceCloseParams, WorkspacePinParams,
+    EmptyParams, ErrorResponse, Method, PanePinParams, PaneTarget, PinState, Request,
+    ResponseResult, SuccessResponse, WorkspaceCloseParams, WorkspacePinParams,
 };
 use crate::protocol::ServerMessage;
 
@@ -118,6 +118,30 @@ fn endpoint_pin_response(
         }
         return Err(serde_json::from_slice(&data).expect("decode pin error response"));
     }
+}
+
+#[test]
+fn pin_subscribe_on_the_socket_api_returns_the_current_state() {
+    let mut server = pin_server();
+    let workspace = server.app.public_workspace_id(1);
+    let empty = api_pin(
+        &mut server,
+        "sub-empty",
+        Method::PinSubscribe(EmptyParams::default()),
+    )
+    .expect("pin.subscribe on the socket API");
+    assert_eq!(empty.revision, 0);
+    assert!(empty.workspace_ids.is_empty() && empty.pane_ids.is_empty());
+
+    api_pin(&mut server, "pin", workspace_pin(&workspace, true)).expect("pin workspace");
+    let state = api_pin(
+        &mut server,
+        "sub",
+        Method::PinSubscribe(EmptyParams::default()),
+    )
+    .expect("pin.subscribe on the socket API");
+    assert_eq!(state.revision, 1);
+    assert_eq!(state.workspace_ids, vec![workspace]);
 }
 
 #[test]

@@ -4383,6 +4383,18 @@ impl HeadlessServer {
                 let _ = msg.respond_to.send(response);
                 return false;
             }
+            // Socket API callers can't receive `pin.state` broadcasts, so they get
+            // the current state once, like `snooze.list`.
+            api::schema::Method::PinSubscribe(_) => {
+                let state = self.pin_state();
+                let response = serde_json::to_string(&api::schema::SuccessResponse {
+                    id: msg.request.id,
+                    result: api::schema::ResponseResult::Pin { state },
+                })
+                .unwrap_or_default();
+                let _ = msg.respond_to.send(response);
+                return false;
+            }
             _ => {}
         }
 
