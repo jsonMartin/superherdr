@@ -1238,6 +1238,31 @@ fn expanded_endpoint_navigation_skips_a_collapsed_unpinned_child() {
 }
 
 #[test]
+fn mobile_endpoint_navigation_reaches_a_desktop_collapsed_child() {
+    let mut parent = linked(workspace("P", 1), "repo", false);
+    parent.focused = true;
+    let child = linked(workspace("P1", 2), "repo", true);
+    let mut state = shell(snapshot_of(vec![parent, child]));
+    let mut remote_snapshot = super::snapshot();
+    remote_snapshot.boot_id = "remote-boot".into();
+    let remote = attach_remote(&mut state, remote_snapshot);
+    state.set_endpoint_status(&remote, ClientEndpointStatus::Reconnecting);
+    state.collapsed_groups.insert("repo".into());
+
+    state.compose(44, 40).expect("mobile layout");
+    assert!(state.mobile_layout_active());
+    let mut outcome = ClientShellInput::default();
+    assert!(state.handle_endpoint_navigation(KeybindAction::NextWorkspace, &mut outcome));
+    assert!(matches!(
+        outcome.actions.as_slice(),
+        [ClientShellAction::ActivateEndpoint {
+            target: Some(ClientEndpointFocusTarget::Workspace(workspace_id)),
+            ..
+        }] if workspace_id == "P1"
+    ));
+}
+
+#[test]
 fn compact_endpoint_navigation_without_pins_follows_snapshot_order() {
     let mut parent = linked(workspace("P", 1), "repo", false);
     parent.focused = true;

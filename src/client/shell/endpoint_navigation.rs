@@ -155,9 +155,14 @@ impl ClientShellState {
                                 })
                                 .unwrap_or_default();
                             let empty_collapsed_groups = HashSet::new();
-                            let collapsed_groups = self
-                                .collapsed_groups_for_endpoint(&endpoint.endpoint_id)
-                                .unwrap_or(&empty_collapsed_groups);
+                            // Mobile lists every visible child. A desktop collapsed
+                            // group must not skip a row the mobile switcher still shows.
+                            let collapsed_groups = if self.mobile_layout_active() {
+                                &empty_collapsed_groups
+                            } else {
+                                self.collapsed_groups_for_endpoint(&endpoint.endpoint_id)
+                                    .unwrap_or(&empty_collapsed_groups)
+                            };
                             render::rendered_workspace_entries(
                                 snapshot,
                                 collapsed_groups,

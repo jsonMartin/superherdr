@@ -401,11 +401,22 @@ mod tests {
             std::fs::read(&path).expect("original pins.json"),
             b"{not json"
         );
+        // The process temp directory is shared. Only this file's unique prefix
+        // can show that load renamed it.
+        let prefix = path
+            .file_stem()
+            .expect("pins file name")
+            .to_string_lossy()
+            .into_owned();
         assert!(
             !std::fs::read_dir(path.parent().expect("temp dir"))
                 .expect("list temp dir")
                 .flatten()
-                .any(|entry| { entry.file_name().to_string_lossy().contains(".corrupt-") }),
+                .any(|entry| {
+                    let name = entry.file_name();
+                    let name = name.to_string_lossy();
+                    name.starts_with(&prefix) && name.contains(".corrupt-")
+                }),
             "malformed pins.json is not renamed"
         );
 
