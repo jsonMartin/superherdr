@@ -320,11 +320,6 @@ fn closing_a_workspace_or_pane_prunes_its_pins() {
     shutdown_test_runtimes(&mut server);
 }
 
-/// Keeps the session checkpoint of these tests inside a throwaway directory.
-/// Persist tests share a lock because the config-home env var is process-wide
-/// and the session checkpoint resolves it at save time.
-static PERSIST_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
 struct TempConfigHome {
     previous: Option<std::ffi::OsString>,
     previous_session: Option<std::ffi::OsString>,
@@ -390,7 +385,9 @@ fn read_pin_document(pin_path: &std::path::Path) -> serde_json::Value {
 
 #[test]
 fn pinned_pane_moves_update_persistence_and_survive_restore() {
-    let _persist_lock = PERSIST_TEST_LOCK.lock().expect("persist test lock");
+    let _persist_lock = crate::config::test_config_env_lock()
+        .lock()
+        .expect("config env lock");
     let temp_home = TempConfigHome::new("move");
     let pin_path = temp_home.data_dir().join("pins.json");
 
@@ -540,7 +537,9 @@ fn pinned_pane_moves_update_persistence_and_survive_restore() {
 
 #[test]
 fn split_pin_restores_from_the_checkpointed_session() {
-    let _persist_lock = PERSIST_TEST_LOCK.lock().expect("persist test lock");
+    let _persist_lock = crate::config::test_config_env_lock()
+        .lock()
+        .expect("config env lock");
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -640,7 +639,9 @@ fn subscribe_pin_client(
 
 #[test]
 fn failed_pin_save_keeps_the_change_and_still_broadcasts() {
-    let _persist_lock = PERSIST_TEST_LOCK.lock().expect("persist test lock");
+    let _persist_lock = crate::config::test_config_env_lock()
+        .lock()
+        .expect("config env lock");
     let temp_home = TempConfigHome::new("save-fail");
     let pin_path = temp_home.data_dir().join("pins.json");
     let mut server = pin_server();
@@ -702,7 +703,9 @@ fn failed_pin_save_keeps_the_change_and_still_broadcasts() {
 
 #[test]
 fn failed_pin_checkpoint_keeps_the_change() {
-    let _persist_lock = PERSIST_TEST_LOCK.lock().expect("persist test lock");
+    let _persist_lock = crate::config::test_config_env_lock()
+        .lock()
+        .expect("config env lock");
     let temp_home = TempConfigHome::new("checkpoint-fail");
     let pin_path = temp_home.data_dir().join("pins.json");
     let session_path = temp_home.data_dir().join("session.json");
