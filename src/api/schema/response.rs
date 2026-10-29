@@ -68,6 +68,9 @@ pub enum ResponseResult {
     WorkspaceSnooze {
         state: WorkspaceSnoozeState,
     },
+    Pin {
+        state: super::common::PinState,
+    },
     WorkspaceWake {
         state: WorkspaceSnoozeState,
     },

@@ -16,27 +16,29 @@ pub(super) fn render_collapsed(
             buffer.set_style(rect, Style::default().bg(config.palette.active_row_bg));
         }
         let initial = row.machine_label.chars().next().unwrap_or('?');
-        put_text(
-            buffer,
-            rect.x,
-            rect.y,
-            rect.width,
-            &format!(
-                "{initial}{}",
-                status_icon(row.agent.status, config.status_indicators)
-            ),
-            Style::default()
-                .fg(if row.stale {
-                    config.palette.overlay0
-                } else {
-                    status_color(row.agent.status, &config.palette)
-                })
-                .add_modifier(if row.stale {
-                    Modifier::DIM
-                } else {
-                    Modifier::empty()
-                }),
+        let style = Style::default()
+            .fg(if row.stale {
+                config.palette.overlay0
+            } else {
+                status_color(row.agent.status, &config.palette)
+            })
+            .add_modifier(if row.stale {
+                Modifier::DIM
+            } else {
+                Modifier::empty()
+            });
+        let (icon, pin_prefix) = status_indicator(
+            row.agent.pinned,
+            row.agent.status,
+            config.status_indicators,
+            style,
         );
+        let text = if pin_prefix.is_some() {
+            format!("{initial}{}{}", crate::ui::PIN_GLYPH, icon.0)
+        } else {
+            format!("{initial}{}", icon.0)
+        };
+        put_text(buffer, rect.x, rect.y, rect.width, &text, style);
         hits.endpoint_agents
             .push((rect, row.endpoint_id, row.agent.pane_id));
     }
@@ -138,6 +140,17 @@ fn agent_rows(
         .iter()
         .filter_map(|endpoint| {
             endpoint.snapshot.as_deref().map(|snapshot| {
+                let pinned = endpoint
+                    .pin_state
+                    .as_ref()
+                    .map(|state| {
+                        state
+                            .pane_ids
+                            .iter()
+                            .map(String::as_str)
+                            .collect::<HashSet<_>>()
+                    })
+                    .unwrap_or_default();
                 snapshot
                     .agents
                     .iter()
@@ -147,6 +160,7 @@ fn agent_rows(
                             &agent.pane_id,
                             config,
                             Some(&endpoint.label),
+                            pinned.contains(agent.pane_id.as_str()),
                         )
                     })
                     .map(|agent| ((endpoint.endpoint_id.clone(), agent.pane_id.clone()), agent))

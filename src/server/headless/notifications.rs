@@ -644,6 +644,7 @@ impl HeadlessServer {
                         );
                     }
                 }
+                self.sync_pins_for_structural_change();
                 true
             }
             AppEvent::PaneDied { pane_id, .. }
@@ -692,6 +693,7 @@ impl HeadlessServer {
                         );
                     }
                 }
+                self.sync_pins_for_structural_change();
 
                 true
             }

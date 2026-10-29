@@ -2797,6 +2797,21 @@
           ],
           "type": "object"
         },
+        "PanePinParams": {
+          "properties": {
+            "pane_id": {
+              "type": "string"
+            },
+            "pinned": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "pane_id",
+            "pinned"
+          ],
+          "type": "object"
+        },
         "PaneProcessInfoParams": {
           "properties": {
             "pane_id": {
@@ -4548,6 +4563,21 @@
           ],
           "type": "object"
         },
+        "WorkspacePinParams": {
+          "properties": {
+            "pinned": {
+              "type": "boolean"
+            },
+            "workspace_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspace_id",
+            "pinned"
+          ],
+          "type": "object"
+        },
         "WorkspaceRenameParams": {
           "properties": {
             "label": {
@@ -5211,6 +5241,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/WorkspaceCloseParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "workspace.pin",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/WorkspacePinParams"
             }
           },
           "required": [
@@ -6299,6 +6345,38 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/PaneTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "pane.pin",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PanePinParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "pin.subscribe",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
             }
           },
           "required": [
@@ -8865,6 +8943,38 @@
           ],
           "type": "object"
         },
+        "PinState": {
+          "description": "Server-owned pins for the current boot. Ids are the same public ids the\nsnapshot uses; clients apply a state only when its `revision` is not older\nthan the one they hold for this `boot_id`.",
+          "properties": {
+            "boot_id": {
+              "type": "string"
+            },
+            "pane_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "revision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "workspace_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "boot_id",
+            "revision",
+            "workspace_ids",
+            "pane_ids"
+          ],
+          "type": "object"
+        },
         "PluginActionContext": {
           "enum": [
             "global",
@@ -9597,6 +9707,22 @@
                 },
                 "type": {
                   "const": "workspace_snooze",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "state"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "state": {
+                  "$ref": "#/schemas/success_response/$defs/PinState"
+                },
+                "type": {
+                  "const": "pin",
                   "type": "string"
                 }
               },

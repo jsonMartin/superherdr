@@ -554,6 +554,10 @@ pub(super) enum ClientContextMenuAction {
     WakeProject,
     ShowSnoozedRecords,
     WakeSharedSnoozes,
+    PinWorkspace,
+    UnpinWorkspace,
+    PinAgent,
+    UnpinAgent,
 }
 
 #[derive(Debug)]
@@ -573,6 +577,8 @@ pub(super) enum ClientContextMenuTarget {
         close_group: bool,
         collapsed: bool,
         can_clear_focus: bool,
+        /// `None` hides the item: this server does not advertise `pin.subscribe`.
+        workspace_pinned: Option<bool>,
     },
     Tab {
         tab_id: String,
@@ -584,6 +590,14 @@ pub(super) enum ClientContextMenuTarget {
         source_pane_id: Option<String>,
         has_manual_label: bool,
         right_click_passthrough: bool,
+        /// `Some` only when this pane hosts an agent and pins are advertised.
+        agent_pinned: Option<bool>,
+    },
+    Agent {
+        endpoint_id: ClientEndpointId,
+        boot_id: String,
+        pane_id: String,
+        pinned: bool,
     },
 }
 
@@ -754,6 +768,9 @@ impl ClientShellOverlay {
 pub(super) enum PendingEndpointKind {
     Generic,
     SharedSnooze {
+        endpoint_id: ClientEndpointId,
+    },
+    Pin {
         endpoint_id: ClientEndpointId,
     },
     SnoozeReset {
@@ -1109,6 +1126,7 @@ pub(crate) struct ClientShellState {
     pub(super) dismissed_product_announcement: Option<(String, String)>,
     pub(crate) focus_scope: Option<ClientFocusScope>,
     pub(crate) snooze_state: Option<crate::api::schema::WorkspaceSnoozeState>,
+    pub(crate) pin_state: Option<crate::api::schema::PinState>,
     pub(crate) empty_presentation: bool,
 }
 
@@ -1291,6 +1309,7 @@ impl ClientShellState {
             dismissed_product_announcement: None,
             focus_scope: None,
             snooze_state: None,
+            pin_state: None,
             empty_presentation: false,
         }
     }
@@ -1352,6 +1371,17 @@ impl ClientShellState {
         &self,
         snapshot: &ClientShellSnapshot,
     ) -> Vec<WorkspaceEntry> {
+        let pinned = self.pinned_workspace_ids_for(&self.active_endpoint_id);
+        let visible = |workspace: &ClientShellWorkspace| self.is_workspace_visible(workspace);
+        let any_visible_pin = snapshot.workspaces.iter().any(|workspace| {
+            visible(workspace) && pinned.contains(workspace.workspace_id.as_str())
+        });
+        // A visible pin makes the compact strip show pinned blocks, children
+        // included. With nothing pinned, compact keyboard navigation stays on
+        // the grouped order from before pins, so a collapsed child stays hidden.
+        if self.sidebar_collapsed && !self.mobile_layout_active() && any_visible_pin {
+            return render::sidebar::pinned_flat_entries(snapshot, &pinned, visible);
+        }
         let empty_collapsed_groups = HashSet::new();
         let collapsed = if self.mobile_layout_active() {
             &empty_collapsed_groups
@@ -1359,9 +1389,7 @@ impl ClientShellState {
             self.collapsed_groups_for_endpoint(&self.active_endpoint_id)
                 .unwrap_or(&empty_collapsed_groups)
         };
-        render::sidebar::workspace_entries_with_filter(snapshot, collapsed, |ws| {
-            self.is_workspace_visible(ws)
-        })
+        render::sidebar::workspace_entries_with_filter(snapshot, collapsed, &pinned, visible)
     }
 
     pub(crate) fn is_workspace_visible(&self, workspace: &ClientShellWorkspace) -> bool {
@@ -1652,6 +1680,112 @@ impl ClientShellState {
         } else {
             Vec::new()
         }
+    }
+
+    /// Applies subscription, action-response and broadcast pin states through
+    /// one gate: a state from another boot or older revision is dropped, so
+    /// every caller sees the same acceptance rules. The active cache and the
+    /// endpoint cache are checked separately so a late update cannot roll
+    /// either one back while they briefly disagree.
+    pub(crate) fn set_endpoint_pin_state(
+        &mut self,
+        endpoint_id: &ClientEndpointId,
+        pin_state: crate::api::schema::PinState,
+    ) {
+        let endpoint_is_active = &self.active_endpoint_id == endpoint_id;
+        let stale_endpoint_state = self
+            .endpoints
+            .iter()
+            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+            .and_then(|endpoint| endpoint.pin_state.as_ref())
+            .is_some_and(|current| {
+                current.boot_id == pin_state.boot_id && current.revision > pin_state.revision
+            });
+        let stale_active_state = endpoint_is_active
+            && self.pin_state.as_ref().is_some_and(|current| {
+                current.boot_id == pin_state.boot_id && current.revision > pin_state.revision
+            });
+        if stale_endpoint_state || stale_active_state {
+            return;
+        }
+        // A state whose boot_id differs from the server's current boot is
+        // ignored; the boot is unknown only before the first snapshot, where
+        // there is nothing to contradict it yet.
+        let current_boot = self.endpoint_boot_id(endpoint_id).map(str::to_owned);
+        if current_boot.is_some_and(|boot| boot != pin_state.boot_id) {
+            return;
+        }
+        if let Some(endpoint) = self
+            .endpoints
+            .iter_mut()
+            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+        {
+            endpoint.pin_state = Some(pin_state.clone());
+        }
+        if &self.active_endpoint_id == endpoint_id {
+            self.pin_state = Some(pin_state);
+        }
+    }
+
+    /// Clears only the feature that failed to decode. A bad pin broadcast must
+    /// not reveal snoozed workspaces, and a bad snooze broadcast must not drop pins.
+    pub(crate) fn apply_optional_feature_error(
+        &mut self,
+        endpoint_id: &ClientEndpointId,
+        feature: &str,
+    ) -> Vec<ClientShellAction> {
+        match feature {
+            "workspace_snooze.state" => self.clear_endpoint_snooze_state(endpoint_id),
+            "pin.state" => {
+                self.clear_endpoint_pin_state(endpoint_id);
+                Vec::new()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    pub(crate) fn clear_endpoint_pin_state(&mut self, endpoint_id: &ClientEndpointId) {
+        if let Some(endpoint) = self
+            .endpoints
+            .iter_mut()
+            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+        {
+            endpoint.pin_state = None;
+        }
+        if &self.active_endpoint_id == endpoint_id {
+            self.pin_state = None;
+        }
+    }
+
+    pub(crate) fn pin_state_for(
+        &self,
+        endpoint_id: &ClientEndpointId,
+    ) -> Option<&crate::api::schema::PinState> {
+        if &self.active_endpoint_id == endpoint_id {
+            return self.pin_state.as_ref();
+        }
+        self.endpoints
+            .iter()
+            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+            .and_then(|endpoint| endpoint.pin_state.as_ref())
+    }
+
+    pub(crate) fn pinned_workspace_ids_for<'a>(
+        &'a self,
+        endpoint_id: &ClientEndpointId,
+    ) -> HashSet<&'a str> {
+        self.pin_state_for(endpoint_id)
+            .map(|state| state.workspace_ids.iter().map(String::as_str).collect())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn pinned_pane_ids_for<'a>(
+        &'a self,
+        endpoint_id: &ClientEndpointId,
+    ) -> HashSet<&'a str> {
+        self.pin_state_for(endpoint_id)
+            .map(|state| state.pane_ids.iter().map(String::as_str).collect())
+            .unwrap_or_default()
     }
 
     pub(crate) fn reconcile_active_workspace_visibility(

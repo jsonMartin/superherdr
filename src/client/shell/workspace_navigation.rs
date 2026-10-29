@@ -108,17 +108,45 @@ impl ClientShellState {
             let Some(snapshot) = endpoint.snapshot.as_deref() else {
                 continue;
             };
+            let pinned = endpoint
+                .pin_state
+                .as_ref()
+                .map(|state| {
+                    state
+                        .workspace_ids
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<HashSet<_>>()
+                })
+                .unwrap_or_default();
             let entries = if self.sidebar_collapsed && !mobile && surface_available {
-                snapshot
-                    .workspaces
-                    .iter()
-                    .enumerate()
-                    .map(|(index, _)| WorkspaceEntry {
-                        index,
-                        indented: false,
-                        last_child: false,
+                let visible = super::focus_snooze::visible_workspace_ids(
+                    endpoint.focus_scope.as_ref(),
+                    endpoint.snooze_state.as_ref(),
+                    &endpoint.endpoint_id,
+                    Some(snapshot.boot_id.as_str()),
+                    &snapshot.workspaces,
+                );
+                let any_visible_pin = snapshot.workspaces.iter().any(|workspace| {
+                    visible.contains(&workspace.workspace_id)
+                        && pinned.contains(workspace.workspace_id.as_str())
+                });
+                if any_visible_pin {
+                    super::sidebar::pinned_flat_entries(snapshot, &pinned, |workspace| {
+                        visible.contains(&workspace.workspace_id)
                     })
-                    .collect()
+                } else {
+                    snapshot
+                        .workspaces
+                        .iter()
+                        .enumerate()
+                        .map(|(index, _)| WorkspaceEntry {
+                            index,
+                            indented: false,
+                            last_child: false,
+                        })
+                        .collect()
+                }
             } else {
                 let collapsed_groups = if mobile && surface_available {
                     &empty_collapsed_groups
@@ -126,7 +154,7 @@ impl ClientShellState {
                     self.collapsed_groups_for_endpoint(&endpoint.endpoint_id)
                         .unwrap_or(&empty_collapsed_groups)
                 };
-                render::workspace_entries(snapshot, collapsed_groups)
+                render::workspace_entries(snapshot, collapsed_groups, &pinned)
             };
             for entry in entries {
                 targets.push(WorkspaceNavigationTarget {

@@ -426,14 +426,14 @@ impl ClientShellState {
         outcome: &mut ClientShellInput,
     ) -> bool {
         let inactive_shared = endpoint_id != &self.active_endpoint_id
-            && crate::client::endpoint_commands::is_shared_snooze_method(&method);
+            && crate::client::endpoint_commands::is_shared_state_method(&method);
         if endpoint_id != &self.active_endpoint_id && !inactive_shared {
             return false;
         }
         if !self.endpoint_is_online(endpoint_id) {
             let label = self.endpoint_label(endpoint_id).to_owned();
             let body = format!("{label} is not ready");
-            outcome.repaint |= if crate::client::endpoint_commands::is_shared_snooze_method(&method)
+            outcome.repaint |= if crate::client::endpoint_commands::is_shared_state_method(&method)
             {
                 self.push_endpoint_notice_for(
                     endpoint_id,
@@ -453,7 +453,7 @@ impl ClientShellState {
             let body = format!(
                 "This server does not support {method_name} yet. Update and restart it to enable this action."
             );
-            outcome.repaint |= if crate::client::endpoint_commands::is_shared_snooze_method(&method)
+            outcome.repaint |= if crate::client::endpoint_commands::is_shared_state_method(&method)
             {
                 self.push_endpoint_notice_for(
                     endpoint_id,
@@ -617,6 +617,9 @@ impl ClientShellState {
                             | PendingEndpointKind::SnoozeManagementWake {
                                 endpoint_id: pending_endpoint_id,
                                 ..
+                            }
+                            | PendingEndpointKind::Pin {
+                                endpoint_id: pending_endpoint_id,
                             } if pending_endpoint_id == endpoint_id
                     )
                 })
@@ -634,7 +637,8 @@ impl ClientShellState {
         let shared_snooze_endpoint = match &pending.kind {
             PendingEndpointKind::SharedSnooze { endpoint_id }
             | PendingEndpointKind::SnoozeReset { endpoint_id, .. }
-            | PendingEndpointKind::SnoozeManagementWake { endpoint_id, .. } => Some(endpoint_id),
+            | PendingEndpointKind::SnoozeManagementWake { endpoint_id, .. }
+            | PendingEndpointKind::Pin { endpoint_id } => Some(endpoint_id),
             _ => None,
         };
         let target_snapshot = shared_snooze_endpoint
@@ -751,6 +755,17 @@ impl ClientShellState {
                         .extend(self.set_endpoint_snooze_state(&endpoint_id, state));
                 }
                 return (true, outcome.actions);
+            }
+            PendingEndpointKind::Pin { endpoint_id } => {
+                let state = match result {
+                    Ok(crate::api::schema::ResponseResult::Pin { state }) => state,
+                    _ => return (true, Vec::new()),
+                };
+                if state.boot_id != boot_id {
+                    return (true, Vec::new());
+                }
+                self.set_endpoint_pin_state(&endpoint_id, state);
+                return (true, Vec::new());
             }
             PendingEndpointKind::SnoozeManagementWake {
                 endpoint_id,
@@ -1249,9 +1264,11 @@ impl ClientShellState {
 
         match action {
             KeybindAction::FocusAgent(index) => {
+                let pinned = self.pinned_pane_ids_for(&self.active_endpoint_id);
                 let agents = super::agent_sidebar::ordered_agent_pane_ids_with_filter(
                     snapshot,
                     self.config.agent_panel_sort,
+                    &pinned,
                     |agent| agent_workspaces.contains(&agent.workspace_id),
                 );
                 Some(Method::PaneFocus(PaneTarget {
@@ -1259,9 +1276,11 @@ impl ClientShellState {
                 }))
             }
             KeybindAction::PreviousAgent | KeybindAction::NextAgent => {
+                let pinned = self.pinned_pane_ids_for(&self.active_endpoint_id);
                 let agents = super::agent_sidebar::ordered_agent_pane_ids_with_filter(
                     snapshot,
                     self.config.agent_panel_sort,
+                    &pinned,
                     |agent| agent_workspaces.contains(&agent.workspace_id),
                 );
                 if agents.is_empty() {

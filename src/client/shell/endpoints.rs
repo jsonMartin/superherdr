@@ -23,6 +23,7 @@ pub(crate) struct ClientShellEndpoint {
     pub(crate) agent_view_projection_supported: bool,
     pub(crate) methods: Option<HashSet<String>>,
     pub(crate) snooze_state: Option<crate::api::schema::WorkspaceSnoozeState>,
+    pub(crate) pin_state: Option<crate::api::schema::PinState>,
     pub(crate) focus_scope: Option<ClientFocusScope>,
 }
 
@@ -91,6 +92,7 @@ impl ClientShellState {
                     .is_some_and(|endpoint| endpoint.agent_view_projection_supported),
                 methods: previous.and_then(|endpoint| endpoint.methods.clone()),
                 snooze_state: previous.and_then(|endpoint| endpoint.snooze_state.clone()),
+                pin_state: previous.and_then(|endpoint| endpoint.pin_state.clone()),
                 focus_scope: self.focus_scope.clone(),
             });
         }
@@ -133,12 +135,16 @@ impl ClientShellState {
             endpoint.snapshot_generation = None;
             endpoint.methods = None;
             endpoint.snooze_state = None;
+            endpoint.pin_state = None;
             endpoint.focus_scope = None;
             endpoint.agent_recency.clear();
             endpoint.agent_presentation = Default::default();
             endpoint.agent_view_projection = None;
             endpoint.pending_agent_view_projection = None;
             endpoint.agent_view_projection_supported = false;
+        }
+        if endpoint_id == &self.active_endpoint_id {
+            self.pin_state = None;
         }
     }
 
@@ -212,12 +218,23 @@ impl ClientShellState {
         methods: Option<Vec<String>>,
     ) {
         let methods = methods.map(|methods| methods.into_iter().collect::<HashSet<_>>());
+        // A server that advertises its methods and omits pin.subscribe cannot
+        // keep showing pins from a previous boot or a different server.
+        let clears_pins = methods
+            .as_ref()
+            .is_some_and(|methods| !methods.contains("pin.subscribe"));
         if let Some(endpoint) = self
             .endpoints
             .iter_mut()
             .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
         {
             endpoint.methods = methods;
+            if clears_pins {
+                endpoint.pin_state = None;
+            }
+        }
+        if clears_pins && endpoint_id == &self.active_endpoint_id {
+            self.pin_state = None;
         }
     }
 
@@ -260,6 +277,11 @@ impl ClientShellState {
             .iter()
             .find(|candidate| &candidate.endpoint_id == endpoint_id)
             .and_then(|endpoint| endpoint.snooze_state.clone());
+        self.pin_state = self
+            .endpoints
+            .iter()
+            .find(|candidate| &candidate.endpoint_id == endpoint_id)
+            .and_then(|endpoint| endpoint.pin_state.clone());
         self.apply_active_snapshot(snapshot, generation);
         if switching_endpoint {
             // The aggregate agent list belongs to the client, not one endpoint.
@@ -517,6 +539,16 @@ impl ClientShellState {
         self.supports_endpoint_method_for(&self.active_endpoint_id, method)
     }
 
+    /// Pins are hidden unless the server listed `pin.subscribe`. An unknown
+    /// method set (`None`) does not count: Herdr servers must not show pin UI.
+    pub(super) fn endpoint_advertises_pins(&self, endpoint_id: &ClientEndpointId) -> bool {
+        self.endpoints
+            .iter()
+            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+            .and_then(|endpoint| endpoint.methods.as_ref())
+            .is_some_and(|methods| methods.contains("pin.subscribe"))
+    }
+
     pub(super) fn supports_endpoint_method_for(
         &self,
         endpoint_id: &ClientEndpointId,
@@ -607,6 +639,19 @@ impl ClientShellState {
             self.endpoints[index].snooze_state = None;
             if endpoint_id == &self.active_endpoint_id {
                 self.snooze_state = None;
+            }
+        }
+        // Drop pins whose boot is not this snapshot's, including a pin accepted
+        // before the first snapshot. Disconnect leaves pins in place so a stale
+        // row can stay dimmed until the boot actually changes.
+        let pin_boot_mismatch = self.endpoints[index]
+            .pin_state
+            .as_ref()
+            .is_some_and(|pin| pin.boot_id != snapshot.boot_id);
+        if boot_changed || pin_boot_mismatch {
+            self.endpoints[index].pin_state = None;
+            if endpoint_id == &self.active_endpoint_id {
+                self.pin_state = None;
             }
         }
         self.endpoints[index]
@@ -751,6 +796,11 @@ impl ClientShellState {
                 .iter()
                 .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
                 .and_then(|endpoint| endpoint.snooze_state.clone());
+            self.pin_state = self
+                .endpoints
+                .iter()
+                .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+                .and_then(|endpoint| endpoint.pin_state.clone());
             self.apply_active_snapshot(snapshot, generation);
         }
     }
@@ -783,6 +833,7 @@ pub(super) fn local_endpoint() -> ClientShellEndpoint {
         agent_view_projection_supported: false,
         methods: None,
         snooze_state: None,
+        pin_state: None,
         focus_scope: None,
     }
 }

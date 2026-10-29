@@ -277,6 +277,7 @@ rows = [[{ token = "workspace", rules = [{ equals = "long-workspace-name", fg = 
             let spans = super::super::resolved_token_spans(
                 &rows[0],
                 ("*", theme),
+                None,
                 theme,
                 theme,
                 theme,

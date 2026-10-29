@@ -232,6 +232,15 @@ pub struct HeadlessServer {
     pub(crate) snooze_retry_deadline: Option<Instant>,
     /// Participating client connections subscribed to workspace snooze state.
     pub(crate) snooze_subscribers: HashSet<u64>,
+    /// Server-owned workspace and agent pins keyed to current boot.
+    pub(crate) pins: crate::server::pins::PinManager,
+    pub(crate) pin_store: Option<crate::server::pin_store::PinStore>,
+    /// Participating client connections subscribed to pin state.
+    pub(crate) pin_subscribers: HashSet<u64>,
+    /// Public ids from the last pin state this server published. A move can
+    /// change these without changing which internal ids are pinned.
+    published_pin_workspace_ids: Vec<String>,
+    published_pin_pane_ids: Vec<String>,
     /// Outer window title last pushed, paired with the client that received it.
     /// Keying on the client means a newly attached terminal is written to even
     /// when the title itself has not changed, without every code path that
@@ -328,6 +337,14 @@ fn spawn_windows_client_accept_thread(
     })
 }
 
+fn same_public_ids(left: &[String], right: &[String]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    let right: HashSet<&str> = right.iter().map(String::as_str).collect();
+    left.iter().all(|id| right.contains(id.as_str()))
+}
+
 impl HeadlessServer {
     /// Creates and starts the headless server.
     ///
@@ -393,7 +410,19 @@ impl HeadlessServer {
             .as_ref()
             .filter(|store| store.needs_save())
             .map(|_| Instant::now() + Duration::from_secs(1));
-        Ok(Self {
+        let mut pins = crate::server::pins::PinManager::new();
+        let (pin_store, pin_notice) = if app.policy.persist_session {
+            let path = crate::session::data_dir().join("pins.json");
+            let (store, notice) =
+                crate::server::pin_store::PinStore::load(path, &app.state.workspaces, &mut pins);
+            (Some(store), notice)
+        } else {
+            (None, None)
+        };
+        if let Some(notice) = pin_notice {
+            warn!(notice = %notice, "pin state could not be restored");
+        }
+        let mut server = Self {
             app,
             #[cfg(unix)]
             api_tx,
@@ -416,6 +445,11 @@ impl HeadlessServer {
             snooze_notice,
             snooze_retry_deadline,
             snooze_subscribers: HashSet::new(),
+            pins,
+            pin_store,
+            pin_subscribers: HashSet::new(),
+            published_pin_workspace_ids: Vec::new(),
+            published_pin_pane_ids: Vec::new(),
             client_shell_boot_id,
             sent_window_title: None,
             api_window_title: None,
@@ -440,7 +474,9 @@ impl HeadlessServer {
             server_stop,
             server_event_rx,
             server_event_tx,
-        })
+        };
+        server.remember_published_pins();
+        Ok(server)
     }
 
     /// Runs the headless server event loop until shutdown.
@@ -1042,6 +1078,7 @@ impl HeadlessServer {
         let was_foreground = self.foreground_client_id == Some(client_id);
         let removed = self.clients.remove(&client_id);
         self.snooze_subscribers.remove(&client_id);
+        self.pin_subscribers.remove(&client_id);
         self.tab_geometry_controllers
             .retain(|_, controller_id| *controller_id != client_id);
         if let Some(mut removed) = removed {
@@ -2303,6 +2340,167 @@ impl HeadlessServer {
         any_sent
     }
 
+    /// Builds the shared `PinState` from the internal-id pins, deriving public
+    /// ids from the live workspaces. Entries whose item no longer exists are
+    /// omitted until the next structural change prunes them.
+    pub(crate) fn pin_state(&self) -> api::schema::PinState {
+        let mut workspace_ids = Vec::new();
+        let mut pane_ids = Vec::new();
+        for (ws_idx, workspace) in self.app.state.workspaces.iter().enumerate() {
+            if self.pins.is_workspace_pinned(&workspace.id) {
+                workspace_ids.push(workspace.id.clone());
+            }
+            let mut pinned_panes: Vec<(usize, String)> = workspace
+                .public_pane_numbers
+                .iter()
+                .filter(|(pane_id, _)| self.pins.is_pane_pinned(**pane_id))
+                .map(|(pane_id, number)| {
+                    (
+                        *number,
+                        self.app
+                            .public_pane_id(ws_idx, *pane_id)
+                            .unwrap_or_else(|| pane_id.raw().to_string()),
+                    )
+                })
+                .collect();
+            pinned_panes.sort_by_key(|(number, _)| *number);
+            pane_ids.extend(pinned_panes.into_iter().map(|(_, public_id)| public_id));
+        }
+        api::schema::PinState {
+            boot_id: self.client_shell_boot_id.clone(),
+            revision: self.pins.revision(),
+            workspace_ids,
+            pane_ids,
+        }
+    }
+
+    pub(crate) fn make_pin_state_message(&self) -> Option<ServerMessage> {
+        let state = self.pin_state();
+        let data = serde_json::to_string(&state).ok()?;
+        Some(ServerMessage::EndpointControl {
+            kind: "pin.state".to_string(),
+            data,
+        })
+    }
+
+    pub(crate) fn send_pin_state_to_client(&mut self, client_id: u64) -> bool {
+        let Some(msg) = self.make_pin_state_message() else {
+            return false;
+        };
+        self.send_to_client(client_id, msg)
+    }
+
+    pub(crate) fn broadcast_pin_state(&mut self) -> bool {
+        let Some(msg) = self.make_pin_state_message() else {
+            return false;
+        };
+        let subscribers: Vec<u64> = self.pin_subscribers.iter().copied().collect();
+        let mut any_sent = false;
+        for client_id in subscribers {
+            if self.send_to_client(client_id, msg.clone()) {
+                any_sent = true;
+            }
+        }
+        any_sent
+    }
+
+    fn published_pin_identity_changed(&self) -> bool {
+        let state = self.pin_state();
+        !same_public_ids(&state.workspace_ids, &self.published_pin_workspace_ids)
+            || !same_public_ids(&state.pane_ids, &self.published_pin_pane_ids)
+    }
+
+    fn remember_published_pins(&mut self) {
+        let state = self.pin_state();
+        self.published_pin_workspace_ids = state.workspace_ids;
+        self.published_pin_pane_ids = state.pane_ids;
+    }
+
+    /// Applies a pin change, checkpointing the session before every pin save.
+    /// A failed checkpoint or `pins.json` write keeps the updated in-memory
+    /// pins and still returns `Ok(true)` so callers broadcast the new state.
+    /// `Ok(false)` is an idempotent request and must not broadcast. Not-found
+    /// is rejected before this runs.
+    fn commit_pin_change<F>(&mut self, change: F) -> Result<bool, String>
+    where
+        F: FnOnce(&mut crate::server::pins::PinManager) -> bool,
+    {
+        let mut manager = self.pins.clone();
+        if !change(&mut manager) {
+            return Ok(false);
+        }
+        self.pins = manager;
+        self.remember_published_pins();
+        let Some(store) = self.pin_store.clone() else {
+            return Ok(true);
+        };
+        let staged = match store.staged(&self.pins, &self.app.state.workspaces) {
+            Ok(staged) => staged,
+            Err(error) => {
+                warn!(error = %error, "pin state could not be staged; keeping in-memory pins");
+                return Ok(true);
+            }
+        };
+        if let Err(err) = self.app.checkpoint_session_for_snooze() {
+            warn!(err = %err, "failed to checkpoint session before pin save; keeping in-memory pins");
+            return Ok(true);
+        }
+        if let Err(err) = staged.save() {
+            warn!(err = %err, "failed to save pin state; keeping in-memory pins");
+            return Ok(true);
+        }
+        self.pin_store = Some(staged);
+        Ok(true)
+    }
+
+    /// Prunes pins whose workspace or pane is gone, and publishes a new
+    /// revision when a move changed a pinned item's public id. One structural
+    /// reconcile bumps the revision at most once. Persistence failure still
+    /// broadcasts the in-memory state.
+    pub(crate) fn sync_pins_for_structural_change(&mut self) {
+        let pruned = self.pins.retain_live(&self.app.state.workspaces);
+        let identity_changed = self.published_pin_identity_changed();
+        if !pruned && !identity_changed {
+            let Some(store) = self.pin_store.clone() else {
+                return;
+            };
+            let Ok(staged) = store.staged(&self.pins, &self.app.state.workspaces) else {
+                return;
+            };
+            if store.same_document(&staged) {
+                return;
+            }
+            self.persist_staged_pins(staged);
+            self.broadcast_pin_state();
+            return;
+        }
+        if identity_changed && !pruned {
+            self.pins.note_public_identity_changed();
+        }
+        if let Some(store) = self.pin_store.clone() {
+            if let Ok(staged) = store.staged(&self.pins, &self.app.state.workspaces) {
+                if pruned || identity_changed || !store.same_document(&staged) {
+                    self.persist_staged_pins(staged);
+                }
+            }
+        }
+        self.remember_published_pins();
+        self.broadcast_pin_state();
+    }
+
+    fn persist_staged_pins(&mut self, staged: crate::server::pin_store::PinStore) {
+        if let Err(err) = self.app.checkpoint_session_for_snooze() {
+            warn!(err = %err, "failed to checkpoint session before pin save; keeping in-memory pins");
+            return;
+        }
+        match staged.save() {
+            Ok(()) => self.pin_store = Some(staged),
+            Err(err) => {
+                warn!(err = %err, "failed to save pin state; keeping previous document");
+            }
+        }
+    }
+
     fn shutdown_terminal_stream_clients(&mut self, terminal_id: &str, reason: String) {
         let client_ids = terminal_stream_client_ids(&self.clients, terminal_id);
 
@@ -3264,6 +3462,11 @@ impl HeadlessServer {
                 self.send_snooze_state_to_client(client_id);
                 false
             }
+            ServerEvent::ClientShellPinSubscribe { client_id } => {
+                self.pin_subscribers.insert(client_id);
+                self.send_pin_state_to_client(client_id);
+                false
+            }
             ServerEvent::ClientDetach { client_id } => {
                 info!(client_id, "client detached");
                 self.send_terminal_stream_detach_shutdown(client_id);
@@ -4093,6 +4296,105 @@ impl HeadlessServer {
                     }
                 }
             }
+            api::schema::Method::WorkspacePin(params) => {
+                let response = match self.app.canonical_workspace_id(&params.workspace_id) {
+                    None => serde_json::to_string(&api::schema::ErrorResponse {
+                        id: msg.request.id.clone(),
+                        error: api::schema::ErrorBody {
+                            code: "not_found".into(),
+                            message: "workspace not found".into(),
+                        },
+                    })
+                    .unwrap_or_default(),
+                    Some(canonical_id) => {
+                        match self.commit_pin_change(|manager| {
+                            manager.set_workspace(&canonical_id, params.pinned)
+                        }) {
+                            Ok(changed) => {
+                                let state = self.pin_state();
+                                if changed {
+                                    self.broadcast_pin_state();
+                                }
+                                serde_json::to_string(&api::schema::SuccessResponse {
+                                    id: msg.request.id.clone(),
+                                    result: api::schema::ResponseResult::Pin { state },
+                                })
+                                .unwrap_or_default()
+                            }
+                            Err(message) => serde_json::to_string(&api::schema::ErrorResponse {
+                                id: msg.request.id.clone(),
+                                error: api::schema::ErrorBody {
+                                    code: "persistence_failed".into(),
+                                    message,
+                                },
+                            })
+                            .unwrap_or_default(),
+                        }
+                    }
+                };
+                let _ = msg.respond_to.send(response);
+                return false;
+            }
+            api::schema::Method::PanePin(params) => {
+                let resolved = self
+                    .app
+                    .parse_pane_id(&params.pane_id)
+                    .map(|(ws_idx, pane_id)| {
+                        self.app
+                            .public_pane_id(ws_idx, pane_id)
+                            .map(|public_id| (ws_idx, pane_id, public_id))
+                    })
+                    .unwrap_or(None);
+                let response = match resolved {
+                    None => serde_json::to_string(&api::schema::ErrorResponse {
+                        id: msg.request.id.clone(),
+                        error: api::schema::ErrorBody {
+                            code: "not_found".into(),
+                            message: "pane not found".into(),
+                        },
+                    })
+                    .unwrap_or_default(),
+                    Some((_, pane_id, _)) => {
+                        match self
+                            .commit_pin_change(|manager| manager.set_pane(pane_id, params.pinned))
+                        {
+                            Ok(changed) => {
+                                let state = self.pin_state();
+                                if changed {
+                                    self.broadcast_pin_state();
+                                }
+                                serde_json::to_string(&api::schema::SuccessResponse {
+                                    id: msg.request.id.clone(),
+                                    result: api::schema::ResponseResult::Pin { state },
+                                })
+                                .unwrap_or_default()
+                            }
+                            Err(message) => serde_json::to_string(&api::schema::ErrorResponse {
+                                id: msg.request.id.clone(),
+                                error: api::schema::ErrorBody {
+                                    code: "persistence_failed".into(),
+                                    message,
+                                },
+                            })
+                            .unwrap_or_default(),
+                        }
+                    }
+                };
+                let _ = msg.respond_to.send(response);
+                return false;
+            }
+            // Socket API callers can't receive `pin.state` broadcasts, so they get
+            // the current state once, like `snooze.list`.
+            api::schema::Method::PinSubscribe(_) => {
+                let state = self.pin_state();
+                let response = serde_json::to_string(&api::schema::SuccessResponse {
+                    id: msg.request.id,
+                    result: api::schema::ResponseResult::Pin { state },
+                })
+                .unwrap_or_default();
+                let _ = msg.respond_to.send(response);
+                return false;
+            }
             _ => {}
         }
 
@@ -4206,8 +4508,26 @@ impl HeadlessServer {
                 .unwrap_or_else(|_| "{}".to_string())
             })
         } else {
-            self.app
-                .handle_api_request_after_internal_events_drained(msg.request)
+            let structural_change = matches!(
+                &msg.request.method,
+                api::schema::Method::WorkspaceClose(_)
+                    | api::schema::Method::WorkspaceMove(_)
+                    | api::schema::Method::WorkspaceMoveBlock(_)
+                    | api::schema::Method::PaneClose(_)
+                    | api::schema::Method::PaneMove(_)
+                    | api::schema::Method::PaneSwap(_)
+                    | api::schema::Method::TabClose(_)
+                    | api::schema::Method::TabMove(_)
+                    | api::schema::Method::LayoutApply(_)
+                    | api::schema::Method::PluginPaneClose(_)
+            );
+            let response = self
+                .app
+                .handle_api_request_after_internal_events_drained(msg.request);
+            if structural_change {
+                self.sync_pins_for_structural_change();
+            }
+            response
         };
         if let Some(snapshot) = frozen_alt_screen_read {
             if let Ok(mut success) = serde_json::from_str::<api::schema::SuccessResponse>(&response)

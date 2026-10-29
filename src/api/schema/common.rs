@@ -35,6 +35,29 @@ pub struct PaneTarget {
     pub pane_id: String,
 }
 
+/// Server-owned pins for the current boot. Ids are the same public ids the
+/// snapshot uses; clients apply a state only when its `revision` is not older
+/// than the one they hold for this `boot_id`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PinState {
+    pub boot_id: String,
+    pub revision: u64,
+    pub workspace_ids: Vec<String>,
+    pub pane_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct WorkspacePinParams {
+    pub workspace_id: String,
+    pub pinned: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PanePinParams {
+    pub pane_id: String,
+    pub pinned: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ProductAnnouncementDismissParams {
     pub version: String,

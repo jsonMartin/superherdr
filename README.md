@@ -2,7 +2,7 @@
 
 Superherdr is an open-source terminal project built on [Herdr](https://github.com/herdrdev/herdr) with built-in Focus and Snooze. It tracks upstream Herdr and keeps its native terminal runtime, agent status detection, CLI, and socket API.
 
-Focus shows the project or workspace you want to work on in one client. Snooze hides a project or workspace across clients until its wake time, without stopping its terminals. See [Focus and Snooze](docs/next/focus-snooze-fork.md).
+Focus shows the project or workspace you want to work on in one client. Snooze hides a project or workspace across clients until its wake time, without stopping its terminals. See [Focus and Snooze](docs/next/focus-snooze-fork.md). Pins keep chosen workspaces and agents at the top of their machine, marked with a status-colored pin, on every client. See [Pins](docs/next/pins.md).
 
 ## Install
 

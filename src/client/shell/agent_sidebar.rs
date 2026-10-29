@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::protocol::ClientShellAgent;
 
@@ -16,6 +16,7 @@ pub(super) struct AgentRow {
     pub(super) pane_id: String,
     pub(super) status: crate::api::schema::AgentStatus,
     pub(super) focused: bool,
+    pub(super) pinned: bool,
     pub(super) rows: Vec<Vec<crate::ui::ResolvedToken>>,
 }
 
@@ -24,27 +25,58 @@ pub(super) struct AgentRow {
 pub(super) fn ordered_agent_pane_ids(
     snapshot: &ClientShellSnapshot,
     sort: crate::config::AgentPanelSortConfig,
+    pinned: &HashSet<&str>,
 ) -> Vec<String> {
-    ordered_agent_pane_ids_with_filter(snapshot, sort, |_| true)
+    ordered_agent_pane_ids_with_filter(snapshot, sort, pinned, |_| true)
 }
 
+/// Orders agent rows with pinned agents first, as a leading block in the
+/// existing order; unpinned agents keep the existing order after them.
 pub(super) fn ordered_agent_pane_ids_with_filter(
     snapshot: &ClientShellSnapshot,
     sort: crate::config::AgentPanelSortConfig,
+    pinned: &HashSet<&str>,
     filter: impl Fn(&ClientShellAgent) -> bool,
 ) -> Vec<String> {
+    let pinned_first = |agents: Vec<&ClientShellAgent>| {
+        let mut ordered = Vec::with_capacity(agents.len());
+        ordered.extend(
+            agents
+                .iter()
+                .copied()
+                .filter(|agent| pinned.contains(agent.pane_id.as_str())),
+        );
+        ordered.extend(
+            agents
+                .iter()
+                .filter(|agent| !pinned.contains(agent.pane_id.as_str())),
+        );
+        ordered
+            .into_iter()
+            .map(|agent| agent.pane_id.clone())
+            .collect::<Vec<_>>()
+    };
     if snapshot.agent_view_label.is_some() {
-        return snapshot
-            .agent_order
-            .iter()
-            .filter(|pane_id| {
-                snapshot
-                    .agents
-                    .iter()
-                    .any(|agent| agent.pane_id == pane_id.as_str() && filter(agent))
-            })
-            .cloned()
-            .collect();
+        return pinned_first(
+            // Pinned-first applies to agent views too; their own order comes
+            // from the server projection.
+            snapshot
+                .agent_order
+                .iter()
+                .filter(|pane_id| {
+                    snapshot
+                        .agents
+                        .iter()
+                        .any(|agent| agent.pane_id == pane_id.as_str() && filter(agent))
+                })
+                .filter_map(|pane_id| {
+                    snapshot
+                        .agents
+                        .iter()
+                        .find(|agent| agent.pane_id == pane_id.as_str())
+                })
+                .collect(),
+        );
     }
     let mut agents = snapshot
         .agents
@@ -59,10 +91,7 @@ pub(super) fn ordered_agent_pane_ids_with_filter(
             )
         });
     }
-    agents
-        .into_iter()
-        .map(|agent| agent.pane_id.clone())
-        .collect()
+    pinned_first(agents)
 }
 
 // Inherited from Herdr; Superherdr calls the filtered variant. Kept to simplify upstream merges.
@@ -75,7 +104,16 @@ pub(super) fn render_agent_panel(
     agent_scroll: &mut usize,
     hits: &mut ShellHitMap,
 ) {
-    render_agent_panel_with_filter(buffer, area, snapshot, config, agent_scroll, hits, |_| true);
+    render_agent_panel_with_filter(
+        buffer,
+        area,
+        snapshot,
+        config,
+        agent_scroll,
+        hits,
+        &HashSet::new(),
+        |_| true,
+    );
 }
 
 pub(super) fn render_agent_panel_with_filter(
@@ -85,6 +123,7 @@ pub(super) fn render_agent_panel_with_filter(
     config: &ClientShellConfig,
     agent_scroll: &mut usize,
     hits: &mut ShellHitMap,
+    pinned: &HashSet<&str>,
     filter: impl Fn(&ClientShellAgent) -> bool,
 ) {
     if !render_agent_panel_header(
@@ -97,7 +136,7 @@ pub(super) fn render_agent_panel_with_filter(
         return;
     }
 
-    let rows = agent_rows_with_filter(snapshot, config, None, filter);
+    let rows = agent_rows_with_filter(snapshot, config, None, pinned, filter);
     render_agent_list(
         buffer,
         area,
@@ -290,19 +329,29 @@ pub(super) fn agent_rows(
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
     machine: Option<&str>,
+    pinned: &HashSet<&str>,
 ) -> Vec<AgentRow> {
-    agent_rows_with_filter(snapshot, config, machine, |_| true)
+    agent_rows_with_filter(snapshot, config, machine, pinned, |_| true)
 }
 
 pub(super) fn agent_rows_with_filter(
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
     machine: Option<&str>,
+    pinned: &HashSet<&str>,
     filter: impl Fn(&ClientShellAgent) -> bool,
 ) -> Vec<AgentRow> {
-    ordered_agent_pane_ids_with_filter(snapshot, config.agent_panel_sort, filter)
+    ordered_agent_pane_ids_with_filter(snapshot, config.agent_panel_sort, pinned, filter)
         .into_iter()
-        .filter_map(|pane_id| agent_row(snapshot, &pane_id, config, machine))
+        .filter_map(|pane_id| {
+            agent_row(
+                snapshot,
+                &pane_id,
+                config,
+                machine,
+                pinned.contains(pane_id.as_str()),
+            )
+        })
         .collect()
 }
 
@@ -311,6 +360,7 @@ pub(super) fn agent_row(
     pane_id: &str,
     config: &ClientShellConfig,
     machine: Option<&str>,
+    pinned: bool,
 ) -> Option<AgentRow> {
     let agent = snapshot
         .agents
@@ -375,6 +425,7 @@ pub(super) fn agent_row(
         pane_id: agent.pane_id.clone(),
         status: agent.agent_status,
         focused: agent.focused,
+        pinned,
         rows,
     })
 }
@@ -402,9 +453,11 @@ pub(super) fn render_agent_row(
     };
     let status_style = Style::default().fg(status_color(row.status, palette));
     let secondary = Style::default().fg(palette.overlay0);
-    let icon = (
-        status_icon(row.status, config.status_indicators),
-        Style::default().fg(status_color(row.status, palette)),
+    let (icon, pin_prefix) = status_indicator(
+        row.pinned,
+        row.status,
+        config.status_indicators,
+        status_style,
     );
     let rows = if row.rows.is_empty() {
         vec![vec![crate::ui::ResolvedToken {
@@ -420,6 +473,7 @@ pub(super) fn render_agent_row(
         spans.extend(crate::ui::resolved_token_spans(
             tokens,
             icon,
+            pin_prefix,
             status_style,
             name_style,
             secondary,

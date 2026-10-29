@@ -5,6 +5,22 @@ const SELECTION_AUTOSCROLL_INTERVAL: std::time::Duration = std::time::Duration::
 const SELECTION_REPAINT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(16);
 
 impl ClientShellState {
+    fn agent_row_at(&self, point: (u16, u16)) -> Option<(ClientEndpointId, String)> {
+        if let Some((_, pane_id)) = self
+            .hits
+            .agents
+            .iter()
+            .find(|(rect, _)| super::contains(*rect, point))
+        {
+            return Some((self.active_endpoint_id.clone(), pane_id.clone()));
+        }
+        self.hits
+            .endpoint_agents
+            .iter()
+            .find(|(rect, _, _)| super::contains(*rect, point))
+            .map(|(_, endpoint_id, pane_id)| (endpoint_id.clone(), pane_id.clone()))
+    }
+
     fn set_sidebar_width_from_column(&mut self, column: u16, outcome: &mut ClientShellInput) {
         let (min, max) = crate::config::validated_sidebar_bounds(
             self.config.sidebar_min_width,
@@ -543,7 +559,8 @@ impl ClientShellState {
         let collapsed_groups = self
             .collapsed_groups_for_endpoint(&self.active_endpoint_id)
             .unwrap_or(&empty_collapsed_groups);
-        let entries = render::workspace_entries(snapshot, collapsed_groups);
+        let pinned = self.pinned_workspace_ids_for(&self.active_endpoint_id);
+        let entries = render::workspace_entries(snapshot, collapsed_groups, &pinned);
         let last_hit = self
             .hits
             .workspaces
@@ -1962,6 +1979,11 @@ impl ClientShellState {
                         mouse.column,
                         mouse.row,
                     );
+                    outcome.repaint = true;
+                    return;
+                }
+                if let Some((endpoint_id, pane_id)) = self.agent_row_at(point) {
+                    self.open_agent_context_menu(endpoint_id, pane_id, mouse.column, mouse.row);
                     outcome.repaint = true;
                     return;
                 }

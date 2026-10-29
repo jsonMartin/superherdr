@@ -20,6 +20,7 @@ impl ClientContextMenuOverlay {
                 can_clear_focus,
                 workspace_record_revision,
                 project_record_revision,
+                workspace_pinned,
                 ..
             } => {
                 let mut items = Vec::new();
@@ -43,6 +44,20 @@ impl ClientContextMenuOverlay {
                     }
                 }
 
+                if let Some(pinned) = workspace_pinned {
+                    items.push(item(
+                        if *pinned {
+                            "Unpin workspace"
+                        } else {
+                            "Pin workspace"
+                        },
+                        if *pinned {
+                            Action::UnpinWorkspace
+                        } else {
+                            Action::PinWorkspace
+                        },
+                    ));
+                }
                 items.push(item("Snooze workspace", Action::Snooze30Minutes));
                 if worktree_key.is_some() && !*is_linked_worktree {
                     items.push(item("Snooze project", Action::SnoozeProject30Minutes));
@@ -75,9 +90,20 @@ impl ClientContextMenuOverlay {
                 source_pane_id,
                 has_manual_label,
                 right_click_passthrough,
+                agent_pinned,
                 ..
             } => {
                 let mut items = vec![item("Rename pane", Action::RenamePane)];
+                if let Some(pinned) = agent_pinned {
+                    items.push(item(
+                        if *pinned { "Unpin agent" } else { "Pin agent" },
+                        if *pinned {
+                            Action::UnpinAgent
+                        } else {
+                            Action::PinAgent
+                        },
+                    ));
+                }
                 if *has_manual_label {
                     items.push(item("Clear pane name", Action::ClearPaneName));
                 }
@@ -100,6 +126,14 @@ impl ClientContextMenuOverlay {
                 ]);
                 items
             }
+            ClientContextMenuTarget::Agent { pinned, .. } => vec![item(
+                if *pinned { "Unpin agent" } else { "Pin agent" },
+                if *pinned {
+                    Action::UnpinAgent
+                } else {
+                    Action::PinAgent
+                },
+            )],
         }
     }
 }
@@ -410,6 +444,10 @@ impl ClientShellState {
                 })
                 .flatten()
         });
+        let workspace_pinned = self.endpoint_advertises_pins(&endpoint_id).then(|| {
+            self.pin_state_for(&endpoint_id)
+                .is_some_and(|state| state.workspace_ids.iter().any(|id| id == &workspace_id))
+        });
         self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
             target: ClientContextMenuTarget::Workspace {
                 endpoint_id,
@@ -426,6 +464,7 @@ impl ClientShellState {
                 close_group,
                 collapsed,
                 can_clear_focus,
+                workspace_pinned,
             },
             x,
             y,
@@ -453,23 +492,42 @@ impl ClientShellState {
     }
 
     pub(super) fn open_pane_context_menu(&mut self, pane_id: String, x: u16, y: u16) {
-        let Some(snapshot) = self.snapshot.as_deref() else {
+        let Some((
+            workspace_id,
+            source_pane_id,
+            has_manual_label,
+            right_click_passthrough,
+            is_agent,
+        )) = self.snapshot.as_deref().and_then(|snapshot| {
+            let pane = snapshot.panes.iter().find(|pane| pane.pane_id == pane_id)?;
+            Some((
+                pane.workspace_id.clone(),
+                snapshot
+                    .focused_pane_id
+                    .clone()
+                    .filter(|focused| focused != &pane_id),
+                pane.label.is_some(),
+                pane.right_click_passthrough,
+                snapshot.agents.iter().any(|agent| agent.pane_id == pane_id),
+            ))
+        })
+        else {
             return;
         };
-        let Some(pane) = snapshot.panes.iter().find(|pane| pane.pane_id == pane_id) else {
-            return;
-        };
-        let source_pane_id = snapshot
-            .focused_pane_id
-            .clone()
-            .filter(|focused| focused != &pane_id);
+        let agent_pinned = (self.endpoint_advertises_pins(&self.active_endpoint_id) && is_agent)
+            .then(|| {
+                self.pin_state
+                    .as_ref()
+                    .is_some_and(|state| state.pane_ids.iter().any(|id| id == &pane_id))
+            });
         self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
             target: ClientContextMenuTarget::Pane {
                 pane_id,
-                workspace_id: pane.workspace_id.clone(),
+                workspace_id,
                 source_pane_id,
-                has_manual_label: pane.label.is_some(),
-                right_click_passthrough: pane.right_click_passthrough,
+                has_manual_label,
+                right_click_passthrough,
+                agent_pinned,
             },
             x,
             y,
@@ -542,6 +600,12 @@ impl ClientShellState {
                 action,
                 outcome,
             ),
+            ClientContextMenuTarget::Agent {
+                endpoint_id,
+                boot_id,
+                pane_id,
+                ..
+            } => self.activate_agent_pin(endpoint_id, boot_id, pane_id, action, outcome),
         }
         outcome.repaint = true;
     }
@@ -567,6 +631,8 @@ impl ClientShellState {
                 | ClientContextMenuAction::SnoozeProject30Minutes
                 | ClientContextMenuAction::WakeWorkspace
                 | ClientContextMenuAction::WakeProject
+                | ClientContextMenuAction::PinWorkspace
+                | ClientContextMenuAction::UnpinWorkspace
         );
         let is_focus = matches!(
             action,
@@ -616,6 +682,22 @@ impl ClientShellState {
         }
 
         match action {
+            ClientContextMenuAction::PinWorkspace | ClientContextMenuAction::UnpinWorkspace => {
+                self.push_endpoint_method_for(
+                    &endpoint_id,
+                    boot_id,
+                    crate::api::schema::Method::WorkspacePin(
+                        crate::api::schema::WorkspacePinParams {
+                            workspace_id,
+                            pinned: action == ClientContextMenuAction::PinWorkspace,
+                        },
+                    ),
+                    PendingEndpointKind::Pin {
+                        endpoint_id: endpoint_id.clone(),
+                    },
+                    outcome,
+                );
+            }
             ClientContextMenuAction::Snooze30Minutes => {
                 self.open_snooze_overlay(endpoint_id, boot_id, workspace_id, None);
             }
@@ -1078,7 +1160,103 @@ impl ClientShellState {
                 outcome,
             ),
             ClientContextMenuAction::ClosePane => self.request_pane_close(pane_id, outcome),
+            ClientContextMenuAction::PinAgent | ClientContextMenuAction::UnpinAgent => {
+                let endpoint_id = self.active_endpoint_id.clone();
+                let Some(boot_id) = self.endpoint_boot_id(&endpoint_id).map(str::to_owned) else {
+                    return;
+                };
+                self.push_endpoint_method_for(
+                    &endpoint_id,
+                    boot_id,
+                    Method::PanePin(crate::api::schema::PanePinParams {
+                        pane_id,
+                        pinned: action == ClientContextMenuAction::PinAgent,
+                    }),
+                    PendingEndpointKind::Pin {
+                        endpoint_id: endpoint_id.clone(),
+                    },
+                    outcome,
+                );
+            }
             _ => {}
         }
+    }
+
+    pub(super) fn open_agent_context_menu(
+        &mut self,
+        endpoint_id: ClientEndpointId,
+        pane_id: String,
+        x: u16,
+        y: u16,
+    ) {
+        if !self.endpoint_advertises_pins(&endpoint_id) {
+            return;
+        }
+        let boot_id = self
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+            .and_then(|endpoint| endpoint.snapshot.as_deref())
+            .filter(|snapshot| snapshot.agents.iter().any(|agent| agent.pane_id == pane_id))
+            .map(|snapshot| snapshot.boot_id.clone());
+        let Some(boot_id) = boot_id else {
+            return;
+        };
+        let pinned = self
+            .pin_state_for(&endpoint_id)
+            .is_some_and(|state| state.pane_ids.iter().any(|id| id == &pane_id));
+        self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
+            target: ClientContextMenuTarget::Agent {
+                endpoint_id,
+                boot_id,
+                pane_id,
+                pinned,
+            },
+            x,
+            y,
+            highlighted: 0,
+        }));
+    }
+
+    fn activate_agent_pin(
+        &mut self,
+        endpoint_id: ClientEndpointId,
+        boot_id: String,
+        pane_id: String,
+        action: ClientContextMenuAction,
+        outcome: &mut ClientShellInput,
+    ) {
+        let (ClientContextMenuAction::PinAgent | ClientContextMenuAction::UnpinAgent) = action
+        else {
+            return;
+        };
+        if !self.endpoint_is_online(&endpoint_id) {
+            return;
+        }
+        let pane_still_here = self
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+            .and_then(|endpoint| endpoint.snapshot.as_deref())
+            .is_some_and(|snapshot| {
+                snapshot.boot_id == boot_id
+                    && (snapshot.agents.iter().any(|agent| agent.pane_id == pane_id)
+                        || snapshot.panes.iter().any(|pane| pane.pane_id == pane_id))
+            });
+        if !pane_still_here {
+            return;
+        }
+        self.push_endpoint_method_for(
+            &endpoint_id,
+            boot_id,
+            crate::api::schema::Method::PanePin(crate::api::schema::PanePinParams {
+                pane_id,
+                pinned: action == ClientContextMenuAction::PinAgent,
+            }),
+            PendingEndpointKind::Pin {
+                endpoint_id: endpoint_id.clone(),
+            },
+            outcome,
+        );
     }
 }
