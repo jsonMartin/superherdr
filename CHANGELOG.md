@@ -2,7 +2,7 @@
 
 Superherdr's release history. Superherdr is a fork of [Herdr](https://github.com/herdrdev/herdr); changes inherited from upstream are described in Herdr's releases and ported into the inherited sections at the end of this file.
 
-## [0.9.5.3] - Unreleased
+## [0.9.5.3] - 2026-10-29
 
 ### Added
 - Pin workspaces and agents from their context menus. Pinned items stay at the top of their machine in the sidebar and the Agents list, marked with a `⚲` in their status color, on every client of that server and across server restarts.
