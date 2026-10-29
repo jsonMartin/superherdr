@@ -6,6 +6,7 @@ These specifications describe the behavior Superherdr adds to or changes from He
 | --- | --- | --- |
 | Client-local Focus | [Focus](specs/superherdr-focus/spec.md) | `src/client/shell`; client Focus tests |
 | Shared, persisted Snooze | [Snooze](specs/superherdr-snooze/spec.md) | Snooze server, API and persistence modules; `cargo nextest run snooze` |
+| Shared, persisted pins | [Pins](specs/superherdr-pins/spec.md) | `src/server/pins.rs`, `src/server/pin_store.rs`, `src/client/shell`; `cargo nextest run pin` |
 | All / Top-level Agents view | [Agents view](specs/superherdr-agents-view/spec.md) | `src/client/shell`; top-level agent filter tests |
 | Release artifacts, shell installer and Homebrew | [Distribution](specs/superherdr-distribution/spec.md) | `distribution/install.sh`; `scripts/test_unix_installer.py`; `jsonmartin/homebrew-tap` |
 | Identity, shared Herdr state and upstream compatibility | [Compatibility](specs/superherdr-compatibility/spec.md) | `tests/drop_in_herdr.rs`; `src/protocol/wire.rs`; endpoint fixtures in `tests/fixtures/` |
